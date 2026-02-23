@@ -12,6 +12,7 @@ import {
   calculateBurnRate,
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
+import { trackDailyCost } from "./daily-cost-tracker.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -75,9 +76,8 @@ export async function buildRenderContext(
     sessionCostUsd = stdinCost ?? calculatedSessionCost;
   }
 
-  // Today's cost: use JSONL-calculated cost, but fall back to session cost
-  // since the current session is part of today
-  const todayCostUsd = calculatedTodayCost > 0 ? calculatedTodayCost : sessionCostUsd;
+  // Today's cost: track per-session costs in our own daily file
+  const todayCostUsd = trackDailyCost(stdin.session_id, sessionCostUsd);
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);

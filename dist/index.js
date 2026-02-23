@@ -2,12 +2,14 @@ import * as v$3 from "valibot";
 import * as v$2 from "valibot";
 import * as v$1 from "valibot";
 import * as v from "valibot";
+import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
 import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
+import * as path$5 from "node:path";
 import * as path$4 from "node:path";
 import * as path$3 from "node:path";
 import * as path$2 from "node:path";
@@ -199,17 +201,17 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$4.join(xdg, "gccusage");
-	return path$4.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$5.join(xdg, "gccusage");
+	return path$5.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$4.join(getConfigDir(), "settings.json");
+	return path$5.join(getConfigDir(), "settings.json");
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$5.existsSync(configPath)) return DEFAULT_SETTINGS;
+	if (!fs$6.existsSync(configPath)) return DEFAULT_SETTINGS;
 	try {
-		const raw = fs$5.readFileSync(configPath, "utf-8");
+		const raw = fs$6.readFileSync(configPath, "utf-8");
 		const parsed = JSON.parse(raw);
 		return v.parse(SettingsSchema, parsed);
 	} catch {
@@ -221,38 +223,38 @@ function loadSettings() {
 //#region src/utils/paths.ts
 function getClaudeDataDir() {
 	const home = process.env["HOME"] || "~";
-	return path$3.join(home, ".claude");
+	return path$4.join(home, ".claude");
 }
 function getProjectsDir() {
-	return path$3.join(getClaudeDataDir(), "projects");
+	return path$4.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$3.join(xdg, "gccusage");
-	return path$3.join(process.env["HOME"] || "~", ".cache", "gccusage");
+	if (xdg) return path$4.join(xdg, "gccusage");
+	return path$4.join(process.env["HOME"] || "~", ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$4.existsSync(dir)) fs$4.mkdirSync(dir, { recursive: true });
+	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$4.existsSync(dir)) return [];
+	if (!fs$5.existsSync(dir)) return [];
 	try {
-		return fs$4.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$3.join(dir, f));
+		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$4.join(dir, f));
 	} catch {
 		return [];
 	}
 }
 function findSessionJsonlFiles(sessionId) {
 	const projectsDir = getProjectsDir();
-	if (!fs$4.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$4.readdirSync(projectsDir)) {
-			const fullPath = path$3.join(projectsDir, projectDir);
-			const stat = fs$4.statSync(fullPath);
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
+			const fullPath = path$4.join(projectsDir, projectDir);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			if (sessionId) files.push(...jsonlFiles.filter((f) => path$3.basename(f, ".jsonl") === sessionId));
+			if (sessionId) files.push(...jsonlFiles.filter((f) => path$4.basename(f, ".jsonl") === sessionId));
 			else files.push(...jsonlFiles);
 		}
 	} catch {}
@@ -260,18 +262,18 @@ function findSessionJsonlFiles(sessionId) {
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$4.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$4.readdirSync(projectsDir)) {
-			const fullPath = path$3.join(projectsDir, projectDir);
-			const stat = fs$4.statSync(fullPath);
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
+			const fullPath = path$4.join(projectsDir, projectDir);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$4.statSync(f);
+				const fstat = fs$5.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -282,9 +284,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$3.existsSync(filePath)) return [];
+	if (!fs$4.existsSync(filePath)) return [];
 	try {
-		const content = fs$3.readFileSync(filePath, "utf-8");
+		const content = fs$4.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -376,16 +378,16 @@ const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 //#endregion
 //#region src/cache/block-cache.ts
 function getBlockCachePath() {
-	return path$2.join(getCacheDir(), "blocks", "current.json");
+	return path$3.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
 	try {
-		if (!fs$2.existsSync(cachePath)) return null;
-		const raw = fs$2.readFileSync(cachePath, "utf-8");
+		if (!fs$3.existsSync(cachePath)) return null;
+		const raw = fs$3.readFileSync(cachePath, "utf-8");
 		const data = JSON.parse(raw);
 		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
-			fs$2.unlinkSync(cachePath);
+			fs$3.unlinkSync(cachePath);
 			return null;
 		}
 		return data;
@@ -396,8 +398,8 @@ function loadBlockCache() {
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();
 	try {
-		ensureDir(path$2.dirname(cachePath));
-		fs$2.writeFileSync(cachePath, JSON.stringify(data));
+		ensureDir(path$3.dirname(cachePath));
+		fs$3.writeFileSync(cachePath, JSON.stringify(data));
 	} catch {}
 }
 
@@ -433,13 +435,13 @@ function detectBlock(sessionStartTime) {
 //#endregion
 //#region src/cache/pricing-cache.ts
 function getCachePath$1() {
-	return path$1.join(getCacheDir(), "pricing.json");
+	return path$2.join(getCacheDir(), "pricing.json");
 }
 function loadPricingCache(ttlMs) {
 	const cachePath = getCachePath$1();
 	try {
-		if (!fs$1.existsSync(cachePath)) return null;
-		const raw = fs$1.readFileSync(cachePath, "utf-8");
+		if (!fs$2.existsSync(cachePath)) return null;
+		const raw = fs$2.readFileSync(cachePath, "utf-8");
 		const cache = JSON.parse(raw);
 		if (Date.now() - cache.timestamp < ttlMs) return cache.data;
 	} catch {}
@@ -448,12 +450,12 @@ function loadPricingCache(ttlMs) {
 function savePricingCache(data) {
 	const cachePath = getCachePath$1();
 	try {
-		ensureDir(path$1.dirname(cachePath));
+		ensureDir(path$2.dirname(cachePath));
 		const cache = {
 			timestamp: Date.now(),
 			data
 		};
-		fs$1.writeFileSync(cachePath, JSON.stringify(cache));
+		fs$2.writeFileSync(cachePath, JSON.stringify(cache));
 	} catch {}
 }
 
@@ -580,6 +582,58 @@ function visibleLength(str) {
 }
 
 //#endregion
+//#region src/data/daily-cost-tracker.ts
+function getDailyCostPath() {
+	return path$1.join(getCacheDir(), "daily-costs.json");
+}
+function todayDateStr() {
+	return new Date().toISOString().slice(0, 10);
+}
+function readDailyCostFile() {
+	const filePath = getDailyCostPath();
+	try {
+		const raw = fs$1.readFileSync(filePath, "utf-8");
+		const data = JSON.parse(raw);
+		if (data.date !== todayDateStr()) return {
+			date: todayDateStr(),
+			sessions: []
+		};
+		return data;
+	} catch {
+		return {
+			date: todayDateStr(),
+			sessions: []
+		};
+	}
+}
+function writeDailyCostFile(data) {
+	const filePath = getDailyCostPath();
+	ensureDir(path$1.dirname(filePath));
+	fs$1.writeFileSync(filePath, JSON.stringify(data), "utf-8");
+}
+/**
+* Record the current session's cost and return today's total across all sessions.
+*/
+function trackDailyCost(sessionId, costUsd) {
+	const data = readDailyCostFile();
+	if (sessionId) {
+		const existing = data.sessions.find((s) => s.sessionId === sessionId);
+		if (existing) {
+			existing.costUsd = costUsd;
+			existing.updatedAt = Date.now();
+		} else data.sessions.push({
+			sessionId,
+			costUsd,
+			updatedAt: Date.now()
+		});
+		writeDailyCostFile(data);
+	}
+	let total = 0;
+	for (const s of data.sessions) total += s.costUsd;
+	return total;
+}
+
+//#endregion
 //#region src/data/pipeline.ts
 function getStdinBurnRate(stdin) {
 	const durationMs = stdin.cost?.total_duration_ms;
@@ -614,7 +668,7 @@ async function buildRenderContext(stdin, settings) {
 	if (settings.costSource === "stdin" && stdinCost !== void 0) sessionCostUsd = stdinCost;
 	else if (settings.costSource === "calculated") sessionCostUsd = calculatedSessionCost;
 	else sessionCostUsd = stdinCost ?? calculatedSessionCost;
-	const todayCostUsd = calculatedTodayCost > 0 ? calculatedTodayCost : sessionCostUsd;
+	const todayCostUsd = trackDailyCost(stdin.session_id, sessionCostUsd);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
