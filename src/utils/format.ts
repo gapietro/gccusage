@@ -32,12 +32,14 @@ export function formatPercent(ratio: number): string {
 
 export function formatModelName(model: string): string {
   // claude-sonnet-4-20250514 -> Sonnet 4
-  // claude-opus-4-20250514 -> Opus 4
+  // claude-opus-4-6-20250219 -> Opus 4.6
+  // claude-haiku-4-5-20251001 -> Haiku 4.5
   // claude-haiku-3.5-20241001 -> Haiku 3.5
-  const match = model.match(/claude-(\w+)-(\d+(?:\.\d+)?)/);
+  const match = model.match(/claude-(\w+)-(\d+)(?:[.-](\d{1,2})(?=-|$))?/);
   if (match) {
     const name = match[1]!.charAt(0).toUpperCase() + match[1]!.slice(1);
-    return `${name} ${match[2]}`;
+    const version = match[3] ? `${match[2]}.${match[3]}` : match[2];
+    return `${name} ${version}`;
   }
   return model;
 }

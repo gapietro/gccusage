@@ -4,20 +4,9 @@ export const DEFAULT_SETTINGS: Settings = {
   lines: [
     {
       widgets: [
-        { type: "model" },
-        { type: "separator" },
+        { type: "model", icon: "🤖" },
         { type: "session-cost" },
-        { type: "separator" },
         { type: "context-percent" },
-      ],
-      flex: "left",
-    },
-    {
-      widgets: [
-        { type: "block-timer" },
-        { type: "separator" },
-        { type: "today-spend" },
-        { type: "separator" },
         { type: "burn-rate" },
       ],
       flex: "left",
@@ -25,14 +14,15 @@ export const DEFAULT_SETTINGS: Settings = {
     {
       widgets: [
         { type: "git-branch" },
-        { type: "separator" },
         { type: "git-changes" },
+        { type: "today-spend" },
+        { type: "block-timer" },
       ],
       flex: "left",
     },
   ],
   powerline: {
-    enabled: false,
+    enabled: true,
     theme: "default",
     separator: "\uE0B0",
     separatorThin: "\uE0B1",
