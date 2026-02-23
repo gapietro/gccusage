@@ -69,7 +69,19 @@ describe("formatModelName", () => {
     expect(formatModelName("claude-opus-4-20250514")).toBe("Opus 4");
   });
 
-  it("formats Haiku", () => {
+  it("formats Opus 4.6 (dash-separated minor version)", () => {
+    expect(formatModelName("claude-opus-4-6-20250219")).toBe("Opus 4.6");
+  });
+
+  it("formats Sonnet 4.6 (dash-separated minor version)", () => {
+    expect(formatModelName("claude-sonnet-4-6-20250219")).toBe("Sonnet 4.6");
+  });
+
+  it("formats Haiku 4.5 (dash-separated minor version)", () => {
+    expect(formatModelName("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+  });
+
+  it("formats Haiku 3.5 (dot-separated minor version)", () => {
     expect(formatModelName("claude-haiku-3.5-20241001")).toBe("Haiku 3.5");
   });
 
