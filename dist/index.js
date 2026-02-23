@@ -21,7 +21,10 @@ const ModelSchema = v$3.union([v$3.string(), v$3.object({
 	id: v$3.optional(v$3.string()),
 	display_name: v$3.optional(v$3.string())
 })]);
-const CostSchema = v$3.object({ total_cost_usd: v$3.optional(v$3.number()) });
+const CostSchema = v$3.object({
+	total_cost_usd: v$3.optional(v$3.number()),
+	total_duration_ms: v$3.optional(v$3.number())
+});
 const CurrentUsageSchema = v$3.object({
 	input_tokens: v$3.optional(v$3.number(), 0),
 	output_tokens: v$3.optional(v$3.number(), 0),
@@ -32,6 +35,8 @@ const ContextWindowSchema = v$3.union([v$3.number(), v$3.object({
 	context_window_size: v$3.optional(v$3.number()),
 	used_percentage: v$3.optional(v$3.nullable(v$3.number())),
 	remaining_percentage: v$3.optional(v$3.nullable(v$3.number())),
+	total_input_tokens: v$3.optional(v$3.number()),
+	total_output_tokens: v$3.optional(v$3.number()),
 	current_usage: v$3.optional(v$3.nullable(CurrentUsageSchema))
 })]);
 const TokenUsageSchema = v$3.object({
@@ -544,6 +549,23 @@ function visibleLength(str) {
 
 //#endregion
 //#region src/data/pipeline.ts
+function getStdinBurnRate(stdin) {
+	const durationMs = stdin.cost?.total_duration_ms;
+	if (!durationMs || durationMs < 1e4) return null;
+	const cw = stdin.context_window;
+	if (typeof cw !== "object" || !cw) return null;
+	const totalTokens = (cw.total_input_tokens ?? 0) + (cw.total_output_tokens ?? 0);
+	if (totalTokens === 0) return null;
+	const elapsedMinutes = durationMs / 6e4;
+	const tokensPerMinute = totalTokens / elapsedMinutes;
+	const costUsd = stdin.cost?.total_cost_usd ?? 0;
+	const costPerMinute = costUsd / elapsedMinutes;
+	return {
+		tokensPerMinute,
+		costPerHour: costPerMinute * 60,
+		costPerMinute
+	};
+}
 async function buildRenderContext(stdin, settings) {
 	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
 	const todayFiles = findTodayJsonlFiles();
@@ -560,10 +582,11 @@ async function buildRenderContext(stdin, settings) {
 	if (settings.costSource === "stdin" && stdinCost !== void 0) sessionCostUsd = stdinCost;
 	else if (settings.costSource === "calculated") sessionCostUsd = calculatedSessionCost;
 	else sessionCostUsd = stdinCost ?? calculatedSessionCost;
+	const todayCostUsd = calculatedTodayCost > 0 ? calculatedTodayCost : sessionCostUsd;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const burnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+	const burnRate = getStdinBurnRate(stdin) ?? calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
 	return {
 		stdin,
 		metrics,
@@ -571,7 +594,7 @@ async function buildRenderContext(stdin, settings) {
 		burnRate,
 		pricing,
 		sessionCostUsd,
-		todayCostUsd: calculatedTodayCost,
+		todayCostUsd,
 		costByModel,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth()

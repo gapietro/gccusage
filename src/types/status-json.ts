@@ -10,6 +10,7 @@ const ModelSchema = v.union([
 
 const CostSchema = v.object({
   total_cost_usd: v.optional(v.number()),
+  total_duration_ms: v.optional(v.number()),
 });
 
 const CurrentUsageSchema = v.object({
@@ -25,6 +26,8 @@ const ContextWindowSchema = v.union([
     context_window_size: v.optional(v.number()),
     used_percentage: v.optional(v.nullable(v.number())),
     remaining_percentage: v.optional(v.nullable(v.number())),
+    total_input_tokens: v.optional(v.number()),
+    total_output_tokens: v.optional(v.number()),
     current_usage: v.optional(v.nullable(CurrentUsageSchema)),
   }),
 ]);

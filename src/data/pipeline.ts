@@ -12,6 +12,30 @@ import {
   calculateBurnRate,
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
+import type { BurnRate } from "../types/burn-rate.js";
+
+function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
+  const durationMs = stdin.cost?.total_duration_ms;
+  if (!durationMs || durationMs < 10000) return null;
+
+  const cw = stdin.context_window;
+  if (typeof cw !== "object" || !cw) return null;
+
+  const totalTokens = (cw.total_input_tokens ?? 0) + (cw.total_output_tokens ?? 0);
+  if (totalTokens === 0) return null;
+
+  const elapsedMinutes = durationMs / 60000;
+  const tokensPerMinute = totalTokens / elapsedMinutes;
+
+  const costUsd = stdin.cost?.total_cost_usd ?? 0;
+  const costPerMinute = costUsd / elapsedMinutes;
+
+  return {
+    tokensPerMinute,
+    costPerHour: costPerMinute * 60,
+    costPerMinute,
+  };
+}
 
 export async function buildRenderContext(
   stdin: StatusJson,
@@ -51,22 +75,22 @@ export async function buildRenderContext(
     sessionCostUsd = stdinCost ?? calculatedSessionCost;
   }
 
+  // Today's cost: use JSONL-calculated cost, but fall back to session cost
+  // since the current session is part of today
+  const todayCostUsd = calculatedTodayCost > 0 ? calculatedTodayCost : sessionCostUsd;
+
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
 
   // Block detection
   const block = detectBlock(sessionStartTime);
 
-  // Burn rate
+  // Burn rate: prefer stdin data (always available), fall back to JSONL calculation
   const modelId = typeof stdin.model === "string"
     ? stdin.model
     : stdin.model?.id;
-  const burnRate = calculateBurnRate(
-    metrics.session,
-    sessionStartTime,
-    pricing,
-    modelId,
-  );
+  const burnRate = getStdinBurnRate(stdin)
+    ?? calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
 
   return {
     stdin,
@@ -75,7 +99,7 @@ export async function buildRenderContext(
     burnRate,
     pricing,
     sessionCostUsd,
-    todayCostUsd: calculatedTodayCost,
+    todayCostUsd,
     costByModel,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
