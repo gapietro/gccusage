@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gccusage settings",
+  "description": "Configuration for gccusage Claude Code statusline tool",
+  "type": "object",
+  "properties": {
+    "lines": {
+      "type": "array",
+      "description": "Status lines to render",
+      "items": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "model", "session-cost", "today-spend", "block-timer",
+                    "burn-rate", "context-percent", "git-branch", "git-changes",
+                    "tokens-input", "tokens-output", "tokens-cached",
+                    "per-model", "session-clock", "cwd",
+                    "custom-text", "custom-command", "separator"
+                  ],
+                  "description": "Widget type"
+                },
+                "label": { "type": "string", "description": "Optional label prefix" },
+                "fg": { "type": "string", "description": "Foreground color (named, hex, or ansi256)" },
+                "bg": { "type": "string", "description": "Background color (named, hex, or ansi256)" },
+                "icon": { "type": "string", "description": "Icon prefix" },
+                "format": { "type": "string", "description": "Custom format string" },
+                "command": { "type": "string", "description": "Shell command (custom-command widget)" },
+                "text": { "type": "string", "description": "Static text (custom-text widget)" },
+                "separator": { "type": "string", "description": "Separator string (separator widget)" },
+                "maxWidth": { "type": "number", "description": "Maximum width for this widget" }
+              },
+              "required": ["type"]
+            }
+          },
+          "flex": {
+            "type": "string",
+            "enum": ["left", "right", "center", "space-between"],
+            "default": "left",
+            "description": "Flex alignment mode for the line"
+          }
+        },
+        "required": ["widgets"]
+      }
+    },
+    "powerline": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "theme": {
+          "type": "string",
+          "enum": ["default", "ocean", "forest", "sunset", "minimal"],
+          "default": "default"
+        },
+        "separator": { "type": "string", "default": "\ue0b0" },
+        "separatorThin": { "type": "string", "default": "\ue0b1" }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "statuslineTtlMs": { "type": "number", "default": 5000, "description": "Statusline cache TTL in ms" },
+        "pricingTtlMs": { "type": "number", "default": 86400000, "description": "Pricing cache TTL in ms (default 24h)" }
+      }
+    },
+    "costSource": {
+      "type": "string",
+      "enum": ["auto", "calculated", "stdin"],
+      "default": "auto",
+      "description": "How to determine session cost"
+    }
+  }
+}

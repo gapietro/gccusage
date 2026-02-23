@@ -1,0 +1,88 @@
+import { describe, it, expect } from "vitest";
+import { renderStatusline } from "../render/renderer.js";
+import type { RenderContext } from "../types/render-context.js";
+import type { Settings } from "../config/schema.js";
+import { stripAnsi } from "../utils/terminal.js";
+
+function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
+  return {
+    stdin: {
+      model: "claude-sonnet-4-20250514",
+      cost: { total_cost_usd: 2.45 },
+    },
+    metrics: {
+      byModel: new Map(),
+      session: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    },
+    block: null,
+    burnRate: null,
+    pricing: {},
+    sessionCostUsd: 2.45,
+    todayCostUsd: 18.72,
+    costByModel: new Map(),
+    sessionStartTime: null,
+    terminalWidth: 80,
+    ...overrides,
+  };
+}
+
+describe("renderStatusline", () => {
+  it("renders a simple single-line config", () => {
+    const settings: Settings = {
+      lines: [
+        {
+          widgets: [
+            { type: "model" },
+            { type: "separator" },
+            { type: "session-cost" },
+          ],
+          flex: "left",
+        },
+      ],
+      costSource: "auto",
+    };
+
+    const output = renderStatusline(makeContext(), settings);
+    const plain = stripAnsi(output);
+    expect(plain).toContain("Sonnet 4");
+    expect(plain).toContain("$2.45");
+    expect(plain).toContain("|");
+  });
+
+  it("skips lines with no output", () => {
+    const settings: Settings = {
+      lines: [
+        {
+          widgets: [{ type: "block-timer" }],
+          flex: "left",
+        },
+      ],
+      costSource: "auto",
+    };
+
+    const output = renderStatusline(makeContext(), settings);
+    expect(output).toBe("");
+  });
+
+  it("cleans leading/trailing separators", () => {
+    const settings: Settings = {
+      lines: [
+        {
+          widgets: [
+            { type: "separator" },
+            { type: "model" },
+            { type: "separator" },
+          ],
+          flex: "left",
+        },
+      ],
+      costSource: "auto",
+    };
+
+    const output = renderStatusline(makeContext(), settings);
+    const plain = stripAnsi(output);
+    // Should not start or end with separator
+    expect(plain.trimEnd().startsWith("|")).toBe(false);
+  });
+});

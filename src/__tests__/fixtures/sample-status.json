@@ -1,0 +1,15 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "cost": {
+    "total_cost_usd": 1.23
+  },
+  "token_usage": {
+    "input_tokens": 42500,
+    "output_tokens": 3200,
+    "cache_creation_input_tokens": 128000,
+    "cache_read_input_tokens": 50000
+  },
+  "context_window": 200000,
+  "cwd": "/Users/test/projects/gccusage",
+  "session_id": "test-session-123"
+}
