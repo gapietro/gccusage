@@ -16,6 +16,10 @@ import { cwdWidget } from "./cwd.js";
 import { customTextWidget } from "./custom-text.js";
 import { customCommandWidget } from "./custom-command.js";
 import { separatorWidget } from "./separator.js";
+import { cacheHitRateWidget } from "./cache-hit-rate.js";
+import { linesChangedWidget } from "./lines-changed.js";
+import { vimModeWidget } from "./vim-mode.js";
+import { apiLatencyWidget } from "./api-latency.js";
 
 const WIDGET_MAP: Record<string, Widget> = {
   model: modelWidget,
@@ -35,6 +39,10 @@ const WIDGET_MAP: Record<string, Widget> = {
   "custom-text": customTextWidget,
   "custom-command": customCommandWidget,
   separator: separatorWidget,
+  "cache-hit-rate": cacheHitRateWidget,
+  "lines-changed": linesChangedWidget,
+  "vim-mode": vimModeWidget,
+  "api-latency": apiLatencyWidget,
 };
 
 export function getWidget(type: string): Widget | null {

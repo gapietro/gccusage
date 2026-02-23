@@ -11,6 +11,9 @@ const ModelSchema = v.union([
 const CostSchema = v.object({
   total_cost_usd: v.optional(v.number()),
   total_duration_ms: v.optional(v.number()),
+  total_api_duration_ms: v.optional(v.number()),
+  total_lines_added: v.optional(v.number()),
+  total_lines_removed: v.optional(v.number()),
 });
 
 const CurrentUsageSchema = v.object({
@@ -40,11 +43,16 @@ const TokenUsageSchema = v.object({
   cache_read_input_tokens: v.optional(v.number(), 0),
 });
 
+const VimSchema = v.object({
+  mode: v.optional(v.string()),
+});
+
 export const StatusJsonSchema = v.object({
   model: v.optional(ModelSchema),
   cost: v.optional(CostSchema),
   context_window: v.optional(ContextWindowSchema),
   token_usage: v.optional(TokenUsageSchema),
+  vim: v.optional(VimSchema),
   cwd: v.optional(v.string()),
   session_id: v.optional(v.string()),
 });

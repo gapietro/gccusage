@@ -25,7 +25,10 @@ const ModelSchema = v$3.union([v$3.string(), v$3.object({
 })]);
 const CostSchema = v$3.object({
 	total_cost_usd: v$3.optional(v$3.number()),
-	total_duration_ms: v$3.optional(v$3.number())
+	total_duration_ms: v$3.optional(v$3.number()),
+	total_api_duration_ms: v$3.optional(v$3.number()),
+	total_lines_added: v$3.optional(v$3.number()),
+	total_lines_removed: v$3.optional(v$3.number())
 });
 const CurrentUsageSchema = v$3.object({
 	input_tokens: v$3.optional(v$3.number(), 0),
@@ -47,11 +50,13 @@ const TokenUsageSchema = v$3.object({
 	cache_creation_input_tokens: v$3.optional(v$3.number(), 0),
 	cache_read_input_tokens: v$3.optional(v$3.number(), 0)
 });
+const VimSchema = v$3.object({ mode: v$3.optional(v$3.string()) });
 const StatusJsonSchema = v$3.object({
 	model: v$3.optional(ModelSchema),
 	cost: v$3.optional(CostSchema),
 	context_window: v$3.optional(ContextWindowSchema),
 	token_usage: v$3.optional(TokenUsageSchema),
+	vim: v$3.optional(VimSchema),
 	cwd: v$3.optional(v$3.string()),
 	session_id: v$3.optional(v$3.string())
 });
@@ -156,6 +161,11 @@ const DEFAULT_SETTINGS = {
 				type: "burn-rate",
 				fg: "#ffffff",
 				bg: "#a67c00"
+			},
+			{
+				type: "cache-hit-rate",
+				fg: "#ffffff",
+				bg: "#1a5fb4"
 			}
 		],
 		flex: "left"
@@ -172,15 +182,21 @@ const DEFAULT_SETTINGS = {
 				bg: "#613583"
 			},
 			{
+				type: "lines-changed",
+				fg: "#ffffff",
+				bg: "#613583"
+			},
+			{
 				type: "today-spend",
 				fg: "#ffffff",
 				bg: "#26a269"
 			},
 			{
-				type: "block-timer",
+				type: "api-latency",
 				fg: "#ffffff",
 				bg: "#a67c00"
-			}
+			},
+			{ type: "vim-mode" }
 		],
 		flex: "left"
 	}],
@@ -762,13 +778,21 @@ const sessionCostWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/today-spend.ts
+const BUDGET_WARN = 10;
+const BUDGET_DANGER = 25;
+function budgetBg(cost, configBg) {
+	if (cost >= BUDGET_DANGER) return "#c01c28";
+	if (cost >= BUDGET_WARN) return "#a67c00";
+	return configBg;
+}
 const todaySpendWidget = { render(context, config) {
+	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
-	const text = `${label} ${formatDollars(context.todayCostUsd)}`;
+	const text = `${label} ${formatDollars(cost)}`;
 	return {
 		text,
 		fg: config.fg,
-		bg: config.bg
+		bg: budgetBg(cost, config.bg)
 	};
 } };
 
@@ -800,6 +824,19 @@ const burnRateWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/context-percent.ts
+const BAR_WIDTH = 10;
+const THRESHOLD_WARN = .7;
+const THRESHOLD_DANGER = .9;
+function buildBar(ratio) {
+	const filled = Math.round(ratio * BAR_WIDTH);
+	const empty = BAR_WIDTH - filled;
+	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
+}
+function thresholdBg(ratio, configBg) {
+	if (ratio >= THRESHOLD_DANGER) return "#c01c28";
+	if (ratio >= THRESHOLD_WARN) return "#a67c00";
+	return configBg;
+}
 const contextPercentWidget = { render(context, config) {
 	const cw = context.stdin.context_window;
 	const label = config.label ?? "";
@@ -822,13 +859,14 @@ const contextPercentWidget = { render(context, config) {
 		}
 	}
 	if (ratio === null) return null;
+	const bar = buildBar(ratio);
 	const pct = formatPercent(ratio);
 	const size = windowSize ? ` (${formatTokens(windowSize)})` : "";
-	const text = label ? `${label} ${pct}${size}` : `${pct}${size}`;
+	const text = label ? `${label} ${bar} ${pct}${size}` : `${bar} ${pct}${size}`;
 	return {
 		text,
 		fg: config.fg,
-		bg: config.bg
+		bg: thresholdBg(ratio, config.bg)
 	};
 } };
 
@@ -1043,6 +1081,80 @@ const separatorWidget = { render(_context, config) {
 } };
 
 //#endregion
+//#region src/widgets/cache-hit-rate.ts
+const cacheHitRateWidget = { render(context, config) {
+	const cw = context.stdin.context_window;
+	if (typeof cw !== "object" || !cw?.current_usage) return null;
+	const u = cw.current_usage;
+	const reads = u.cache_read_input_tokens ?? 0;
+	const creates = u.cache_creation_input_tokens ?? 0;
+	const total = reads + creates;
+	if (total === 0) return null;
+	const hitRate = Math.round(reads / total * 100);
+	const label = config.label ?? "Cache:";
+	const text = `${label} ${hitRate}%`;
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
+//#region src/widgets/lines-changed.ts
+const linesChangedWidget = { render(context, config) {
+	const added = context.stdin.cost?.total_lines_added;
+	const removed = context.stdin.cost?.total_lines_removed;
+	if (added == null && removed == null) return null;
+	const a = added ?? 0;
+	const r = removed ?? 0;
+	if (a === 0 && r === 0) return null;
+	const parts = [];
+	if (a > 0) parts.push(`+${a}`);
+	if (r > 0) parts.push(`-${r}`);
+	const label = config.label ?? "";
+	const text = label ? `${label} ${parts.join(" ")}` : parts.join(" ");
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
+//#region src/widgets/vim-mode.ts
+const MODE_COLORS = {
+	NORMAL: "#26a269",
+	INSERT: "#a67c00"
+};
+const vimModeWidget = { render(context, config) {
+	const mode = context.stdin.vim?.mode;
+	if (!mode) return null;
+	const label = config.label ?? "";
+	const text = label ? `${label} ${mode}` : mode;
+	const bg = config.bg ?? MODE_COLORS[mode] ?? MODE_COLORS["NORMAL"];
+	return {
+		text,
+		fg: config.fg ?? "#ffffff",
+		bg
+	};
+} };
+
+//#endregion
+//#region src/widgets/api-latency.ts
+const apiLatencyWidget = { render(context, config) {
+	const apiMs = context.stdin.cost?.total_api_duration_ms;
+	if (apiMs == null || apiMs === 0) return null;
+	const label = config.label ?? "API:";
+	const text = `${label} ${formatDuration(apiMs)}`;
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
@@ -1061,7 +1173,11 @@ const WIDGET_MAP = {
 	cwd: cwdWidget,
 	"custom-text": customTextWidget,
 	"custom-command": customCommandWidget,
-	separator: separatorWidget
+	separator: separatorWidget,
+	"cache-hit-rate": cacheHitRateWidget,
+	"lines-changed": linesChangedWidget,
+	"vim-mode": vimModeWidget,
+	"api-latency": apiLatencyWidget
 };
 function getWidget(type) {
 	return WIDGET_MAP[type] ?? null;
