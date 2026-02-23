@@ -1,9 +1,35 @@
 import * as v from "valibot";
 
+const ModelSchema = v.union([
+  v.string(),
+  v.object({
+    id: v.optional(v.string()),
+    display_name: v.optional(v.string()),
+  }),
+]);
+
 const CostSchema = v.object({
   total_cost_usd: v.optional(v.number()),
 });
 
+const CurrentUsageSchema = v.object({
+  input_tokens: v.optional(v.number(), 0),
+  output_tokens: v.optional(v.number(), 0),
+  cache_creation_input_tokens: v.optional(v.number(), 0),
+  cache_read_input_tokens: v.optional(v.number(), 0),
+});
+
+const ContextWindowSchema = v.union([
+  v.number(),
+  v.object({
+    context_window_size: v.optional(v.number()),
+    used_percentage: v.optional(v.nullable(v.number())),
+    remaining_percentage: v.optional(v.nullable(v.number())),
+    current_usage: v.optional(v.nullable(CurrentUsageSchema)),
+  }),
+]);
+
+// Legacy flat token_usage (for backwards compat with test inputs)
 const TokenUsageSchema = v.object({
   input_tokens: v.optional(v.number(), 0),
   output_tokens: v.optional(v.number(), 0),
@@ -12,10 +38,10 @@ const TokenUsageSchema = v.object({
 });
 
 export const StatusJsonSchema = v.object({
-  model: v.optional(v.string()),
+  model: v.optional(ModelSchema),
   cost: v.optional(CostSchema),
+  context_window: v.optional(ContextWindowSchema),
   token_usage: v.optional(TokenUsageSchema),
-  context_window: v.optional(v.number()),
   cwd: v.optional(v.string()),
   session_id: v.optional(v.string()),
 });

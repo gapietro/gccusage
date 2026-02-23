@@ -4,7 +4,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lines: [
     {
       widgets: [
-        { type: "model", icon: "🤖" },
+        { type: "model" },
         { type: "session-cost" },
         { type: "context-percent" },
         { type: "burn-rate" },
@@ -24,8 +24,8 @@ export const DEFAULT_SETTINGS: Settings = {
   powerline: {
     enabled: true,
     theme: "default",
-    separator: "\uE0B0",
-    separatorThin: "\uE0B1",
+    separator: "\u25B6",
+    separatorThin: "\u2502",
   },
   cache: {
     statuslineTtlMs: 5000,

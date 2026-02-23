@@ -17,7 +17,23 @@ import { execSync } from "node:child_process";
 import chalk from "chalk";
 
 //#region src/types/status-json.ts
+const ModelSchema = v$3.union([v$3.string(), v$3.object({
+	id: v$3.optional(v$3.string()),
+	display_name: v$3.optional(v$3.string())
+})]);
 const CostSchema = v$3.object({ total_cost_usd: v$3.optional(v$3.number()) });
+const CurrentUsageSchema = v$3.object({
+	input_tokens: v$3.optional(v$3.number(), 0),
+	output_tokens: v$3.optional(v$3.number(), 0),
+	cache_creation_input_tokens: v$3.optional(v$3.number(), 0),
+	cache_read_input_tokens: v$3.optional(v$3.number(), 0)
+});
+const ContextWindowSchema = v$3.union([v$3.number(), v$3.object({
+	context_window_size: v$3.optional(v$3.number()),
+	used_percentage: v$3.optional(v$3.nullable(v$3.number())),
+	remaining_percentage: v$3.optional(v$3.nullable(v$3.number())),
+	current_usage: v$3.optional(v$3.nullable(CurrentUsageSchema))
+})]);
 const TokenUsageSchema = v$3.object({
 	input_tokens: v$3.optional(v$3.number(), 0),
 	output_tokens: v$3.optional(v$3.number(), 0),
@@ -25,10 +41,10 @@ const TokenUsageSchema = v$3.object({
 	cache_read_input_tokens: v$3.optional(v$3.number(), 0)
 });
 const StatusJsonSchema = v$3.object({
-	model: v$3.optional(v$3.string()),
+	model: v$3.optional(ModelSchema),
 	cost: v$3.optional(CostSchema),
+	context_window: v$3.optional(ContextWindowSchema),
 	token_usage: v$3.optional(TokenUsageSchema),
-	context_window: v$3.optional(v$3.number()),
 	cwd: v$3.optional(v$3.string()),
 	session_id: v$3.optional(v$3.string())
 });
@@ -114,10 +130,7 @@ const SettingsSchema = v$1.object({
 const DEFAULT_SETTINGS = {
 	lines: [{
 		widgets: [
-			{
-				type: "model",
-				icon: "🤖"
-			},
+			{ type: "model" },
 			{ type: "session-cost" },
 			{ type: "context-percent" },
 			{ type: "burn-rate" }
@@ -135,8 +148,8 @@ const DEFAULT_SETTINGS = {
 	powerline: {
 		enabled: true,
 		theme: "default",
-		separator: "",
-		separatorThin: ""
+		separator: "▶",
+		separatorThin: "│"
 	},
 	cache: {
 		statuslineTtlMs: 5e3,
@@ -549,7 +562,8 @@ async function buildRenderContext(stdin, settings) {
 	else sessionCostUsd = stdinCost ?? calculatedSessionCost;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
-	const burnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, stdin.model);
+	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
+	const burnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
 	return {
 		stdin,
 		metrics,
@@ -607,11 +621,14 @@ function formatTokensPerMinute(tokPerMin) {
 //#endregion
 //#region src/widgets/model.ts
 const modelWidget = { render(context, config) {
-	const model = context.stdin.model;
-	if (!model) return null;
+	const raw = context.stdin.model;
+	if (!raw) return null;
+	let name;
+	if (typeof raw === "string") name = formatModelName(raw);
+	else name = raw.id ? formatModelName(raw.id) : raw.display_name ?? "";
+	if (!name) return null;
 	const label = config.label ?? "";
 	const icon = config.icon ?? "";
-	const name = formatModelName(model);
 	const prefix = [icon, label].filter(Boolean).join(" ");
 	const text = prefix ? `${prefix} ${name}` : name;
 	return {
@@ -675,12 +692,24 @@ const burnRateWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/context-percent.ts
 const contextPercentWidget = { render(context, config) {
-	const usage = context.stdin.token_usage;
-	const window = context.stdin.context_window;
-	if (!usage || !window || window === 0) return null;
-	const totalUsed = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-	const ratio = totalUsed / window;
+	const cw = context.stdin.context_window;
 	const label = config.label ?? "";
+	let ratio = null;
+	if (typeof cw === "object" && cw !== null && cw !== void 0) {
+		if (cw.used_percentage != null) ratio = cw.used_percentage / 100;
+		else if (cw.current_usage && cw.context_window_size && cw.context_window_size > 0) {
+			const u = cw.current_usage;
+			const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+			ratio = total / cw.context_window_size;
+		}
+	} else if (typeof cw === "number" && cw > 0) {
+		const usage = context.stdin.token_usage;
+		if (usage) {
+			const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+			ratio = total / cw;
+		}
+	}
+	if (ratio === null) return null;
 	const text = label ? `${label} ${formatPercent(ratio)}` : formatPercent(ratio);
 	return {
 		text,
@@ -733,7 +762,7 @@ function getGitChanges(cwd) {
 const gitBranchWidget = { render(context, config) {
 	const branch = getGitBranch(context.stdin.cwd);
 	if (!branch) return null;
-	const icon = config.icon ?? "";
+	const icon = config.icon ?? "";
 	const label = config.label ?? "";
 	const prefix = [icon, label].filter(Boolean).join(" ");
 	const text = prefix ? `${prefix} ${branch}` : branch;

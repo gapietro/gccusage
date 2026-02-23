@@ -8,7 +8,7 @@ export const gitBranchWidget: Widget = {
     const branch = getGitBranch(context.stdin.cwd);
     if (!branch) return null;
 
-    const icon = config.icon ?? "\uE0A0"; // Powerline branch icon
+    const icon = config.icon ?? ""; // No icon by default (powerline branch icon requires Nerd Font)
     const label = config.label ?? "";
     const prefix = [icon, label].filter(Boolean).join(" ");
     const text = prefix ? `${prefix} ${branch}` : branch;

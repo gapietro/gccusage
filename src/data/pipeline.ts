@@ -39,7 +39,7 @@ export async function buildRenderContext(
   );
   const calculatedTodayCost = calculateTotalCost(todayCostByModel);
 
-  // Determine cost source
+  // Determine cost source (cost.total_cost_usd works for both formats)
   const stdinCost = stdin.cost?.total_cost_usd;
   let sessionCostUsd: number;
   if (settings.costSource === "stdin" && stdinCost !== undefined) {
@@ -58,11 +58,14 @@ export async function buildRenderContext(
   const block = detectBlock(sessionStartTime);
 
   // Burn rate
+  const modelId = typeof stdin.model === "string"
+    ? stdin.model
+    : stdin.model?.id;
   const burnRate = calculateBurnRate(
     metrics.session,
     sessionStartTime,
     pricing,
-    stdin.model,
+    modelId,
   );
 
   return {
