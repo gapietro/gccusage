@@ -1155,6 +1155,7 @@ function getTheme(name) {
 
 //#endregion
 //#region src/render/powerline.ts
+chalk.level = 3;
 function renderPowerlineSegments(outputs, options) {
 	const theme = getTheme(options.theme);
 	const segments = [];

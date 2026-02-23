@@ -2,6 +2,10 @@ import chalk from "chalk";
 import type { WidgetOutput } from "../widgets/base.js";
 import { getTheme, type SegmentStyle } from "./themes.js";
 
+// Force truecolor output — chalk disables colors when stdout is a pipe,
+// but statusline output is rendered by Claude Code which supports ANSI.
+chalk.level = 3;
+
 export interface PowerlineOptions {
   theme: string;
   separator: string;
