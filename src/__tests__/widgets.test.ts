@@ -74,7 +74,7 @@ describe("contextPercentWidget", () => {
       },
     });
     const result = contextPercentWidget.render(ctx, { type: "context-percent" });
-    expect(result!.text).toBe("25%");
+    expect(result!.text).toBe("25% (200.0k)");
   });
 
   it("returns null when no context window", () => {

@@ -1,29 +1,32 @@
 import type { Widget, WidgetOutput } from "./base.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetConfig } from "../config/schema.js";
-import { formatPercent } from "../utils/format.js";
+import { formatPercent, formatTokens } from "../utils/format.js";
 
 export const contextPercentWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
     const cw = context.stdin.context_window;
     const label = config.label ?? "";
     let ratio: number | null = null;
+    let windowSize: number | null = null;
 
     if (typeof cw === "object" && cw !== null && cw !== undefined) {
       // Claude Code format: { used_percentage, context_window_size, current_usage }
+      windowSize = cw.context_window_size ?? null;
       if (cw.used_percentage != null) {
         ratio = cw.used_percentage / 100;
-      } else if (cw.current_usage && cw.context_window_size && cw.context_window_size > 0) {
+      } else if (cw.current_usage && windowSize && windowSize > 0) {
         const u = cw.current_usage;
         const total =
           (u.input_tokens ?? 0) +
           (u.output_tokens ?? 0) +
           (u.cache_creation_input_tokens ?? 0) +
           (u.cache_read_input_tokens ?? 0);
-        ratio = total / cw.context_window_size;
+        ratio = total / windowSize;
       }
     } else if (typeof cw === "number" && cw > 0) {
       // Legacy format: context_window is a plain number
+      windowSize = cw;
       const usage = context.stdin.token_usage;
       if (usage) {
         const total =
@@ -37,7 +40,9 @@ export const contextPercentWidget: Widget = {
 
     if (ratio === null) return null;
 
-    const text = label ? `${label} ${formatPercent(ratio)}` : formatPercent(ratio);
+    const pct = formatPercent(ratio);
+    const size = windowSize ? ` (${formatTokens(windowSize)})` : "";
+    const text = label ? `${label} ${pct}${size}` : `${pct}${size}`;
     return { text, fg: config.fg, bg: config.bg };
   },
 };

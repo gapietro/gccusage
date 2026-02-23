@@ -804,14 +804,17 @@ const contextPercentWidget = { render(context, config) {
 	const cw = context.stdin.context_window;
 	const label = config.label ?? "";
 	let ratio = null;
+	let windowSize = null;
 	if (typeof cw === "object" && cw !== null && cw !== void 0) {
+		windowSize = cw.context_window_size ?? null;
 		if (cw.used_percentage != null) ratio = cw.used_percentage / 100;
-		else if (cw.current_usage && cw.context_window_size && cw.context_window_size > 0) {
+		else if (cw.current_usage && windowSize && windowSize > 0) {
 			const u = cw.current_usage;
 			const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
-			ratio = total / cw.context_window_size;
+			ratio = total / windowSize;
 		}
 	} else if (typeof cw === "number" && cw > 0) {
+		windowSize = cw;
 		const usage = context.stdin.token_usage;
 		if (usage) {
 			const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
@@ -819,7 +822,9 @@ const contextPercentWidget = { render(context, config) {
 		}
 	}
 	if (ratio === null) return null;
-	const text = label ? `${label} ${formatPercent(ratio)}` : formatPercent(ratio);
+	const pct = formatPercent(ratio);
+	const size = windowSize ? ` (${formatTokens(windowSize)})` : "";
+	const text = label ? `${label} ${pct}${size}` : `${pct}${size}`;
 	return {
 		text,
 		fg: config.fg,
