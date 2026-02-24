@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
@@ -1156,7 +1155,11 @@ function getDailyCostPath() {
 	return path$2.join(getCacheDir(), "daily-costs.json");
 }
 function todayDateStr() {
-	return new Date().toISOString().slice(0, 10);
+	const now = new Date();
+	const y = now.getFullYear();
+	const m = String(now.getMonth() + 1).padStart(2, "0");
+	const d = String(now.getDate()).padStart(2, "0");
+	return `${y}-${m}-${d}`;
 }
 function readDailyCostFile() {
 	const filePath = getDailyCostPath();
