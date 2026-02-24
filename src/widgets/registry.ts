@@ -23,6 +23,7 @@ import { apiLatencyWidget } from "./api-latency.js";
 import { tokenBreakdownWidget } from "./token-breakdown.js";
 import { sessionTimerWidget } from "./session-timer.js";
 import { compactCountdownWidget } from "./compact-countdown.js";
+import { turnCounterWidget } from "./turn-counter.js";
 
 const WIDGET_MAP: Record<string, Widget> = {
   model: modelWidget,
@@ -49,6 +50,7 @@ const WIDGET_MAP: Record<string, Widget> = {
   "token-breakdown": tokenBreakdownWidget,
   "session-timer": sessionTimerWidget,
   "compact-countdown": compactCountdownWidget,
+  "turn-counter": turnCounterWidget,
 };
 
 export function getWidget(type: string): Widget | null {

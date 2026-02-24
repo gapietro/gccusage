@@ -23,4 +23,5 @@ export interface RenderContext {
   sessionStartTime: number | null;
   terminalWidth: number;
   alerts: AlertsConfig;
+  turnCount: number;
 }
