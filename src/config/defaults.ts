@@ -34,6 +34,12 @@ export const DEFAULT_SETTINGS: Settings = {
     mode: "auto",
     threshold: 80,
   },
+  alerts: {
+    sessionWarn: 5,
+    sessionDanger: 15,
+    dailyWarn: 10,
+    dailyDanger: 25,
+  },
   cache: {
     statuslineTtlMs: 5000,
     pricingTtlMs: 86400000,

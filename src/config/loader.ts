@@ -48,6 +48,11 @@ function mergeSettings(
       raw["compact"] as Record<string, unknown> | undefined,
       validated.compact,
     ),
+    alerts: mergeIfPresent(
+      defaults.alerts ?? {},
+      raw["alerts"] as Record<string, unknown> | undefined,
+      validated.alerts,
+    ),
     cache: mergeIfPresent(
       defaults.cache ?? {},
       raw["cache"] as Record<string, unknown> | undefined,

@@ -135,10 +135,17 @@ const CompactConfigSchema = v$1.object({
 	]), "auto"),
 	threshold: v$1.optional(v$1.number(), 80)
 });
+const AlertsConfigSchema = v$1.object({
+	sessionWarn: v$1.optional(v$1.number(), 5),
+	sessionDanger: v$1.optional(v$1.number(), 15),
+	dailyWarn: v$1.optional(v$1.number(), 10),
+	dailyDanger: v$1.optional(v$1.number(), 25)
+});
 const SettingsSchema = v$1.object({
 	lines: v$1.optional(v$1.array(LineConfigSchema)),
 	powerline: v$1.optional(PowerlineConfigSchema),
 	compact: v$1.optional(CompactConfigSchema),
+	alerts: v$1.optional(AlertsConfigSchema),
 	cache: v$1.optional(CacheConfigSchema),
 	costSource: v$1.optional(v$1.picklist([
 		"auto",
@@ -230,6 +237,12 @@ const DEFAULT_SETTINGS = {
 		mode: "auto",
 		threshold: 80
 	},
+	alerts: {
+		sessionWarn: 5,
+		sessionDanger: 15,
+		dailyWarn: 10,
+		dailyDanger: 25
+	},
 	cache: {
 		statuslineTtlMs: 5e3,
 		pricingTtlMs: 864e5
@@ -260,6 +273,7 @@ function mergeSettings(defaults, raw, validated) {
 		lines: validated.lines ?? defaults.lines,
 		powerline: mergeIfPresent(defaults.powerline ?? {}, raw["powerline"], validated.powerline),
 		compact: mergeIfPresent(defaults.compact ?? {}, raw["compact"], validated.compact),
+		alerts: mergeIfPresent(defaults.alerts ?? {}, raw["alerts"], validated.alerts),
 		cache: mergeIfPresent(defaults.cache ?? {}, raw["cache"], validated.cache),
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
@@ -741,7 +755,13 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUsd,
 		costByModel,
 		sessionStartTime,
-		terminalWidth: getTerminalWidth()
+		terminalWidth: getTerminalWidth(),
+		alerts: {
+			sessionWarn: settings.alerts?.sessionWarn ?? 5,
+			sessionDanger: settings.alerts?.sessionDanger ?? 15,
+			dailyWarn: settings.alerts?.dailyWarn ?? 10,
+			dailyDanger: settings.alerts?.dailyDanger ?? 25
+		}
 	};
 }
 
@@ -807,34 +827,39 @@ const modelWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/session-cost.ts
+function alertBg$1(cost, warn, danger, configBg) {
+	if (cost >= danger) return "#c01c28";
+	if (cost >= warn) return "#a67c00";
+	return configBg;
+}
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
 	const text = label ? `${label} ${formatDollars(cost)}` : formatDollars(cost);
+	const bg = alertBg$1(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
 		text,
 		fg: config.fg,
-		bg: config.bg
+		bg
 	};
 } };
 
 //#endregion
 //#region src/widgets/today-spend.ts
-const BUDGET_WARN = 10;
-const BUDGET_DANGER = 25;
-function budgetBg(cost, configBg) {
-	if (cost >= BUDGET_DANGER) return "#c01c28";
-	if (cost >= BUDGET_WARN) return "#a67c00";
+function alertBg(cost, warn, danger, configBg) {
+	if (cost >= danger) return "#c01c28";
+	if (cost >= warn) return "#a67c00";
 	return configBg;
 }
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
 	const text = `${label} ${formatDollars(cost)}`;
+	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,
 		fg: config.fg,
-		bg: budgetBg(cost, config.bg)
+		bg
 	};
 } };
 
