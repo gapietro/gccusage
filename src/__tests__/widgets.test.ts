@@ -23,6 +23,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     costByModel: new Map(),
     sessionStartTime: null,
     terminalWidth: 120,
+    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
     ...overrides,
   };
 }

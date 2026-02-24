@@ -44,10 +44,18 @@ const CompactConfigSchema = v.object({
   threshold: v.optional(v.number(), 80),
 });
 
+const AlertsConfigSchema = v.object({
+  sessionWarn: v.optional(v.number(), 5),
+  sessionDanger: v.optional(v.number(), 15),
+  dailyWarn: v.optional(v.number(), 10),
+  dailyDanger: v.optional(v.number(), 25),
+});
+
 export const SettingsSchema = v.object({
   lines: v.optional(v.array(LineConfigSchema)),
   powerline: v.optional(PowerlineConfigSchema),
   compact: v.optional(CompactConfigSchema),
+  alerts: v.optional(AlertsConfigSchema),
   cache: v.optional(CacheConfigSchema),
   costSource: v.optional(v.picklist(["auto", "calculated", "stdin"]), "auto"),
 });

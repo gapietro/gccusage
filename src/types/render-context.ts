@@ -4,6 +4,13 @@ import type { BlockMetrics } from "./block-metrics.js";
 import type { BurnRate } from "./burn-rate.js";
 import type { PricingTable } from "./pricing.js";
 
+export interface AlertsConfig {
+  sessionWarn: number;
+  sessionDanger: number;
+  dailyWarn: number;
+  dailyDanger: number;
+}
+
 export interface RenderContext {
   stdin: StatusJson;
   metrics: AggregatedMetrics;
@@ -15,4 +22,5 @@ export interface RenderContext {
   costByModel: Map<string, number>;
   sessionStartTime: number | null;
   terminalWidth: number;
+  alerts: AlertsConfig;
 }

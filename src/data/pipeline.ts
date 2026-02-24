@@ -103,5 +103,11 @@ export async function buildRenderContext(
     costByModel,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
+    alerts: {
+      sessionWarn: settings.alerts?.sessionWarn ?? 5,
+      sessionDanger: settings.alerts?.sessionDanger ?? 15,
+      dailyWarn: settings.alerts?.dailyWarn ?? 10,
+      dailyDanger: settings.alerts?.dailyDanger ?? 25,
+    },
   };
 }
