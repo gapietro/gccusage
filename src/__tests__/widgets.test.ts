@@ -24,6 +24,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     sessionStartTime: null,
     terminalWidth: 120,
     alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
+    turnCount: 0,
     ...overrides,
   };
 }

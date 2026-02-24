@@ -13,6 +13,7 @@ import {
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
 import { trackDailyCost } from "./daily-cost-tracker.js";
+import { trackTurn } from "./turn-tracker.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -103,6 +104,7 @@ export async function buildRenderContext(
     costByModel,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
+    turnCount: trackTurn(stdin.session_id),
     alerts: {
       sessionWarn: settings.alerts?.sessionWarn ?? 5,
       sessionDanger: settings.alerts?.sessionDanger ?? 15,
