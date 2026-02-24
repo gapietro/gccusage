@@ -43,6 +43,11 @@ function mergeSettings(
       raw["powerline"] as Record<string, unknown> | undefined,
       validated.powerline,
     ),
+    compact: mergeIfPresent(
+      defaults.compact ?? {},
+      raw["compact"] as Record<string, unknown> | undefined,
+      validated.compact,
+    ),
     cache: mergeIfPresent(
       defaults.cache ?? {},
       raw["cache"] as Record<string, unknown> | undefined,

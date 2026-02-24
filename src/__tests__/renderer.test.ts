@@ -85,4 +85,64 @@ describe("renderStatusline", () => {
     // Should not start or end with separator
     expect(plain.trimEnd().startsWith("|")).toBe(false);
   });
+
+  it("compact mode collapses to single line with priority ordering", () => {
+    const settings: Settings = {
+      lines: [
+        {
+          widgets: [
+            { type: "model", priority: 1 },
+            { type: "session-cost", priority: 2 },
+          ],
+          flex: "left",
+        },
+        {
+          widgets: [
+            { type: "today-spend", priority: 3 },
+          ],
+          flex: "left",
+        },
+      ],
+      compact: { mode: "always", threshold: 80 },
+      powerline: { enabled: true, theme: "default", separator: "\u25B6", separatorThin: "\u2502" },
+      costSource: "auto",
+    };
+
+    const output = renderStatusline(makeContext(), settings);
+    // Should be a single line (no newlines)
+    expect(output.split("\n")).toHaveLength(1);
+    const plain = stripAnsi(output);
+    expect(plain).toContain("Sonnet 4");
+    expect(plain).toContain("$2.45");
+  });
+
+  it("compact auto mode triggers on narrow terminal", () => {
+    const settings: Settings = {
+      lines: [
+        {
+          widgets: [
+            { type: "model", priority: 1 },
+            { type: "session-cost", priority: 2 },
+          ],
+          flex: "left",
+        },
+        {
+          widgets: [
+            { type: "today-spend", priority: 3 },
+          ],
+          flex: "left",
+        },
+      ],
+      compact: { mode: "auto", threshold: 80 },
+      costSource: "auto",
+    };
+
+    // Wide terminal — should be multi-line
+    const wide = renderStatusline(makeContext({ terminalWidth: 120 }), settings);
+    expect(wide.split("\n").length).toBeGreaterThanOrEqual(2);
+
+    // Narrow terminal — should be single-line
+    const narrow = renderStatusline(makeContext({ terminalWidth: 60 }), settings);
+    expect(narrow.split("\n")).toHaveLength(1);
+  });
 });
