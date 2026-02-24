@@ -15,6 +15,7 @@ const WidgetConfigSchema = v.object({
   text: v.optional(v.string()),
   separator: v.optional(v.string()),
   maxWidth: v.optional(v.number()),
+  priority: v.optional(v.number()),
 });
 
 export type WidgetConfig = v.InferOutput<typeof WidgetConfigSchema>;
@@ -38,9 +39,15 @@ const CacheConfigSchema = v.object({
   pricingTtlMs: v.optional(v.number(), 86400000),
 });
 
+const CompactConfigSchema = v.object({
+  mode: v.optional(v.picklist(["auto", "always", "never"]), "auto"),
+  threshold: v.optional(v.number(), 80),
+});
+
 export const SettingsSchema = v.object({
   lines: v.optional(v.array(LineConfigSchema)),
   powerline: v.optional(PowerlineConfigSchema),
+  compact: v.optional(CompactConfigSchema),
   cache: v.optional(CacheConfigSchema),
   costSource: v.optional(v.picklist(["auto", "calculated", "stdin"]), "auto"),
 });

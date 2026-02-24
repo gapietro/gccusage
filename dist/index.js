@@ -105,7 +105,8 @@ const WidgetConfigSchema = v$1.object({
 	command: v$1.optional(v$1.string()),
 	text: v$1.optional(v$1.string()),
 	separator: v$1.optional(v$1.string()),
-	maxWidth: v$1.optional(v$1.number())
+	maxWidth: v$1.optional(v$1.number()),
+	priority: v$1.optional(v$1.number())
 });
 const LineConfigSchema = v$1.object({
 	widgets: v$1.array(WidgetConfigSchema),
@@ -126,9 +127,18 @@ const CacheConfigSchema = v$1.object({
 	statuslineTtlMs: v$1.optional(v$1.number(), 5e3),
 	pricingTtlMs: v$1.optional(v$1.number(), 864e5)
 });
+const CompactConfigSchema = v$1.object({
+	mode: v$1.optional(v$1.picklist([
+		"auto",
+		"always",
+		"never"
+	]), "auto"),
+	threshold: v$1.optional(v$1.number(), 80)
+});
 const SettingsSchema = v$1.object({
 	lines: v$1.optional(v$1.array(LineConfigSchema)),
 	powerline: v$1.optional(PowerlineConfigSchema),
+	compact: v$1.optional(CompactConfigSchema),
 	cache: v$1.optional(CacheConfigSchema),
 	costSource: v$1.optional(v$1.picklist([
 		"auto",
@@ -145,27 +155,32 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "model",
 				fg: "#ffffff",
-				bg: "#1a5fb4"
+				bg: "#1a5fb4",
+				priority: 1
 			},
 			{
 				type: "session-cost",
 				fg: "#ffffff",
-				bg: "#26a269"
+				bg: "#26a269",
+				priority: 2
 			},
 			{
 				type: "context-percent",
 				fg: "#ffffff",
-				bg: "#0d7377"
+				bg: "#0d7377",
+				priority: 3
 			},
 			{
 				type: "burn-rate",
 				fg: "#ffffff",
-				bg: "#555555"
+				bg: "#555555",
+				priority: 7
 			},
 			{
 				type: "cache-hit-rate",
 				fg: "#ffffff",
-				bg: "#1a5fb4"
+				bg: "#1a5fb4",
+				priority: 8
 			}
 		],
 		flex: "left"
@@ -174,27 +189,32 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "git-branch",
 				fg: "#ffffff",
-				bg: "#613583"
+				bg: "#613583",
+				priority: 4
 			},
 			{
 				type: "git-changes",
 				fg: "#ffffff",
-				bg: "#613583"
+				bg: "#613583",
+				priority: 9
 			},
 			{
 				type: "lines-changed",
 				fg: "#ffffff",
-				bg: "#0d7377"
+				bg: "#0d7377",
+				priority: 10
 			},
 			{
 				type: "today-spend",
 				fg: "#ffffff",
-				bg: "#26a269"
+				bg: "#26a269",
+				priority: 5
 			},
 			{
 				type: "api-latency",
 				fg: "#ffffff",
-				bg: "#555555"
+				bg: "#555555",
+				priority: 6
 			},
 			{ type: "vim-mode" }
 		],
@@ -205,6 +225,10 @@ const DEFAULT_SETTINGS = {
 		theme: "default",
 		separator: "▶",
 		separatorThin: "│"
+	},
+	compact: {
+		mode: "auto",
+		threshold: 80
 	},
 	cache: {
 		statuslineTtlMs: 5e3,
@@ -235,6 +259,7 @@ function mergeSettings(defaults, raw, validated) {
 	return {
 		lines: validated.lines ?? defaults.lines,
 		powerline: mergeIfPresent(defaults.powerline ?? {}, raw["powerline"], validated.powerline),
+		compact: mergeIfPresent(defaults.compact ?? {}, raw["compact"], validated.compact),
 		cache: mergeIfPresent(defaults.cache ?? {}, raw["cache"], validated.cache),
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
@@ -1425,10 +1450,68 @@ function truncateAnsi(str, maxWidth) {
 
 //#endregion
 //#region src/render/renderer.ts
-function renderStatusline(context, settings) {
-	const lines = [];
+function shouldCompact(settings, terminalWidth) {
+	const compact = settings.compact;
+	if (!compact) return false;
+	const mode = compact.mode ?? "auto";
+	if (mode === "always") return true;
+	if (mode === "never") return false;
+	return terminalWidth < (compact.threshold ?? 80);
+}
+function collectWidgets(configs, context) {
+	const results = [];
+	for (const config of configs) {
+		const widget = getWidget(config.type);
+		if (!widget) continue;
+		const output = widget.render(context, config);
+		if (!output) continue;
+		if (isSeparatorOutput(output)) continue;
+		results.push({
+			output,
+			priority: config.priority ?? 99
+		});
+	}
+	return results;
+}
+function renderLine(outputs, settings, context, flex) {
 	const powerline = settings.powerline;
 	const isPowerline = powerline?.enabled ?? false;
+	let line;
+	if (isPowerline && powerline) {
+		const nonSeparator = outputs.filter((o) => o.text !== " | " && o.text.trim() !== "|");
+		line = renderPowerlineSegments(nonSeparator, {
+			theme: powerline.theme ?? "default",
+			separator: powerline.separator ?? "",
+			separatorThin: powerline.separatorThin ?? ""
+		});
+	} else {
+		const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));
+		line = applyFlex(segments, context.terminalWidth, flex);
+	}
+	return truncateAnsi(line, context.terminalWidth);
+}
+function renderStatusline(context, settings) {
+	if (shouldCompact(settings, context.terminalWidth)) return renderCompact(context, settings);
+	return renderFull(context, settings);
+}
+function renderCompact(context, settings) {
+	const allWidgets = [];
+	for (const lineConfig of settings.lines) allWidgets.push(...collectWidgets(lineConfig.widgets, context));
+	allWidgets.sort((a, b) => a.priority - b.priority);
+	const fitted = [];
+	let usedWidth = 0;
+	const sepWidth = 3;
+	for (const { output } of allWidgets) {
+		const segWidth = visibleLength(output.text) + 2 + sepWidth;
+		if (usedWidth + segWidth > context.terminalWidth && fitted.length > 0) break;
+		fitted.push(output);
+		usedWidth += segWidth;
+	}
+	if (fitted.length === 0) return "";
+	return renderLine(fitted, settings, context, "left");
+}
+function renderFull(context, settings) {
+	const lines = [];
 	for (const lineConfig of settings.lines) {
 		const outputs = [];
 		for (const widgetConfig of lineConfig.widgets) {
@@ -1440,20 +1523,7 @@ function renderStatusline(context, settings) {
 		}
 		const cleaned = cleanSeparators(outputs);
 		if (cleaned.length === 0) continue;
-		let line;
-		if (isPowerline && powerline) {
-			const nonSeparator = cleaned.filter((o) => o.text !== " | " && o.text.trim() !== "|");
-			line = renderPowerlineSegments(nonSeparator, {
-				theme: powerline.theme ?? "default",
-				separator: powerline.separator ?? "",
-				separatorThin: powerline.separatorThin ?? ""
-			});
-		} else {
-			const segments = cleaned.map((o) => colorize(o.text, o.fg, o.bg));
-			const flex = lineConfig.flex ?? "left";
-			line = applyFlex(segments, context.terminalWidth, flex);
-		}
-		line = truncateAnsi(line, context.terminalWidth);
+		const line = renderLine(cleaned, settings, context, lineConfig.flex ?? "left");
 		lines.push(line);
 	}
 	return lines.join("\n");
