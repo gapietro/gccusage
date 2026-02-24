@@ -1239,6 +1239,20 @@ const tokenBreakdownWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/session-timer.ts
+const sessionTimerWidget = { render(context, config) {
+	const durationMs = context.stdin.cost?.total_duration_ms;
+	if (!durationMs || durationMs < 1e3) return null;
+	const label = config.label ?? "";
+	const text = label ? `${label} ${formatDuration(durationMs)}` : formatDuration(durationMs);
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
@@ -1262,7 +1276,8 @@ const WIDGET_MAP = {
 	"lines-changed": linesChangedWidget,
 	"vim-mode": vimModeWidget,
 	"api-latency": apiLatencyWidget,
-	"token-breakdown": tokenBreakdownWidget
+	"token-breakdown": tokenBreakdownWidget,
+	"session-timer": sessionTimerWidget
 };
 function getWidget(type) {
 	return WIDGET_MAP[type] ?? null;
