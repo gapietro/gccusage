@@ -39,10 +39,14 @@ const CacheConfigSchema = v.object({
 });
 
 export const SettingsSchema = v.object({
-  lines: v.array(LineConfigSchema),
+  lines: v.optional(v.array(LineConfigSchema)),
   powerline: v.optional(PowerlineConfigSchema),
   cache: v.optional(CacheConfigSchema),
   costSource: v.optional(v.picklist(["auto", "calculated", "stdin"]), "auto"),
 });
 
-export type Settings = v.InferOutput<typeof SettingsSchema>;
+/** Raw parsed settings (lines may be missing if user only overrides powerline/cache). */
+export type PartialSettings = v.InferOutput<typeof SettingsSchema>;
+
+/** Fully resolved settings after merging with defaults — lines is always present. */
+export type Settings = Required<Pick<PartialSettings, "lines">> & Omit<PartialSettings, "lines">;

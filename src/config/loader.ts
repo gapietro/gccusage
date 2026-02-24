@@ -14,6 +14,44 @@ export function getConfigPath(): string {
   return path.join(getConfigDir(), "settings.json");
 }
 
+/** Shallow-merge only keys that exist in the source object. */
+function mergeIfPresent<T extends Record<string, unknown>>(
+  defaults: T,
+  raw: Record<string, unknown> | undefined,
+  validated: Partial<T> | undefined,
+): T {
+  if (!raw || !validated) return defaults;
+  const result = { ...defaults };
+  for (const key of Object.keys(raw)) {
+    if (key in validated) {
+      (result as Record<string, unknown>)[key] = (validated as Record<string, unknown>)[key];
+    }
+  }
+  return result;
+}
+
+/** Deep-merge user overrides onto defaults, only overriding keys the user actually set. */
+function mergeSettings(
+  defaults: Settings,
+  raw: Record<string, unknown>,
+  validated: v.InferOutput<typeof SettingsSchema>,
+): Settings {
+  return {
+    lines: validated.lines ?? defaults.lines,
+    powerline: mergeIfPresent(
+      defaults.powerline ?? {},
+      raw["powerline"] as Record<string, unknown> | undefined,
+      validated.powerline,
+    ),
+    cache: mergeIfPresent(
+      defaults.cache ?? {},
+      raw["cache"] as Record<string, unknown> | undefined,
+      validated.cache,
+    ),
+    costSource: "costSource" in raw ? (validated.costSource ?? defaults.costSource) : defaults.costSource,
+  };
+}
+
 export function loadSettings(): Settings {
   const configPath = getConfigPath();
 
@@ -24,7 +62,8 @@ export function loadSettings(): Settings {
   try {
     const raw = fs.readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
-    return v.parse(SettingsSchema, parsed);
+    const validated = v.parse(SettingsSchema, parsed);
+    return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
   } catch {
     return DEFAULT_SETTINGS;
   }
