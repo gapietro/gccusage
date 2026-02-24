@@ -127,7 +127,7 @@ const CacheConfigSchema = v$1.object({
 	pricingTtlMs: v$1.optional(v$1.number(), 864e5)
 });
 const SettingsSchema = v$1.object({
-	lines: v$1.array(LineConfigSchema),
+	lines: v$1.optional(v$1.array(LineConfigSchema)),
 	powerline: v$1.optional(PowerlineConfigSchema),
 	cache: v$1.optional(CacheConfigSchema),
 	costSource: v$1.optional(v$1.picklist([
@@ -223,13 +223,30 @@ function getConfigDir() {
 function getConfigPath() {
 	return path$5.join(getConfigDir(), "settings.json");
 }
+/** Shallow-merge only keys that exist in the source object. */
+function mergeIfPresent(defaults, raw, validated) {
+	if (!raw || !validated) return defaults;
+	const result = { ...defaults };
+	for (const key of Object.keys(raw)) if (key in validated) result[key] = validated[key];
+	return result;
+}
+/** Deep-merge user overrides onto defaults, only overriding keys the user actually set. */
+function mergeSettings(defaults, raw, validated) {
+	return {
+		lines: validated.lines ?? defaults.lines,
+		powerline: mergeIfPresent(defaults.powerline ?? {}, raw["powerline"], validated.powerline),
+		cache: mergeIfPresent(defaults.cache ?? {}, raw["cache"], validated.cache),
+		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
+	};
+}
 function loadSettings() {
 	const configPath = getConfigPath();
 	if (!fs$6.existsSync(configPath)) return DEFAULT_SETTINGS;
 	try {
 		const raw = fs$6.readFileSync(configPath, "utf-8");
 		const parsed = JSON.parse(raw);
-		return v.parse(SettingsSchema, parsed);
+		const validated = v.parse(SettingsSchema, parsed);
+		return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
 	} catch {
 		return DEFAULT_SETTINGS;
 	}
