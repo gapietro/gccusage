@@ -7,40 +7,39 @@ A powerline-style statusline for [Claude Code](https://claude.com/claude-code). 
  main ▶ +307 -43 ▶ Today: $14.50 ▶ API: 9m 55s ▶
 ```
 
-## Installation
+## Quick Start
 
 ```bash
-# Clone and build
 git clone https://github.com/gapietro/gccusage.git
-cd gccusage
-npm install
-npm run build
-
-# Or install globally
-npm install -g .
+cd gccusage && npm link
+gccusage setup
 ```
 
-## Setup with Claude Code
+That's it — restart Claude Code and you'll see the statusline.
 
-Add to your Claude Code settings (`~/.claude/settings.json`):
+### Alternative: global install from GitHub
+
+```bash
+npm install -g github:gapietro/gccusage
+gccusage setup
+```
+
+### What `gccusage setup` does
+
+Adds the following to `~/.claude/settings.json` (creates the file if missing, preserves existing settings):
 
 ```json
 {
-  "hooks": {
-    "StatusLine": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gccusage"
-          }
-        ]
-      }
-    ]
+  "statusLine": {
+    "type": "command",
+    "command": "node /path/to/gccusage/dist/index.js"
   }
 }
 ```
+
+### Manual setup
+
+If you prefer to configure it yourself, add the `statusLine` key above to `~/.claude/settings.json`, replacing the path with the absolute path to your `dist/index.js`.
 
 Claude Code pipes JSON status data via stdin on each render. gccusage parses it and outputs ANSI-colored powerline segments.
 

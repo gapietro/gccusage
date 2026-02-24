@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-import * as v$3 from "valibot";
-import * as v$2 from "valibot";
-import * as v$1 from "valibot";
-import * as v from "valibot";
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
@@ -11,6 +7,7 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path$6 from "node:path";
 import * as path$5 from "node:path";
 import * as path$4 from "node:path";
@@ -18,65 +15,562 @@ import * as path$3 from "node:path";
 import * as path$2 from "node:path";
 import * as path$1 from "node:path";
 import * as path from "node:path";
+import { dirname, resolve } from "node:path";
 import { execSync } from "node:child_process";
-import chalk from "chalk";
+import process$1 from "node:process";
+import os, { homedir } from "node:os";
+import tty from "node:tty";
+import { fileURLToPath } from "node:url";
 
+//#region node_modules/valibot/dist/index.mjs
+let store$4;
+/**
+* Returns the global configuration.
+*
+* @param config The config to merge.
+*
+* @returns The configuration.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getGlobalConfig(config$1) {
+	return {
+		lang: config$1?.lang ?? store$4?.lang,
+		message: config$1?.message,
+		abortEarly: config$1?.abortEarly ?? store$4?.abortEarly,
+		abortPipeEarly: config$1?.abortPipeEarly ?? store$4?.abortPipeEarly
+	};
+}
+let store$3;
+/**
+* Returns a global error message.
+*
+* @param lang The language of the message.
+*
+* @returns The error message.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getGlobalMessage(lang) {
+	return store$3?.get(lang);
+}
+let store$2;
+/**
+* Returns a schema error message.
+*
+* @param lang The language of the message.
+*
+* @returns The error message.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getSchemaMessage(lang) {
+	return store$2?.get(lang);
+}
+let store$1;
+/**
+* Returns a specific error message.
+*
+* @param reference The identifier reference.
+* @param lang The language of the message.
+*
+* @returns The error message.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getSpecificMessage(reference, lang) {
+	return store$1?.get(reference)?.get(lang);
+}
+/**
+* Stringifies an unknown input to a literal or type string.
+*
+* @param input The unknown input.
+*
+* @returns A literal or type string.
+*
+* @internal
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _stringify(input) {
+	const type = typeof input;
+	if (type === "string") return `"${input}"`;
+	if (type === "number" || type === "bigint" || type === "boolean") return `${input}`;
+	if (type === "object" || type === "function") return (input && Object.getPrototypeOf(input)?.constructor?.name) ?? "null";
+	return type;
+}
+/**
+* Adds an issue to the dataset.
+*
+* @param context The issue context.
+* @param label The issue label.
+* @param dataset The input dataset.
+* @param config The configuration.
+* @param other The optional props.
+*
+* @internal
+*/
+function _addIssue(context, label, dataset, config$1, other) {
+	const input = other && "input" in other ? other.input : dataset.value;
+	const expected = other?.expected ?? context.expects ?? null;
+	const received = other?.received ?? /* @__PURE__ */ _stringify(input);
+	const issue = {
+		kind: context.kind,
+		type: context.type,
+		input,
+		expected,
+		received,
+		message: `Invalid ${label}: ${expected ? `Expected ${expected} but r` : "R"}eceived ${received}`,
+		requirement: context.requirement,
+		path: other?.path,
+		issues: other?.issues,
+		lang: config$1.lang,
+		abortEarly: config$1.abortEarly,
+		abortPipeEarly: config$1.abortPipeEarly
+	};
+	const isSchema = context.kind === "schema";
+	const message$1 = other?.message ?? context.message ?? /* @__PURE__ */ getSpecificMessage(context.reference, issue.lang) ?? (isSchema ? /* @__PURE__ */ getSchemaMessage(issue.lang) : null) ?? config$1.message ?? /* @__PURE__ */ getGlobalMessage(issue.lang);
+	if (message$1 !== void 0) issue.message = typeof message$1 === "function" ? message$1(issue) : message$1;
+	if (isSchema) dataset.typed = false;
+	if (dataset.issues) dataset.issues.push(issue);
+	else dataset.issues = [issue];
+}
+/**
+* Returns the Standard Schema properties.
+*
+* @param context The schema context.
+*
+* @returns The Standard Schema properties.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _getStandardProps(context) {
+	return {
+		version: 1,
+		vendor: "valibot",
+		validate(value$1) {
+			return context["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig());
+		}
+	};
+}
+/**
+* Joins multiple `expects` values with the given separator.
+*
+* @param values The `expects` values.
+* @param separator The separator.
+*
+* @returns The joined `expects` property.
+*
+* @internal
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _joinExpects(values$1, separator) {
+	const list = [...new Set(values$1)];
+	if (list.length > 1) return `(${list.join(` ${separator} `)})`;
+	return list[0] ?? "never";
+}
+/**
+* A Valibot error with useful information.
+*/
+var ValiError = class extends Error {
+	/**
+	* Creates a Valibot error with useful information.
+	*
+	* @param issues The error issues.
+	*/
+	constructor(issues) {
+		super(issues[0].message);
+		this.name = "ValiError";
+		this.issues = issues;
+	}
+};
+/**
+* Returns the fallback value of the schema.
+*
+* @param schema The schema to get it from.
+* @param dataset The output dataset if available.
+* @param config The config if available.
+*
+* @returns The fallback value.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getFallback(schema, dataset, config$1) {
+	return typeof schema.fallback === "function" ? schema.fallback(dataset, config$1) : schema.fallback;
+}
+/**
+* Returns the default value of the schema.
+*
+* @param schema The schema to get it from.
+* @param dataset The input dataset if available.
+* @param config The config if available.
+*
+* @returns The default value.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function getDefault(schema, dataset, config$1) {
+	return typeof schema.default === "function" ? schema.default(dataset, config$1) : schema.default;
+}
+/* @__NO_SIDE_EFFECTS__ */
+function array(item, message$1) {
+	return {
+		kind: "schema",
+		type: "array",
+		reference: array,
+		expects: "Array",
+		async: false,
+		item,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const input = dataset.value;
+			if (Array.isArray(input)) {
+				dataset.typed = true;
+				dataset.value = [];
+				for (let key = 0; key < input.length; key++) {
+					const value$1 = input[key];
+					const itemDataset = this.item["~run"]({ value: value$1 }, config$1);
+					if (itemDataset.issues) {
+						const pathItem = {
+							type: "array",
+							origin: "value",
+							input,
+							key,
+							value: value$1
+						};
+						for (const issue of itemDataset.issues) {
+							if (issue.path) issue.path.unshift(pathItem);
+							else issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = itemDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					if (!itemDataset.typed) dataset.typed = false;
+					dataset.value.push(itemDataset.value);
+				}
+			} else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function boolean(message$1) {
+	return {
+		kind: "schema",
+		type: "boolean",
+		reference: boolean,
+		expects: "boolean",
+		async: false,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (typeof dataset.value === "boolean") dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function nullable(wrapped, default_) {
+	return {
+		kind: "schema",
+		type: "nullable",
+		reference: nullable,
+		expects: `(${wrapped.expects} | null)`,
+		async: false,
+		wrapped,
+		default: default_,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (dataset.value === null) {
+				if (this.default !== void 0) dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
+				if (dataset.value === null) {
+					dataset.typed = true;
+					return dataset;
+				}
+			}
+			return this.wrapped["~run"](dataset, config$1);
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function number(message$1) {
+	return {
+		kind: "schema",
+		type: "number",
+		reference: number,
+		expects: "number",
+		async: false,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (typeof dataset.value === "number" && !isNaN(dataset.value)) dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function object(entries$1, message$1) {
+	return {
+		kind: "schema",
+		type: "object",
+		reference: object,
+		expects: "Object",
+		async: false,
+		entries: entries$1,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const input = dataset.value;
+			if (input && typeof input === "object") {
+				dataset.typed = true;
+				dataset.value = {};
+				for (const key in this.entries) {
+					const valueSchema = this.entries[key];
+					if (key in input || (valueSchema.type === "exact_optional" || valueSchema.type === "optional" || valueSchema.type === "nullish") && valueSchema.default !== void 0) {
+						const value$1 = key in input ? input[key] : /* @__PURE__ */ getDefault(valueSchema);
+						const valueDataset = valueSchema["~run"]({ value: value$1 }, config$1);
+						if (valueDataset.issues) {
+							const pathItem = {
+								type: "object",
+								origin: "value",
+								input,
+								key,
+								value: value$1
+							};
+							for (const issue of valueDataset.issues) {
+								if (issue.path) issue.path.unshift(pathItem);
+								else issue.path = [pathItem];
+								dataset.issues?.push(issue);
+							}
+							if (!dataset.issues) dataset.issues = valueDataset.issues;
+							if (config$1.abortEarly) {
+								dataset.typed = false;
+								break;
+							}
+						}
+						if (!valueDataset.typed) dataset.typed = false;
+						dataset.value[key] = valueDataset.value;
+					} else if (valueSchema.fallback !== void 0) dataset.value[key] = /* @__PURE__ */ getFallback(valueSchema);
+					else if (valueSchema.type !== "exact_optional" && valueSchema.type !== "optional" && valueSchema.type !== "nullish") {
+						_addIssue(this, "key", dataset, config$1, {
+							input: void 0,
+							expected: `"${key}"`,
+							path: [{
+								type: "object",
+								origin: "key",
+								input,
+								key,
+								value: input[key]
+							}]
+						});
+						if (config$1.abortEarly) break;
+					}
+				}
+			} else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function optional(wrapped, default_) {
+	return {
+		kind: "schema",
+		type: "optional",
+		reference: optional,
+		expects: `(${wrapped.expects} | undefined)`,
+		async: false,
+		wrapped,
+		default: default_,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (dataset.value === void 0) {
+				if (this.default !== void 0) dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
+				if (dataset.value === void 0) {
+					dataset.typed = true;
+					return dataset;
+				}
+			}
+			return this.wrapped["~run"](dataset, config$1);
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function picklist(options, message$1) {
+	return {
+		kind: "schema",
+		type: "picklist",
+		reference: picklist,
+		expects: /* @__PURE__ */ _joinExpects(options.map(_stringify), "|"),
+		async: false,
+		options,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (this.options.includes(dataset.value)) dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function string(message$1) {
+	return {
+		kind: "schema",
+		type: "string",
+		reference: string,
+		expects: "string",
+		async: false,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (typeof dataset.value === "string") dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/**
+* Returns the sub issues of the provided datasets for the union issue.
+*
+* @param datasets The datasets.
+*
+* @returns The sub issues.
+*
+* @internal
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _subIssues(datasets) {
+	let issues;
+	if (datasets) for (const dataset of datasets) if (issues) issues.push(...dataset.issues);
+	else issues = dataset.issues;
+	return issues;
+}
+/* @__NO_SIDE_EFFECTS__ */
+function union(options, message$1) {
+	return {
+		kind: "schema",
+		type: "union",
+		reference: union,
+		expects: /* @__PURE__ */ _joinExpects(options.map((option) => option.expects), "|"),
+		async: false,
+		options,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			let validDataset;
+			let typedDatasets;
+			let untypedDatasets;
+			for (const schema of this.options) {
+				const optionDataset = schema["~run"]({ value: dataset.value }, config$1);
+				if (optionDataset.typed) if (optionDataset.issues) if (typedDatasets) typedDatasets.push(optionDataset);
+				else typedDatasets = [optionDataset];
+				else {
+					validDataset = optionDataset;
+					break;
+				}
+				else if (untypedDatasets) untypedDatasets.push(optionDataset);
+				else untypedDatasets = [optionDataset];
+			}
+			if (validDataset) return validDataset;
+			if (typedDatasets) {
+				if (typedDatasets.length === 1) return typedDatasets[0];
+				_addIssue(this, "type", dataset, config$1, { issues: /* @__PURE__ */ _subIssues(typedDatasets) });
+				dataset.typed = true;
+			} else if (untypedDatasets?.length === 1) return untypedDatasets[0];
+			else _addIssue(this, "type", dataset, config$1, { issues: /* @__PURE__ */ _subIssues(untypedDatasets) });
+			return dataset;
+		}
+	};
+}
+/**
+* Parses an unknown input based on a schema.
+*
+* @param schema The schema to be used.
+* @param input The input to be parsed.
+* @param config The parse configuration.
+*
+* @returns The parsed input.
+*/
+function parse(schema, input, config$1) {
+	const dataset = schema["~run"]({ value: input }, /* @__PURE__ */ getGlobalConfig(config$1));
+	if (dataset.issues) throw new ValiError(dataset.issues);
+	return dataset.value;
+}
+
+//#endregion
 //#region src/types/status-json.ts
-const ModelSchema = v$3.union([v$3.string(), v$3.object({
-	id: v$3.optional(v$3.string()),
-	display_name: v$3.optional(v$3.string())
+const ModelSchema = union([string(), object({
+	id: optional(string()),
+	display_name: optional(string())
 })]);
-const CostSchema = v$3.object({
-	total_cost_usd: v$3.optional(v$3.number()),
-	total_duration_ms: v$3.optional(v$3.number()),
-	total_api_duration_ms: v$3.optional(v$3.number()),
-	total_lines_added: v$3.optional(v$3.number()),
-	total_lines_removed: v$3.optional(v$3.number())
+const CostSchema = object({
+	total_cost_usd: optional(number()),
+	total_duration_ms: optional(number()),
+	total_api_duration_ms: optional(number()),
+	total_lines_added: optional(number()),
+	total_lines_removed: optional(number())
 });
-const CurrentUsageSchema = v$3.object({
-	input_tokens: v$3.optional(v$3.number(), 0),
-	output_tokens: v$3.optional(v$3.number(), 0),
-	cache_creation_input_tokens: v$3.optional(v$3.number(), 0),
-	cache_read_input_tokens: v$3.optional(v$3.number(), 0)
+const CurrentUsageSchema = object({
+	input_tokens: optional(number(), 0),
+	output_tokens: optional(number(), 0),
+	cache_creation_input_tokens: optional(number(), 0),
+	cache_read_input_tokens: optional(number(), 0)
 });
-const ContextWindowSchema = v$3.union([v$3.number(), v$3.object({
-	context_window_size: v$3.optional(v$3.number()),
-	used_percentage: v$3.optional(v$3.nullable(v$3.number())),
-	remaining_percentage: v$3.optional(v$3.nullable(v$3.number())),
-	total_input_tokens: v$3.optional(v$3.number()),
-	total_output_tokens: v$3.optional(v$3.number()),
-	current_usage: v$3.optional(v$3.nullable(CurrentUsageSchema))
+const ContextWindowSchema = union([number(), object({
+	context_window_size: optional(number()),
+	used_percentage: optional(nullable(number())),
+	remaining_percentage: optional(nullable(number())),
+	total_input_tokens: optional(number()),
+	total_output_tokens: optional(number()),
+	current_usage: optional(nullable(CurrentUsageSchema))
 })]);
-const TokenUsageSchema = v$3.object({
-	input_tokens: v$3.optional(v$3.number(), 0),
-	output_tokens: v$3.optional(v$3.number(), 0),
-	cache_creation_input_tokens: v$3.optional(v$3.number(), 0),
-	cache_read_input_tokens: v$3.optional(v$3.number(), 0)
+const TokenUsageSchema = object({
+	input_tokens: optional(number(), 0),
+	output_tokens: optional(number(), 0),
+	cache_creation_input_tokens: optional(number(), 0),
+	cache_read_input_tokens: optional(number(), 0)
 });
-const VimSchema = v$3.object({ mode: v$3.optional(v$3.string()) });
-const StatusJsonSchema = v$3.object({
-	model: v$3.optional(ModelSchema),
-	cost: v$3.optional(CostSchema),
-	context_window: v$3.optional(ContextWindowSchema),
-	token_usage: v$3.optional(TokenUsageSchema),
-	vim: v$3.optional(VimSchema),
-	cwd: v$3.optional(v$3.string()),
-	session_id: v$3.optional(v$3.string())
+const VimSchema = object({ mode: optional(string()) });
+const StatusJsonSchema = object({
+	model: optional(ModelSchema),
+	cost: optional(CostSchema),
+	context_window: optional(ContextWindowSchema),
+	token_usage: optional(TokenUsageSchema),
+	vim: optional(VimSchema),
+	cwd: optional(string()),
+	session_id: optional(string())
 });
 
 //#endregion
 //#region src/data/stdin-reader.ts
 function readStdin() {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve$1, reject) => {
 		const chunks = [];
 		const timeout = setTimeout(() => {
 			process.stdin.destroy();
-			resolve("");
+			resolve$1("");
 		}, 1e3);
 		process.stdin.on("data", (chunk) => chunks.push(chunk));
 		process.stdin.on("end", () => {
 			clearTimeout(timeout);
-			resolve(Buffer.concat(chunks).toString("utf-8"));
+			resolve$1(Buffer.concat(chunks).toString("utf-8"));
 		});
 		process.stdin.on("error", (err) => {
 			clearTimeout(timeout);
@@ -89,7 +583,7 @@ function parseStatusJson(raw) {
 	if (!raw.trim()) return null;
 	try {
 		const data = JSON.parse(raw);
-		return v$2.parse(StatusJsonSchema, data);
+		return parse(StatusJsonSchema, data);
 	} catch {
 		return null;
 	}
@@ -97,60 +591,60 @@ function parseStatusJson(raw) {
 
 //#endregion
 //#region src/config/schema.ts
-const ColorSchema = v$1.union([v$1.string()]);
-const WidgetConfigSchema = v$1.object({
-	type: v$1.string(),
-	label: v$1.optional(v$1.string()),
-	fg: v$1.optional(ColorSchema),
-	bg: v$1.optional(ColorSchema),
-	icon: v$1.optional(v$1.string()),
-	format: v$1.optional(v$1.string()),
-	command: v$1.optional(v$1.string()),
-	text: v$1.optional(v$1.string()),
-	separator: v$1.optional(v$1.string()),
-	maxWidth: v$1.optional(v$1.number()),
-	priority: v$1.optional(v$1.number())
+const ColorSchema = union([string()]);
+const WidgetConfigSchema = object({
+	type: string(),
+	label: optional(string()),
+	fg: optional(ColorSchema),
+	bg: optional(ColorSchema),
+	icon: optional(string()),
+	format: optional(string()),
+	command: optional(string()),
+	text: optional(string()),
+	separator: optional(string()),
+	maxWidth: optional(number()),
+	priority: optional(number())
 });
-const LineConfigSchema = v$1.object({
-	widgets: v$1.array(WidgetConfigSchema),
-	flex: v$1.optional(v$1.picklist([
+const LineConfigSchema = object({
+	widgets: array(WidgetConfigSchema),
+	flex: optional(picklist([
 		"left",
 		"right",
 		"center",
 		"space-between"
 	]), "left")
 });
-const PowerlineConfigSchema = v$1.object({
-	enabled: v$1.optional(v$1.boolean(), false),
-	theme: v$1.optional(v$1.string(), "default"),
-	separator: v$1.optional(v$1.string(), ""),
-	separatorThin: v$1.optional(v$1.string(), "")
+const PowerlineConfigSchema = object({
+	enabled: optional(boolean(), false),
+	theme: optional(string(), "default"),
+	separator: optional(string(), ""),
+	separatorThin: optional(string(), "")
 });
-const CacheConfigSchema = v$1.object({
-	statuslineTtlMs: v$1.optional(v$1.number(), 5e3),
-	pricingTtlMs: v$1.optional(v$1.number(), 864e5)
+const CacheConfigSchema = object({
+	statuslineTtlMs: optional(number(), 5e3),
+	pricingTtlMs: optional(number(), 864e5)
 });
-const CompactConfigSchema = v$1.object({
-	mode: v$1.optional(v$1.picklist([
+const CompactConfigSchema = object({
+	mode: optional(picklist([
 		"auto",
 		"always",
 		"never"
 	]), "auto"),
-	threshold: v$1.optional(v$1.number(), 80)
+	threshold: optional(number(), 80)
 });
-const AlertsConfigSchema = v$1.object({
-	sessionWarn: v$1.optional(v$1.number(), 5),
-	sessionDanger: v$1.optional(v$1.number(), 15),
-	dailyWarn: v$1.optional(v$1.number(), 10),
-	dailyDanger: v$1.optional(v$1.number(), 25)
+const AlertsConfigSchema = object({
+	sessionWarn: optional(number(), 5),
+	sessionDanger: optional(number(), 15),
+	dailyWarn: optional(number(), 10),
+	dailyDanger: optional(number(), 25)
 });
-const SettingsSchema = v$1.object({
-	lines: v$1.optional(v$1.array(LineConfigSchema)),
-	powerline: v$1.optional(PowerlineConfigSchema),
-	compact: v$1.optional(CompactConfigSchema),
-	alerts: v$1.optional(AlertsConfigSchema),
-	cache: v$1.optional(CacheConfigSchema),
-	costSource: v$1.optional(v$1.picklist([
+const SettingsSchema = object({
+	lines: optional(array(LineConfigSchema)),
+	powerline: optional(PowerlineConfigSchema),
+	compact: optional(CompactConfigSchema),
+	alerts: optional(AlertsConfigSchema),
+	cache: optional(CacheConfigSchema),
+	costSource: optional(picklist([
 		"auto",
 		"calculated",
 		"stdin"
@@ -287,7 +781,7 @@ function loadSettings() {
 	try {
 		const raw = fs$7.readFileSync(configPath, "utf-8");
 		const parsed = JSON.parse(raw);
-		const validated = v.parse(SettingsSchema, parsed);
+		const validated = parse(SettingsSchema, parsed);
 		return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
 	} catch {
 		return DEFAULT_SETTINGS;
@@ -1395,6 +1889,417 @@ function getWidget(type) {
 }
 
 //#endregion
+//#region node_modules/chalk/source/vendor/ansi-styles/index.js
+const ANSI_BACKGROUND_OFFSET = 10;
+const wrapAnsi16 = (offset = 0) => (code) => `\u001B[${code + offset}m`;
+const wrapAnsi256 = (offset = 0) => (code) => `\u001B[${38 + offset};5;${code}m`;
+const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u001B[${38 + offset};2;${red};${green};${blue}m`;
+const styles$1 = {
+	modifier: {
+		reset: [0, 0],
+		bold: [1, 22],
+		dim: [2, 22],
+		italic: [3, 23],
+		underline: [4, 24],
+		overline: [53, 55],
+		inverse: [7, 27],
+		hidden: [8, 28],
+		strikethrough: [9, 29]
+	},
+	color: {
+		black: [30, 39],
+		red: [31, 39],
+		green: [32, 39],
+		yellow: [33, 39],
+		blue: [34, 39],
+		magenta: [35, 39],
+		cyan: [36, 39],
+		white: [37, 39],
+		blackBright: [90, 39],
+		gray: [90, 39],
+		grey: [90, 39],
+		redBright: [91, 39],
+		greenBright: [92, 39],
+		yellowBright: [93, 39],
+		blueBright: [94, 39],
+		magentaBright: [95, 39],
+		cyanBright: [96, 39],
+		whiteBright: [97, 39]
+	},
+	bgColor: {
+		bgBlack: [40, 49],
+		bgRed: [41, 49],
+		bgGreen: [42, 49],
+		bgYellow: [43, 49],
+		bgBlue: [44, 49],
+		bgMagenta: [45, 49],
+		bgCyan: [46, 49],
+		bgWhite: [47, 49],
+		bgBlackBright: [100, 49],
+		bgGray: [100, 49],
+		bgGrey: [100, 49],
+		bgRedBright: [101, 49],
+		bgGreenBright: [102, 49],
+		bgYellowBright: [103, 49],
+		bgBlueBright: [104, 49],
+		bgMagentaBright: [105, 49],
+		bgCyanBright: [106, 49],
+		bgWhiteBright: [107, 49]
+	}
+};
+const modifierNames = Object.keys(styles$1.modifier);
+const foregroundColorNames = Object.keys(styles$1.color);
+const backgroundColorNames = Object.keys(styles$1.bgColor);
+const colorNames = [...foregroundColorNames, ...backgroundColorNames];
+function assembleStyles() {
+	const codes = new Map();
+	for (const [groupName, group] of Object.entries(styles$1)) {
+		for (const [styleName, style] of Object.entries(group)) {
+			styles$1[styleName] = {
+				open: `\u001B[${style[0]}m`,
+				close: `\u001B[${style[1]}m`
+			};
+			group[styleName] = styles$1[styleName];
+			codes.set(style[0], style[1]);
+		}
+		Object.defineProperty(styles$1, groupName, {
+			value: group,
+			enumerable: false
+		});
+	}
+	Object.defineProperty(styles$1, "codes", {
+		value: codes,
+		enumerable: false
+	});
+	styles$1.color.close = "\x1B[39m";
+	styles$1.bgColor.close = "\x1B[49m";
+	styles$1.color.ansi = wrapAnsi16();
+	styles$1.color.ansi256 = wrapAnsi256();
+	styles$1.color.ansi16m = wrapAnsi16m();
+	styles$1.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
+	styles$1.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
+	styles$1.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+	Object.defineProperties(styles$1, {
+		rgbToAnsi256: {
+			value(red, green, blue) {
+				if (red === green && green === blue) {
+					if (red < 8) return 16;
+					if (red > 248) return 231;
+					return Math.round((red - 8) / 247 * 24) + 232;
+				}
+				return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
+			},
+			enumerable: false
+		},
+		hexToRgb: {
+			value(hex) {
+				const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+				if (!matches) return [
+					0,
+					0,
+					0
+				];
+				let [colorString] = matches;
+				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
+				const integer = Number.parseInt(colorString, 16);
+				return [
+					integer >> 16 & 255,
+					integer >> 8 & 255,
+					integer & 255
+				];
+			},
+			enumerable: false
+		},
+		hexToAnsi256: {
+			value: (hex) => styles$1.rgbToAnsi256(...styles$1.hexToRgb(hex)),
+			enumerable: false
+		},
+		ansi256ToAnsi: {
+			value(code) {
+				if (code < 8) return 30 + code;
+				if (code < 16) return 90 + (code - 8);
+				let red;
+				let green;
+				let blue;
+				if (code >= 232) {
+					red = ((code - 232) * 10 + 8) / 255;
+					green = red;
+					blue = red;
+				} else {
+					code -= 16;
+					const remainder = code % 36;
+					red = Math.floor(code / 36) / 5;
+					green = Math.floor(remainder / 6) / 5;
+					blue = remainder % 6 / 5;
+				}
+				const value = Math.max(red, green, blue) * 2;
+				if (value === 0) return 30;
+				let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
+				if (value === 2) result += 60;
+				return result;
+			},
+			enumerable: false
+		},
+		rgbToAnsi: {
+			value: (red, green, blue) => styles$1.ansi256ToAnsi(styles$1.rgbToAnsi256(red, green, blue)),
+			enumerable: false
+		},
+		hexToAnsi: {
+			value: (hex) => styles$1.ansi256ToAnsi(styles$1.hexToAnsi256(hex)),
+			enumerable: false
+		}
+	});
+	return styles$1;
+}
+const ansiStyles = assembleStyles();
+var ansi_styles_default = ansiStyles;
+
+//#endregion
+//#region node_modules/chalk/source/vendor/supports-color/index.js
+function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process$1.argv) {
+	const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf("--");
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+}
+const { env } = process$1;
+let flagForceColor;
+if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) flagForceColor = 0;
+else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) flagForceColor = 1;
+function envForceColor() {
+	if ("FORCE_COLOR" in env) {
+		if (env.FORCE_COLOR === "true") return 1;
+		if (env.FORCE_COLOR === "false") return 0;
+		return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+function translateLevel(level) {
+	if (level === 0) return false;
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3
+	};
+}
+function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
+	const noFlagForceColor = envForceColor();
+	if (noFlagForceColor !== void 0) flagForceColor = noFlagForceColor;
+	const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
+	if (forceColor === 0) return 0;
+	if (sniffFlags) {
+		if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) return 3;
+		if (hasFlag("color=256")) return 2;
+	}
+	if ("TF_BUILD" in env && "AGENT_NAME" in env) return 1;
+	if (haveStream && !streamIsTTY && forceColor === void 0) return 0;
+	const min = forceColor || 0;
+	if (env.TERM === "dumb") return min;
+	if (process$1.platform === "win32") {
+		const osRelease = os.release().split(".");
+		if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) return Number(osRelease[2]) >= 14931 ? 3 : 2;
+		return 1;
+	}
+	if ("CI" in env) {
+		if ([
+			"GITHUB_ACTIONS",
+			"GITEA_ACTIONS",
+			"CIRCLECI"
+		].some((key) => key in env)) return 3;
+		if ([
+			"TRAVIS",
+			"APPVEYOR",
+			"GITLAB_CI",
+			"BUILDKITE",
+			"DRONE"
+		].some((sign) => sign in env) || env.CI_NAME === "codeship") return 1;
+		return min;
+	}
+	if ("TEAMCITY_VERSION" in env) return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	if (env.COLORTERM === "truecolor") return 3;
+	if (env.TERM === "xterm-kitty") return 3;
+	if (env.TERM === "xterm-ghostty") return 3;
+	if (env.TERM === "wezterm") return 3;
+	if ("TERM_PROGRAM" in env) {
+		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+		switch (env.TERM_PROGRAM) {
+			case "iTerm.app": return version >= 3 ? 3 : 2;
+			case "Apple_Terminal": return 2;
+		}
+	}
+	if (/-256(color)?$/i.test(env.TERM)) return 2;
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) return 1;
+	if ("COLORTERM" in env) return 1;
+	return min;
+}
+function createSupportsColor(stream, options = {}) {
+	const level = _supportsColor(stream, {
+		streamIsTTY: stream && stream.isTTY,
+		...options
+	});
+	return translateLevel(level);
+}
+const supportsColor = {
+	stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
+	stderr: createSupportsColor({ isTTY: tty.isatty(2) })
+};
+var supports_color_default = supportsColor;
+
+//#endregion
+//#region node_modules/chalk/source/utilities.js
+function stringReplaceAll(string$1, substring, replacer) {
+	let index = string$1.indexOf(substring);
+	if (index === -1) return string$1;
+	const substringLength = substring.length;
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		returnValue += string$1.slice(endIndex, index) + substring + replacer;
+		endIndex = index + substringLength;
+		index = string$1.indexOf(substring, endIndex);
+	} while (index !== -1);
+	returnValue += string$1.slice(endIndex);
+	return returnValue;
+}
+function stringEncaseCRLFWithFirstIndex(string$1, prefix, postfix, index) {
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		const gotCR = string$1[index - 1] === "\r";
+		returnValue += string$1.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? "\r\n" : "\n") + postfix;
+		endIndex = index + 1;
+		index = string$1.indexOf("\n", endIndex);
+	} while (index !== -1);
+	returnValue += string$1.slice(endIndex);
+	return returnValue;
+}
+
+//#endregion
+//#region node_modules/chalk/source/index.js
+const { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
+const GENERATOR = Symbol("GENERATOR");
+const STYLER = Symbol("STYLER");
+const IS_EMPTY = Symbol("IS_EMPTY");
+const levelMapping = [
+	"ansi",
+	"ansi",
+	"ansi256",
+	"ansi16m"
+];
+const styles = Object.create(null);
+const applyOptions = (object$1, options = {}) => {
+	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) throw new Error("The `level` option should be an integer from 0 to 3");
+	const colorLevel = stdoutColor ? stdoutColor.level : 0;
+	object$1.level = options.level === void 0 ? colorLevel : options.level;
+};
+const chalkFactory = (options) => {
+	const chalk$1 = (...strings) => strings.join(" ");
+	applyOptions(chalk$1, options);
+	Object.setPrototypeOf(chalk$1, createChalk.prototype);
+	return chalk$1;
+};
+function createChalk(options) {
+	return chalkFactory(options);
+}
+Object.setPrototypeOf(createChalk.prototype, Function.prototype);
+for (const [styleName, style] of Object.entries(ansi_styles_default)) styles[styleName] = { get() {
+	const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
+	Object.defineProperty(this, styleName, { value: builder });
+	return builder;
+} };
+styles.visible = { get() {
+	const builder = createBuilder(this, this[STYLER], true);
+	Object.defineProperty(this, "visible", { value: builder });
+	return builder;
+} };
+const getModelAnsi = (model, level, type, ...arguments_) => {
+	if (model === "rgb") {
+		if (level === "ansi16m") return ansi_styles_default[type].ansi16m(...arguments_);
+		if (level === "ansi256") return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
+		return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
+	}
+	if (model === "hex") return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
+	return ansi_styles_default[type][model](...arguments_);
+};
+const usedModels = [
+	"rgb",
+	"hex",
+	"ansi256"
+];
+for (const model of usedModels) {
+	styles[model] = { get() {
+		const { level } = this;
+		return function(...arguments_) {
+			const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
+			return createBuilder(this, styler, this[IS_EMPTY]);
+		};
+	} };
+	const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
+	styles[bgModel] = { get() {
+		const { level } = this;
+		return function(...arguments_) {
+			const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
+			return createBuilder(this, styler, this[IS_EMPTY]);
+		};
+	} };
+}
+const proto = Object.defineProperties(() => {}, {
+	...styles,
+	level: {
+		enumerable: true,
+		get() {
+			return this[GENERATOR].level;
+		},
+		set(level) {
+			this[GENERATOR].level = level;
+		}
+	}
+});
+const createStyler = (open, close, parent) => {
+	let openAll;
+	let closeAll;
+	if (parent === void 0) {
+		openAll = open;
+		closeAll = close;
+	} else {
+		openAll = parent.openAll + open;
+		closeAll = close + parent.closeAll;
+	}
+	return {
+		open,
+		close,
+		openAll,
+		closeAll,
+		parent
+	};
+};
+const createBuilder = (self, _styler, _isEmpty) => {
+	const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
+	Object.setPrototypeOf(builder, proto);
+	builder[GENERATOR] = self;
+	builder[STYLER] = _styler;
+	builder[IS_EMPTY] = _isEmpty;
+	return builder;
+};
+const applyStyle = (self, string$1) => {
+	if (self.level <= 0 || !string$1) return self[IS_EMPTY] ? "" : string$1;
+	let styler = self[STYLER];
+	if (styler === void 0) return string$1;
+	const { openAll, closeAll } = styler;
+	if (string$1.includes("\x1B")) while (styler !== void 0) {
+		string$1 = stringReplaceAll(string$1, styler.close, styler.open);
+		styler = styler.parent;
+	}
+	const lfIndex = string$1.indexOf("\n");
+	if (lfIndex !== -1) string$1 = stringEncaseCRLFWithFirstIndex(string$1, closeAll, openAll, lfIndex);
+	return openAll + string$1 + closeAll;
+};
+Object.defineProperties(createChalk.prototype, styles);
+const chalk = createChalk();
+const chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
+var source_default = chalk;
+
+//#endregion
 //#region src/render/colors.ts
 const NAMED_COLORS = {
 	red: "#ff0000",
@@ -1414,7 +2319,7 @@ function resolveColor(color) {
 	return NAMED_COLORS[color.toLowerCase()] ?? color;
 }
 function colorize(text, fg, bg) {
-	let result = chalk;
+	let result = source_default;
 	if (fg) {
 		const resolved = resolveColor(fg);
 		result = result.hex(resolved.startsWith("#") ? resolved : "#808080");
@@ -1541,7 +2446,7 @@ function getTheme(name) {
 
 //#endregion
 //#region src/render/powerline.ts
-chalk.level = 3;
+source_default.level = 3;
 function renderPowerlineSegments(outputs, options) {
 	const theme = getTheme(options.theme);
 	const segments = [];
@@ -1551,11 +2456,11 @@ function renderPowerlineSegments(outputs, options) {
 		const style = theme.segments[i % theme.segments.length];
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
-		if (prevBg !== null) segments.push(chalk.hex(prevBg).bgHex(bg)(options.separator));
-		segments.push(chalk.hex(fg).bgHex(bg)(` ${output.text} `));
+		if (prevBg !== null) segments.push(source_default.hex(prevBg).bgHex(bg)(options.separator));
+		segments.push(source_default.hex(fg).bgHex(bg)(` ${output.text} `));
 		prevBg = bg;
 	}
-	if (prevBg !== null) segments.push(chalk.hex(prevBg)(options.separator));
+	if (prevBg !== null) segments.push(source_default.hex(prevBg)(options.separator));
 	return segments.join("");
 }
 
@@ -1756,6 +2661,9 @@ async function runCli(args) {
 		case "today":
 			await reportToday();
 			break;
+		case "setup":
+			runSetup();
+			break;
 		case "help":
 			printHelp();
 			break;
@@ -1786,21 +2694,43 @@ async function reportToday() {
 	}
 	console.log(`\nSessions analyzed: ${files.length} files`);
 }
+function runSetup() {
+	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
+	const claudeDir = resolve(homedir(), ".claude");
+	const settingsPath = resolve(claudeDir, "settings.json");
+	if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+	let settings = {};
+	if (existsSync(settingsPath)) try {
+		settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+	} catch {
+		console.error(`Warning: Could not parse ${settingsPath}, creating backup and starting fresh`);
+		writeFileSync(`${settingsPath}.bak`, readFileSync(settingsPath));
+		settings = {};
+	}
+	const command = `node ${scriptPath}`;
+	settings.statusLine = {
+		type: "command",
+		command
+	};
+	writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	console.log("gccusage setup complete!\n");
+	console.log(`  Settings: ${settingsPath}`);
+	console.log(`  Command:  ${command}\n`);
+	console.log("Restart Claude Code to activate the statusline.");
+}
 function printHelp() {
-	console.log(`gccusage - Claude Code usage analytics
+	console.log(`gccusage - Powerline statusline for Claude Code
 
 Usage:
   gccusage              Statusline mode (reads stdin JSON)
+  gccusage setup        Configure Claude Code to use gccusage
   gccusage today        Show today's usage report
   gccusage help         Show this help
 
-Statusline Installation:
-  Add to ~/.claude/settings.json:
-  {
-    "hooks": {
-      "StatusLine": [{ "type": "command", "command": "npx gccusage@latest" }]
-    }
-  }
+Quick Start:
+  git clone https://github.com/gapietro/gccusage.git
+  cd gccusage && npm link
+  gccusage setup
 
 Config: ~/.config/gccusage/settings.json`);
 }
