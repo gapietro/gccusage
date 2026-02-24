@@ -2627,31 +2627,27 @@ function isSeparatorOutput(output) {
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
-function checkCache(ttlMs) {
+function checkCache(ttlMs, sessionId) {
 	const cachePath = getCachePath();
 	try {
 		if (!fs.existsSync(cachePath)) return null;
 		const raw = fs.readFileSync(cachePath, "utf-8");
 		const entry = JSON.parse(raw);
+		if (sessionId && entry.sessionId && entry.sessionId !== sessionId) return null;
 		if (Date.now() - entry.timestamp > ttlMs) return null;
-		if (entry.pid && entry.pid !== process.pid) try {
-			process.kill(entry.pid, 0);
-		} catch {
-			return null;
-		}
 		return entry.output;
 	} catch {
 		return null;
 	}
 }
-function writeCache(output) {
+function writeCache(output, sessionId) {
 	const cachePath = getCachePath();
 	try {
 		ensureDir(path.dirname(cachePath));
 		const entry = {
 			output,
 			timestamp: Date.now(),
-			pid: process.pid
+			sessionId
 		};
 		fs.writeFileSync(cachePath, JSON.stringify(entry));
 	} catch {}
@@ -2748,18 +2744,19 @@ async function main() {
 		return;
 	}
 	const settings = loadSettings();
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3);
-	if (cached !== null) {
-		process.stdout.write(cached);
-		return;
-	}
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
 	if (!isTTY) raw = await readStdin();
 	const stdin = parseStatusJson(raw) ?? {};
+	const sessionId = stdin.session_id;
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId);
+	if (cached !== null) {
+		process.stdout.write(cached);
+		return;
+	}
 	const context = await buildRenderContext(stdin, settings);
 	const output = renderStatusline(context, settings);
-	writeCache(output);
+	writeCache(output, sessionId);
 	process.stdout.write(output);
 }
 main().catch(() => {

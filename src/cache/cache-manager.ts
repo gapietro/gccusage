@@ -5,32 +5,25 @@ import { getCacheDir, ensureDir } from "../utils/paths.js";
 interface CacheEntry {
   output: string;
   timestamp: number;
-  pid: number;
+  sessionId?: string;
 }
 
 function getCachePath(): string {
   return path.join(getCacheDir(), "statusline-cache.json");
 }
 
-export function checkCache(ttlMs: number): string | null {
+export function checkCache(ttlMs: number, sessionId?: string): string | null {
   const cachePath = getCachePath();
   try {
     if (!fs.existsSync(cachePath)) return null;
     const raw = fs.readFileSync(cachePath, "utf-8");
     const entry = JSON.parse(raw) as CacheEntry;
 
+    // Invalidate on session change
+    if (sessionId && entry.sessionId && entry.sessionId !== sessionId) return null;
+
     // TTL check
     if (Date.now() - entry.timestamp > ttlMs) return null;
-
-    // PID deadlock protection: if the PID that wrote is dead, invalidate
-    if (entry.pid && entry.pid !== process.pid) {
-      try {
-        process.kill(entry.pid, 0); // check if alive
-      } catch {
-        // process is dead, cache might be stale
-        return null;
-      }
-    }
 
     return entry.output;
   } catch {
@@ -38,14 +31,14 @@ export function checkCache(ttlMs: number): string | null {
   }
 }
 
-export function writeCache(output: string): void {
+export function writeCache(output: string, sessionId?: string): void {
   const cachePath = getCachePath();
   try {
     ensureDir(path.dirname(cachePath));
     const entry: CacheEntry = {
       output,
       timestamp: Date.now(),
-      pid: process.pid,
+      sessionId,
     };
     fs.writeFileSync(cachePath, JSON.stringify(entry));
   } catch {

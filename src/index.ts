@@ -16,13 +16,6 @@ async function main(): Promise<void> {
   // Statusline mode
   const settings = loadSettings();
 
-  // Check cache first (hot path)
-  const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5000);
-  if (cached !== null) {
-    process.stdout.write(cached);
-    return;
-  }
-
   // Read stdin
   const isTTY = process.stdin.isTTY;
   let raw = "";
@@ -31,10 +24,19 @@ async function main(): Promise<void> {
   }
 
   const stdin = parseStatusJson(raw) ?? {};
+  const sessionId = stdin.session_id;
+
+  // Check cache first (hot path)
+  const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5000, sessionId);
+  if (cached !== null) {
+    process.stdout.write(cached);
+    return;
+  }
+
   const context = await buildRenderContext(stdin, settings);
   const output = renderStatusline(context, settings);
 
-  writeCache(output);
+  writeCache(output, sessionId);
   process.stdout.write(output);
 }
 
