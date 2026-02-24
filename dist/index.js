@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import * as v$3 from "valibot";
 import * as v$2 from "valibot";
 import * as v$1 from "valibot";

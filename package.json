@@ -1,7 +1,7 @@
 {
   "name": "gccusage",
   "version": "0.1.0",
-  "description": "Claude Code statusline tool — usage analytics, pricing, burn rate",
+  "description": "Powerline-style statusline for Claude Code — model info, costs, context usage, git status, and more",
   "type": "module",
   "bin": {
     "gccusage": "./dist/index.js"
@@ -9,11 +9,34 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsdown",
+    "postbuild": "node -e \"const fs=require('fs');const f='dist/index.js';const c=fs.readFileSync(f,'utf8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env node\\n'+c)\"",
+    "prepublishOnly": "npm run build",
     "dev": "bun run src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "statusline",
+    "powerline",
+    "terminal",
+    "cli",
+    "anthropic",
+    "ai",
+    "usage",
+    "tokens"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gapietro/gccusage.git"
+  },
+  "homepage": "https://github.com/gapietro/gccusage#readme",
+  "bugs": {
+    "url": "https://github.com/gapietro/gccusage/issues"
+  },
+  "author": "gapietro",
   "dependencies": {
     "chalk": "^5.4.1",
     "valibot": "^1.0.0"
@@ -25,7 +48,9 @@
     "vitest": "^3.0.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "license": "MIT",
   "engines": {
