@@ -27,9 +27,13 @@ export const contextPercentWidget: Widget = {
     let windowSize: number | null = null;
 
     if (typeof cw === "object" && cw !== null && cw !== undefined) {
-      // Claude Code format: { used_percentage, context_window_size, current_usage }
+      // Claude Code format: { remaining_percentage, used_percentage, context_window_size, current_usage }
       windowSize = cw.context_window_size ?? null;
-      if (cw.used_percentage != null) {
+      if (cw.remaining_percentage != null) {
+        // remaining_percentage accounts for all tokens (input, output, system, etc.)
+        // Convert to "used" ratio for display
+        ratio = (100 - cw.remaining_percentage) / 100;
+      } else if (cw.used_percentage != null) {
         ratio = cw.used_percentage / 100;
       } else if (cw.current_usage && windowSize && windowSize > 0) {
         const u = cw.current_usage;

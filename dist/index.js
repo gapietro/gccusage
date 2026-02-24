@@ -844,7 +844,8 @@ const contextPercentWidget = { render(context, config) {
 	let windowSize = null;
 	if (typeof cw === "object" && cw !== null && cw !== void 0) {
 		windowSize = cw.context_window_size ?? null;
-		if (cw.used_percentage != null) ratio = cw.used_percentage / 100;
+		if (cw.remaining_percentage != null) ratio = (100 - cw.remaining_percentage) / 100;
+		else if (cw.used_percentage != null) ratio = cw.used_percentage / 100;
 		else if (cw.current_usage && windowSize && windowSize > 0) {
 			const u = cw.current_usage;
 			const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
