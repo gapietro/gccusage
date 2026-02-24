@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
