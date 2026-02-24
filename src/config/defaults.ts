@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: Settings = {
       widgets: [
         { type: "model", fg: "#ffffff", bg: "#1a5fb4" },
         { type: "session-cost", fg: "#ffffff", bg: "#26a269" },
-        { type: "context-percent", fg: "#ffffff", bg: "#1a5fb4" },
+        { type: "context-percent", fg: "#ffffff", bg: "#0d7377" },
         { type: "burn-rate", fg: "#ffffff", bg: "#a67c00" },
         { type: "cache-hit-rate", fg: "#ffffff", bg: "#1a5fb4" },
       ],
@@ -16,9 +16,9 @@ export const DEFAULT_SETTINGS: Settings = {
       widgets: [
         { type: "git-branch", fg: "#ffffff", bg: "#613583" },
         { type: "git-changes", fg: "#ffffff", bg: "#613583" },
-        { type: "lines-changed", fg: "#ffffff", bg: "#613583" },
+        { type: "lines-changed", fg: "#ffffff", bg: "#0d7377" },
         { type: "today-spend", fg: "#ffffff", bg: "#26a269" },
-        { type: "api-latency", fg: "#ffffff", bg: "#a67c00" },
+        { type: "api-latency", fg: "#ffffff", bg: "#555555" },
         { type: "vim-mode" },
       ],
       flex: "left",

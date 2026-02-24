@@ -155,7 +155,7 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "context-percent",
 				fg: "#ffffff",
-				bg: "#1a5fb4"
+				bg: "#0d7377"
 			},
 			{
 				type: "burn-rate",
@@ -184,7 +184,7 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "lines-changed",
 				fg: "#ffffff",
-				bg: "#613583"
+				bg: "#0d7377"
 			},
 			{
 				type: "today-spend",
@@ -194,7 +194,7 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "api-latency",
 				fg: "#ffffff",
-				bg: "#a67c00"
+				bg: "#555555"
 			},
 			{ type: "vim-mode" }
 		],
