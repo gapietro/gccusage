@@ -20,6 +20,7 @@ import { cacheHitRateWidget } from "./cache-hit-rate.js";
 import { linesChangedWidget } from "./lines-changed.js";
 import { vimModeWidget } from "./vim-mode.js";
 import { apiLatencyWidget } from "./api-latency.js";
+import { tokenBreakdownWidget } from "./token-breakdown.js";
 
 const WIDGET_MAP: Record<string, Widget> = {
   model: modelWidget,
@@ -43,6 +44,7 @@ const WIDGET_MAP: Record<string, Widget> = {
   "lines-changed": linesChangedWidget,
   "vim-mode": vimModeWidget,
   "api-latency": apiLatencyWidget,
+  "token-breakdown": tokenBreakdownWidget,
 };
 
 export function getWidget(type: string): Widget | null {

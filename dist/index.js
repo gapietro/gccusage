@@ -1223,6 +1223,22 @@ const apiLatencyWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/token-breakdown.ts
+const tokenBreakdownWidget = { render(context, config) {
+	const cw = context.stdin.context_window;
+	if (!cw || typeof cw !== "object") return null;
+	const input = cw.total_input_tokens ?? 0;
+	const output = cw.total_output_tokens ?? 0;
+	if (input === 0 && output === 0) return null;
+	const text = `In:${formatTokens(input)} Out:${formatTokens(output)}`;
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
@@ -1245,7 +1261,8 @@ const WIDGET_MAP = {
 	"cache-hit-rate": cacheHitRateWidget,
 	"lines-changed": linesChangedWidget,
 	"vim-mode": vimModeWidget,
-	"api-latency": apiLatencyWidget
+	"api-latency": apiLatencyWidget,
+	"token-breakdown": tokenBreakdownWidget
 };
 function getWidget(type) {
 	return WIDGET_MAP[type] ?? null;
