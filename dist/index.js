@@ -160,7 +160,7 @@ const DEFAULT_SETTINGS = {
 			{
 				type: "burn-rate",
 				fg: "#ffffff",
-				bg: "#a67c00"
+				bg: "#555555"
 			},
 			{
 				type: "cache-hit-rate",

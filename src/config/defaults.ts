@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS: Settings = {
         { type: "model", fg: "#ffffff", bg: "#1a5fb4" },
         { type: "session-cost", fg: "#ffffff", bg: "#26a269" },
         { type: "context-percent", fg: "#ffffff", bg: "#0d7377" },
-        { type: "burn-rate", fg: "#ffffff", bg: "#a67c00" },
+        { type: "burn-rate", fg: "#ffffff", bg: "#555555" },
         { type: "cache-hit-rate", fg: "#ffffff", bg: "#1a5fb4" },
       ],
       flex: "left",
