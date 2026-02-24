@@ -1253,6 +1253,37 @@ const sessionTimerWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/compact-countdown.ts
+const AUTOCOMPACT_BUFFER = .165;
+const compactCountdownWidget = { render(context, config) {
+	const cw = context.stdin.context_window;
+	if (!cw || typeof cw !== "object") return null;
+	const windowSize = cw.context_window_size;
+	if (!windowSize) return null;
+	const totalInput = cw.total_input_tokens ?? 0;
+	const totalOutput = cw.total_output_tokens ?? 0;
+	const usedTokens = totalInput + totalOutput;
+	if (usedTokens === 0) return null;
+	const compactThreshold = windowSize * (1 - AUTOCOMPACT_BUFFER);
+	const remaining = Math.max(0, compactThreshold - usedTokens);
+	if (remaining <= 0) return {
+		text: "Compact imminent!",
+		fg: "#ffffff",
+		bg: "#c01c28"
+	};
+	const ratio = remaining / compactThreshold;
+	let bg = config.bg;
+	if (ratio < .1) bg = "#c01c28";
+	else if (ratio < .25) bg = "#a67c00";
+	const text = `~${formatTokens(remaining)} left`;
+	return {
+		text,
+		fg: config.fg,
+		bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
@@ -1277,7 +1308,8 @@ const WIDGET_MAP = {
 	"vim-mode": vimModeWidget,
 	"api-latency": apiLatencyWidget,
 	"token-breakdown": tokenBreakdownWidget,
-	"session-timer": sessionTimerWidget
+	"session-timer": sessionTimerWidget,
+	"compact-countdown": compactCountdownWidget
 };
 function getWidget(type) {
 	return WIDGET_MAP[type] ?? null;

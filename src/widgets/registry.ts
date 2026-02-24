@@ -22,6 +22,7 @@ import { vimModeWidget } from "./vim-mode.js";
 import { apiLatencyWidget } from "./api-latency.js";
 import { tokenBreakdownWidget } from "./token-breakdown.js";
 import { sessionTimerWidget } from "./session-timer.js";
+import { compactCountdownWidget } from "./compact-countdown.js";
 
 const WIDGET_MAP: Record<string, Widget> = {
   model: modelWidget,
@@ -47,6 +48,7 @@ const WIDGET_MAP: Record<string, Widget> = {
   "api-latency": apiLatencyWidget,
   "token-breakdown": tokenBreakdownWidget,
   "session-timer": sessionTimerWidget,
+  "compact-countdown": compactCountdownWidget,
 };
 
 export function getWidget(type: string): Widget | null {
