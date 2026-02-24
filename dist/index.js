@@ -1111,13 +1111,28 @@ const customTextWidget = { render(_context, config) {
 
 //#endregion
 //#region src/widgets/custom-command.ts
+const commandCache = new Map();
+const DEFAULT_TTL_MS = 3e4;
+const DEFAULT_TIMEOUT_MS = 2e3;
 const customCommandWidget = { render(context, config) {
 	const command = config.command;
 	if (!command) return null;
+	const ttl = config.maxWidth ?? DEFAULT_TTL_MS;
+	const now = Date.now();
+	const cached = commandCache.get(command);
+	if (cached && now - cached.timestamp < ttl) {
+		const label = config.label;
+		const text = label ? `${label} ${cached.output}` : cached.output;
+		return {
+			text,
+			fg: config.fg,
+			bg: config.bg
+		};
+	}
 	try {
-		const output = execSync(command, {
+		const raw = execSync(command, {
 			encoding: "utf-8",
-			timeout: 2e3,
+			timeout: DEFAULT_TIMEOUT_MS,
 			cwd: context.stdin.cwd,
 			stdio: [
 				"pipe",
@@ -1125,14 +1140,29 @@ const customCommandWidget = { render(context, config) {
 				"pipe"
 			]
 		}).trim();
-		if (!output) return null;
-		const text = output.split("\n")[0] ?? "";
+		if (!raw) return null;
+		const output = raw.split("\n")[0] ?? "";
+		commandCache.set(command, {
+			output,
+			timestamp: now
+		});
+		const label = config.label;
+		const text = label ? `${label} ${output}` : output;
 		return {
 			text,
 			fg: config.fg,
 			bg: config.bg
 		};
 	} catch {
+		if (cached) {
+			const label = config.label;
+			const text = label ? `${label} ${cached.output}` : cached.output;
+			return {
+				text,
+				fg: config.fg,
+				bg: config.bg
+			};
+		}
 		return null;
 	}
 } };
