@@ -7,15 +7,37 @@ A powerline-style statusline for [Claude Code](https://claude.com/claude-code). 
  main ▶ +307 -43 ▶ Today: $14.50 ▶ API: 9m 55s ▶
 ```
 
+## Prerequisites
+
+- **Node.js 18+** — check with `node -v`
+- **Claude Code** installed and working
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/gapietro/gccusage.git
-cd gccusage && npm link
+cd gccusage
+npm install && npm link
 gccusage setup
 ```
 
-That's it — restart Claude Code and you'll see the statusline.
+Restart Claude Code and you'll see the statusline.
+
+### Verify it works
+
+```bash
+echo '{}' | gccusage
+```
+
+You should see a rendered statusline (mostly empty, but colored). If that works, restart Claude Code — the full statusline will appear with live data.
+
+### Check today's spend
+
+```bash
+gccusage today
+```
+
+Works standalone — no need to be inside Claude Code.
 
 ### Alternative: global install from GitHub
 
@@ -23,6 +45,14 @@ That's it — restart Claude Code and you'll see the statusline.
 npm install -g github:gapietro/gccusage
 gccusage setup
 ```
+
+### Deploy to another machine
+
+1. Install Node.js 18+ (e.g. `brew install node` on macOS)
+2. Clone the repo: `git clone https://github.com/gapietro/gccusage.git`
+3. `cd gccusage && npm install && npm link`
+4. `gccusage setup`
+5. Restart Claude Code
 
 ### What `gccusage setup` does
 
@@ -182,6 +212,12 @@ npm run test:watch    # Watch mode
 npm run build         # Build dist/index.js
 npm run typecheck     # Type check
 ```
+
+## Uninstall
+
+1. Remove the `statusLine` key from `~/.claude/settings.json`
+2. `npm unlink -g gccusage` (or delete the cloned repo)
+3. Optionally delete config and cache: `rm -rf ~/.config/gccusage ~/.cache/gccusage`
 
 ## License
 
