@@ -29,9 +29,21 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   };
 }
 
+function makeSettings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    lines: [],
+    powerline: { enabled: false, theme: "default", separator: "▶", separatorThin: "│" },
+    compact: { mode: "auto", threshold: 80 },
+    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
+    cache: { statuslineTtlMs: 5000, pricingTtlMs: 86400000 },
+    costSource: "auto",
+    ...overrides,
+  };
+}
+
 describe("renderStatusline", () => {
   it("renders a simple single-line config", () => {
-    const settings: Settings = {
+    const settings = makeSettings({
       lines: [
         {
           widgets: [
@@ -42,8 +54,7 @@ describe("renderStatusline", () => {
           flex: "left",
         },
       ],
-      costSource: "auto",
-    };
+    });
 
     const output = renderStatusline(makeContext(), settings);
     const plain = stripAnsi(output);
@@ -53,22 +64,21 @@ describe("renderStatusline", () => {
   });
 
   it("skips lines with no output", () => {
-    const settings: Settings = {
+    const settings = makeSettings({
       lines: [
         {
           widgets: [{ type: "block-timer" }],
           flex: "left",
         },
       ],
-      costSource: "auto",
-    };
+    });
 
     const output = renderStatusline(makeContext(), settings);
     expect(output).toBe("");
   });
 
   it("cleans leading/trailing separators", () => {
-    const settings: Settings = {
+    const settings = makeSettings({
       lines: [
         {
           widgets: [
@@ -79,8 +89,7 @@ describe("renderStatusline", () => {
           flex: "left",
         },
       ],
-      costSource: "auto",
-    };
+    });
 
     const output = renderStatusline(makeContext(), settings);
     const plain = stripAnsi(output);
@@ -89,7 +98,7 @@ describe("renderStatusline", () => {
   });
 
   it("compact mode collapses to single line with priority ordering", () => {
-    const settings: Settings = {
+    const settings = makeSettings({
       lines: [
         {
           widgets: [
@@ -107,8 +116,7 @@ describe("renderStatusline", () => {
       ],
       compact: { mode: "always", threshold: 80 },
       powerline: { enabled: true, theme: "default", separator: "\u25B6", separatorThin: "\u2502" },
-      costSource: "auto",
-    };
+    });
 
     const output = renderStatusline(makeContext(), settings);
     // Should be a single line (no newlines)
@@ -119,7 +127,7 @@ describe("renderStatusline", () => {
   });
 
   it("compact auto mode triggers on narrow terminal", () => {
-    const settings: Settings = {
+    const settings = makeSettings({
       lines: [
         {
           widgets: [
@@ -136,8 +144,7 @@ describe("renderStatusline", () => {
         },
       ],
       compact: { mode: "auto", threshold: 80 },
-      costSource: "auto",
-    };
+    });
 
     // Wide terminal — should be multi-line
     const wide = renderStatusline(makeContext({ terminalWidth: 120 }), settings);

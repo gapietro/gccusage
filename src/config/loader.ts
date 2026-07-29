@@ -39,22 +39,22 @@ function mergeSettings(
   return {
     lines: validated.lines ?? defaults.lines,
     powerline: mergeIfPresent(
-      defaults.powerline ?? {},
+      defaults.powerline,
       raw["powerline"] as Record<string, unknown> | undefined,
       validated.powerline,
     ),
     compact: mergeIfPresent(
-      defaults.compact ?? {},
+      defaults.compact,
       raw["compact"] as Record<string, unknown> | undefined,
       validated.compact,
     ),
     alerts: mergeIfPresent(
-      defaults.alerts ?? {},
+      defaults.alerts,
       raw["alerts"] as Record<string, unknown> | undefined,
       validated.alerts,
     ),
     cache: mergeIfPresent(
-      defaults.cache ?? {},
+      defaults.cache,
       raw["cache"] as Record<string, unknown> | undefined,
       validated.cache,
     ),
