@@ -768,10 +768,10 @@ function mergeIfPresent(defaults, raw, validated) {
 function mergeSettings(defaults, raw, validated) {
 	return {
 		lines: validated.lines ?? defaults.lines,
-		powerline: mergeIfPresent(defaults.powerline ?? {}, raw["powerline"], validated.powerline),
-		compact: mergeIfPresent(defaults.compact ?? {}, raw["compact"], validated.compact),
-		alerts: mergeIfPresent(defaults.alerts ?? {}, raw["alerts"], validated.alerts),
-		cache: mergeIfPresent(defaults.cache ?? {}, raw["cache"], validated.cache),
+		powerline: mergeIfPresent(defaults.powerline, raw["powerline"], validated.powerline),
+		compact: mergeIfPresent(defaults.compact, raw["compact"], validated.compact),
+		alerts: mergeIfPresent(defaults.alerts, raw["alerts"], validated.alerts),
+		cache: mergeIfPresent(defaults.cache, raw["cache"], validated.cache),
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
 }
@@ -814,6 +814,7 @@ function findJsonlFiles(dir) {
 	}
 }
 function findSessionJsonlFiles(sessionId) {
+	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
 	if (!fs$6.existsSync(projectsDir)) return [];
 	const files = [];
@@ -823,8 +824,7 @@ function findSessionJsonlFiles(sessionId) {
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			if (sessionId) files.push(...jsonlFiles.filter((f) => path$5.basename(f, ".jsonl") === sessionId));
-			else files.push(...jsonlFiles);
+			files.push(...jsonlFiles.filter((f) => path$5.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
@@ -875,11 +875,13 @@ function parseJsonlContent(content) {
 function normalizeEntry(raw) {
 	const entry = {};
 	if (typeof raw["type"] === "string") entry.type = raw["type"];
-	if (typeof raw["model"] === "string") entry.model = raw["model"];
 	if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
 	if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
 	if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
-	const usage = raw["usage"];
+	const message = typeof raw["message"] === "object" && raw["message"] !== null ? raw["message"] : void 0;
+	const model = message?.["model"] ?? raw["model"];
+	const usage = message?.["usage"] ?? raw["usage"];
+	if (typeof model === "string") entry.model = model;
 	if (usage && typeof usage === "object") entry.usage = {
 		input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
 		output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
@@ -887,6 +889,17 @@ function normalizeEntry(raw) {
 		cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
 	};
 	return entry;
+}
+function isEntryFromToday(entry, now = new Date()) {
+	if (!entry.timestamp) return false;
+	const ts = new Date(entry.timestamp).getTime();
+	if (Number.isNaN(ts)) return false;
+	const midnight = new Date(now);
+	midnight.setHours(0, 0, 0, 0);
+	return ts >= midnight.getTime();
+}
+function filterTodayEntries(entries, now = new Date()) {
+	return entries.filter((e) => isEntryFromToday(e, now));
 }
 
 //#endregion
@@ -1155,26 +1168,37 @@ function visibleLength(str) {
 function getDailyCostPath() {
 	return path$2.join(getCacheDir(), "daily-costs.json");
 }
-function todayDateStr() {
-	const now = new Date();
-	const y = now.getFullYear();
-	const m = String(now.getMonth() + 1).padStart(2, "0");
-	const d = String(now.getDate()).padStart(2, "0");
-	return `${y}-${m}-${d}`;
+function dateStr(d) {
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
 }
-function readDailyCostFile() {
+const STALE_SESSION_MS = 48 * 3600 * 1e3;
+function readDailyCostFile(now) {
 	const filePath = getDailyCostPath();
+	const today = dateStr(now);
 	try {
 		const raw = fs$2.readFileSync(filePath, "utf-8");
 		const data = JSON.parse(raw);
-		if (data.date !== todayDateStr()) return {
-			date: todayDateStr(),
-			sessions: []
+		const sessions = (data.sessions ?? []).map((s) => ({
+			...s,
+			baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0
+		}));
+		if (data.date !== today) return {
+			date: today,
+			sessions: sessions.filter((s) => now.getTime() - s.updatedAt < STALE_SESSION_MS).map((s) => ({
+				...s,
+				baselineUsd: s.costUsd
+			}))
 		};
-		return data;
+		return {
+			date: today,
+			sessions
+		};
 	} catch {
 		return {
-			date: todayDateStr(),
+			date: today,
 			sessions: []
 		};
 	}
@@ -1185,24 +1209,27 @@ function writeDailyCostFile(data) {
 	fs$2.writeFileSync(filePath, JSON.stringify(data), "utf-8");
 }
 /**
-* Record the current session's cost and return today's total across all sessions.
+* Record the current session's cumulative cost and return today's total
+* across all sessions (spend since local midnight only).
 */
-function trackDailyCost(sessionId, costUsd) {
-	const data = readDailyCostFile();
+function trackDailyCost(sessionId, costUsd, now = new Date()) {
+	const data = readDailyCostFile(now);
 	if (sessionId) {
 		const existing = data.sessions.find((s) => s.sessionId === sessionId);
 		if (existing) {
 			existing.costUsd = costUsd;
-			existing.updatedAt = Date.now();
+			if (costUsd < existing.baselineUsd) existing.baselineUsd = 0;
+			existing.updatedAt = now.getTime();
 		} else data.sessions.push({
 			sessionId,
 			costUsd,
-			updatedAt: Date.now()
+			baselineUsd: 0,
+			updatedAt: now.getTime()
 		});
 		writeDailyCostFile(data);
 	}
 	let total = 0;
-	for (const s of data.sessions) total += s.costUsd;
+	for (const s of data.sessions) total += Math.max(0, s.costUsd - s.baselineUsd);
 	return total;
 }
 
@@ -1259,7 +1286,7 @@ async function buildRenderContext(stdin, settings) {
 	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
 	const todayFiles = findTodayJsonlFiles();
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-	const todayEntries = todayFiles.flatMap(parseJsonlFile);
+	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(sessionEntries, todayEntries);
 	const pricing = await fetchPricing(settings.cache?.pricingTtlMs ?? 864e5);
 	const costByModel = calculateCostByModel(metrics.byModel, pricing);
@@ -1271,7 +1298,8 @@ async function buildRenderContext(stdin, settings) {
 	if (settings.costSource === "stdin" && stdinCost !== void 0) sessionCostUsd = stdinCost;
 	else if (settings.costSource === "calculated") sessionCostUsd = calculatedSessionCost;
 	else sessionCostUsd = stdinCost ?? calculatedSessionCost;
-	const todayCostUsd = trackDailyCost(stdin.session_id, sessionCostUsd);
+	const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd);
+	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -2633,7 +2661,7 @@ function checkCache(ttlMs, sessionId) {
 		if (!fs.existsSync(cachePath)) return null;
 		const raw = fs.readFileSync(cachePath, "utf-8");
 		const entry = JSON.parse(raw);
-		if (sessionId && entry.sessionId && entry.sessionId !== sessionId) return null;
+		if (entry.sessionId !== sessionId) return null;
 		if (Date.now() - entry.timestamp > ttlMs) return null;
 		return entry.output;
 	} catch {
@@ -2675,7 +2703,7 @@ async function runCli(args) {
 }
 async function reportToday() {
 	const files = findTodayJsonlFiles();
-	const entries = files.flatMap(parseJsonlFile);
+	const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(entries, entries);
 	const pricing = await fetchPricing(864e5);
 	const costByModel = calculateCostByModel(metrics.byModel, pricing);
@@ -2694,6 +2722,13 @@ async function reportToday() {
 	}
 	console.log(`\nSessions analyzed: ${files.length} files`);
 }
+/** POSIX shell single-quote escaping: ' becomes '\'' */
+function shellQuote(p) {
+	return `'${p.replaceAll("'", `'\\''`)}'`;
+}
+function buildStatusLineCommand(execPath, scriptPath) {
+	return `${shellQuote(execPath)} ${shellQuote(scriptPath)}`;
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
 	const claudeDir = resolve(homedir(), ".claude");
@@ -2707,7 +2742,7 @@ function runSetup() {
 		writeFileSync(`${settingsPath}.bak`, readFileSync(settingsPath));
 		settings = {};
 	}
-	const command = `node ${scriptPath}`;
+	const command = buildStatusLineCommand(process.execPath, scriptPath);
 	settings.statusLine = {
 		type: "command",
 		command
