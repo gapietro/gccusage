@@ -60,6 +60,15 @@ async function reportToday(): Promise<void> {
   console.log(`\nSessions analyzed: ${files.length} files`);
 }
 
+/** POSIX shell single-quote escaping: ' becomes '\'' */
+export function shellQuote(p: string): string {
+  return `'${p.replaceAll("'", `'\\''`)}'`;
+}
+
+export function buildStatusLineCommand(execPath: string, scriptPath: string): string {
+  return `${shellQuote(execPath)} ${shellQuote(scriptPath)}`;
+}
+
 function runSetup(): void {
   // Resolve the absolute path to this script's dist/index.js
   const scriptPath = resolve(
@@ -90,7 +99,7 @@ function runSetup(): void {
   }
 
   // Merge statusLine config without overwriting other settings
-  const command = `node ${scriptPath}`;
+  const command = buildStatusLineCommand(process.execPath, scriptPath);
   settings.statusLine = { type: "command", command };
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
