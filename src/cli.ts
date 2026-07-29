@@ -1,5 +1,5 @@
 import { findTodayJsonlFiles, findSessionJsonlFiles } from "./utils/paths.js";
-import { parseJsonlFile } from "./data/jsonl-reader.js";
+import { parseJsonlFile, filterTodayEntries } from "./data/jsonl-reader.js";
 import { aggregateTokens } from "./data/token-aggregator.js";
 import { fetchPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
@@ -31,7 +31,7 @@ export async function runCli(args: string[]): Promise<void> {
 
 async function reportToday(): Promise<void> {
   const files = findTodayJsonlFiles();
-  const entries = files.flatMap(parseJsonlFile);
+  const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
   const metrics = aggregateTokens(entries, entries);
   const pricing = await fetchPricing(86400000);
   const costByModel = calculateCostByModel(metrics.byModel, pricing);

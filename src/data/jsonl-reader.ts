@@ -76,3 +76,16 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
 
   return entry;
 }
+
+export function isEntryFromToday(entry: JsonlEntry, now: Date = new Date()): boolean {
+  if (!entry.timestamp) return false;
+  const ts = new Date(entry.timestamp).getTime();
+  if (Number.isNaN(ts)) return false;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return ts >= midnight.getTime();
+}
+
+export function filterTodayEntries(entries: JsonlEntry[], now: Date = new Date()): JsonlEntry[] {
+  return entries.filter((e) => isEntryFromToday(e, now));
+}

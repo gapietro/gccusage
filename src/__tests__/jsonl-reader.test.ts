@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseJsonlContent } from "../data/jsonl-reader.js";
+import { parseJsonlContent, filterTodayEntries } from "../data/jsonl-reader.js";
 
 describe("parseJsonlContent", () => {
   it("parses valid lines", () => {
@@ -62,5 +62,33 @@ describe("parseJsonlContent", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.model).toBeUndefined();
     expect(entries[0]!.usage).toBeUndefined();
+  });
+});
+
+describe("filterTodayEntries", () => {
+  it("keeps only entries stamped on or after local midnight", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0); // 2026-07-29 10:00 local
+    const midnight = new Date(2026, 6, 29, 0, 0, 0);
+    const yesterday = new Date(2026, 6, 28, 23, 59, 0);
+
+    const entries = [
+      { timestamp: yesterday.toISOString(), usage: { input_tokens: 1 } },
+      { timestamp: midnight.toISOString(), usage: { input_tokens: 2 } },
+      { timestamp: now.toISOString(), usage: { input_tokens: 3 } },
+    ];
+
+    const filtered = filterTodayEntries(entries, now);
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0]!.usage?.input_tokens).toBe(2);
+    expect(filtered[1]!.usage?.input_tokens).toBe(3);
+  });
+
+  it("drops entries without a parseable timestamp", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const entries = [
+      { usage: { input_tokens: 1 } },
+      { timestamp: "not-a-date", usage: { input_tokens: 2 } },
+    ];
+    expect(filterTodayEntries(entries, now)).toHaveLength(0);
   });
 });

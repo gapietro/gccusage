@@ -2,7 +2,7 @@ import type { StatusJson } from "../types/status-json.js";
 import type { Settings } from "../config/schema.js";
 import type { RenderContext } from "../types/render-context.js";
 import { findSessionJsonlFiles, findTodayJsonlFiles } from "../utils/paths.js";
-import { parseJsonlFile } from "./jsonl-reader.js";
+import { parseJsonlFile, filterTodayEntries } from "./jsonl-reader.js";
 import { aggregateTokens, getFirstTimestamp } from "./token-aggregator.js";
 import { detectBlock } from "./block-tracker.js";
 import { fetchPricing } from "./pricing-fetcher.js";
@@ -48,7 +48,7 @@ export async function buildRenderContext(
   const todayFiles = findTodayJsonlFiles();
 
   const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-  const todayEntries = todayFiles.flatMap(parseJsonlFile);
+  const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 
   // Aggregate tokens
   const metrics = aggregateTokens(sessionEntries, todayEntries);
@@ -77,8 +77,11 @@ export async function buildRenderContext(
     sessionCostUsd = stdinCost ?? calculatedSessionCost;
   }
 
-  // Today's cost: track per-session costs in our own daily file
-  const todayCostUsd = trackDailyCost(stdin.session_id, sessionCostUsd);
+  // Today's cost: JSONL-calculated when the user forces calculated costs,
+  // otherwise our per-session daily tracker (stdin-based).
+  const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd);
+  const todayCostUsd =
+    settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
