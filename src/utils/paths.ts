@@ -36,6 +36,10 @@ export function findJsonlFiles(dir: string): string[] {
 }
 
 export function findSessionJsonlFiles(sessionId?: string): string[] {
+  // Fail closed: without a session id we would otherwise scan every
+  // transcript across every project.
+  if (!sessionId) return [];
+
   const projectsDir = getProjectsDir();
   if (!fs.existsSync(projectsDir)) return [];
 
@@ -46,11 +50,7 @@ export function findSessionJsonlFiles(sessionId?: string): string[] {
       const stat = fs.statSync(fullPath);
       if (!stat.isDirectory()) continue;
       const jsonlFiles = findJsonlFiles(fullPath);
-      if (sessionId) {
-        files.push(...jsonlFiles.filter((f) => path.basename(f, ".jsonl") === sessionId));
-      } else {
-        files.push(...jsonlFiles);
-      }
+      files.push(...jsonlFiles.filter((f) => path.basename(f, ".jsonl") === sessionId));
     }
   } catch {
     // ignore
