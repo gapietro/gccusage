@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
-import { layoutPowerline } from "../render/powerline.js";
+import { layoutPowerline, normalizeColor } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi } from "../utils/terminal.js";
@@ -212,5 +212,83 @@ describe("layoutPowerline", () => {
     const pieces = layoutPowerline([{ text: "a" }, { text: "b" }], OPTIONS);
     expect(pieces[0]).toEqual({ text: " a ", fg: "#ffffff", bg: "#5f5faf" });
     expect(pieces[2]).toEqual({ text: " b ", fg: "#ffffff", bg: "#444444" });
+  });
+
+  it("draws the thin separator for #fff vs #ffffff (same paint, different strings)", () => {
+    // chalk.bgHex("#fff") and chalk.bgHex("#ffffff") both paint
+    // 48;2;255;255;255 — a naive string/case compare misses this. Issue #36.
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#000000", bg: "#fff" },
+        { text: "b", fg: "#000000", bg: "#ffffff" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("draws the thin separator for #ABC vs #aabbcc (3-digit hex expansion)", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#000000", bg: "#ABC" },
+        { text: "b", fg: "#000000", bg: "#aabbcc" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("draws the thin separator for two different named colors (both paint black)", () => {
+    // chalk.bgHex("red") and chalk.bgHex("blue") both fail hex parsing and
+    // paint 48;2;0;0;0 — identical backgrounds despite distinct config values.
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#ffffff", bg: "red" },
+        { text: "b", fg: "#ffffff", bg: "blue" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("still draws the wide separator for a genuinely different pair", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#ffffff", bg: "#26a269" },
+        { text: "b", fg: "#ffffff", bg: "#0d7377" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("▶");
+  });
+
+  it("falls back to the wide separator when separatorThin is empty", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "$14.21", fg: "#ffffff", bg: "#a67c00" },
+        { text: "70%", fg: "#ffffff", bg: "#a67c00" },
+      ],
+      { ...OPTIONS, separatorThin: "" },
+    );
+    // Still painted in the previous segment's fg (not bg) so it stays visible
+    // even though it's rendering the wide glyph.
+    expect(pieces[1]).toEqual({ text: "▶", fg: "#ffffff", bg: "#a67c00" });
+  });
+});
+
+describe("normalizeColor", () => {
+  it("lowercases and passes through valid 6-digit hex", () => {
+    expect(normalizeColor("#AABBCC")).toBe("#aabbcc");
+  });
+
+  it("expands 3-digit hex", () => {
+    expect(normalizeColor("#abc")).toBe("#aabbcc");
+    expect(normalizeColor("#ABC")).toBe("#aabbcc");
+  });
+
+  it("collapses non-hex values to the black chalk paints them as", () => {
+    expect(normalizeColor("red")).toBe("#000000");
+    expect(normalizeColor("blue")).toBe("#000000");
+    expect(normalizeColor("")).toBe("#000000");
   });
 });

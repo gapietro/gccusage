@@ -31,7 +31,7 @@ const PowerlineConfigSchema = v.object({
   enabled: v.optional(v.boolean(), false),
   theme: v.optional(v.string(), "default"),
   separator: v.optional(v.string(), "\uE0B0"),
-  separatorThin: v.optional(v.string(), "\uE0B1"),
+  separatorThin: v.optional(v.string(), "\u2502"),
 });
 
 const CacheConfigSchema = v.object({

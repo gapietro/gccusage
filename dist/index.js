@@ -618,7 +618,7 @@ const PowerlineConfigSchema = object({
 	enabled: optional(boolean(), false),
 	theme: optional(string(), "default"),
 	separator: optional(string(), ""),
-	separatorThin: optional(string(), "")
+	separatorThin: optional(string(), "│")
 });
 const CacheConfigSchema = object({
 	statuslineTtlMs: optional(number(), 5e3),
@@ -2499,8 +2499,28 @@ function getTheme(name) {
 //#endregion
 //#region src/render/powerline.ts
 source_default.level = 3;
+const HEX6 = /^#?([0-9a-f]{6})$/;
+const HEX3 = /^#?([0-9a-f]{3})$/;
+/**
+* Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
+* it: lowercase, expand 3-digit hex to 6, and collapse anything that isn't a
+* valid hex color (named colors, empty strings, garbage) to the same black
+* chalk paints for those inputs. Exported so tests can assert visibility
+* through the same lens the renderer uses to compare colors.
+*/
+function normalizeColor(color) {
+	const lower = color.toLowerCase();
+	const six = HEX6.exec(lower);
+	if (six) return `#${six[1]}`;
+	const three = HEX3.exec(lower);
+	if (three) {
+		const [r, g, b] = three[1];
+		return `#${r}${r}${g}${g}${b}${b}`;
+	}
+	return "#000000";
+}
 function sameColor(a, b) {
-	return a.toLowerCase() === b.toLowerCase();
+	return normalizeColor(a) === normalizeColor(b);
 }
 /**
 * Resolve widget outputs and the theme into the exact pieces the statusline is
@@ -2517,7 +2537,7 @@ function layoutPowerline(outputs, options) {
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
 		if (prev !== null) pieces.push(sameColor(prev.bg, bg) ? {
-			text: options.separatorThin,
+			text: options.separatorThin || options.separator,
 			fg: prev.fg,
 			bg
 		} : {
@@ -2636,7 +2656,7 @@ function renderLine(outputs, settings, context, flex) {
 		line = renderPowerlineSegments(nonSeparator, {
 			theme: powerline.theme ?? "default",
 			separator: powerline.separator ?? "",
-			separatorThin: powerline.separatorThin ?? ""
+			separatorThin: powerline.separatorThin ?? "│"
 		});
 	} else {
 		const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
-import { layoutPowerline } from "../render/powerline.js";
+import { layoutPowerline, normalizeColor } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -137,7 +137,9 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // The renderer paints separators and segment text from the same resolved
   // {fg, bg} model, so one predicate covers both: a piece whose fg matches its
   // own bg is invisible — an unreadable segment, or a seam that makes two
-  // segments read as one block.
+  // segments read as one block. Compare colors the way chalk's bgHex/hex
+  // actually resolve them (normalizeColor), not a raw string/case compare —
+  // "#fff" and "#ffffff" paint identically but aren't equal as strings.
   function assertEveryPieceVisible(rendered: Rendered[], point: SweepPoint, mode: string): void {
     const pieces = layoutPowerline(
       rendered.map((r) => r.output),
@@ -145,13 +147,22 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     );
     const order = rendered.map((r) => r.type).join(" > ");
     for (const piece of pieces) {
+      // A piece with no ink (empty or whitespace-only text) is invisible
+      // regardless of color — e.g. a misconfigured empty separatorThin.
+      expect(
+        piece.text.trim(),
+        `[${mode}] piece has no visible characters at ` +
+          `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
+          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+      ).not.toBe("");
+
       if (piece.bg === undefined) continue;
       expect(
-        piece.fg.toLowerCase(),
+        normalizeColor(piece.fg),
         `[${mode}] "${piece.text}" is invisible (fg === bg === ${piece.bg}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
           `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
-      ).not.toBe(piece.bg.toLowerCase());
+      ).not.toBe(normalizeColor(piece.bg));
     }
   }
 

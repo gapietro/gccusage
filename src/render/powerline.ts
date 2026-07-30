@@ -19,8 +19,30 @@ export interface PowerlinePiece {
   bg?: string;
 }
 
+const HEX6 = /^#?([0-9a-f]{6})$/;
+const HEX3 = /^#?([0-9a-f]{3})$/;
+
+/**
+ * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
+ * it: lowercase, expand 3-digit hex to 6, and collapse anything that isn't a
+ * valid hex color (named colors, empty strings, garbage) to the same black
+ * chalk paints for those inputs. Exported so tests can assert visibility
+ * through the same lens the renderer uses to compare colors.
+ */
+export function normalizeColor(color: string): string {
+  const lower = color.toLowerCase();
+  const six = HEX6.exec(lower);
+  if (six) return `#${six[1]}`;
+  const three = HEX3.exec(lower);
+  if (three) {
+    const [r, g, b] = three[1]!;
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return "#000000";
+}
+
 function sameColor(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+  return normalizeColor(a) === normalizeColor(b);
 }
 
 /**
@@ -51,7 +73,7 @@ export function layoutPowerline(
     if (prev !== null) {
       pieces.push(
         sameColor(prev.bg, bg)
-          ? { text: options.separatorThin, fg: prev.fg, bg }
+          ? { text: options.separatorThin || options.separator, fg: prev.fg, bg }
           : { text: options.separator, fg: prev.bg, bg },
       );
     }
