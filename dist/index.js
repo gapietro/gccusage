@@ -1807,7 +1807,7 @@ const linesChangedWidget = { render(context, config) {
 //#region src/widgets/vim-mode.ts
 const MODE_COLORS = {
 	NORMAL: "#2ec27e",
-	INSERT: "#a67c00"
+	INSERT: "#e5a50a"
 };
 const vimModeWidget = { render(context, config) {
 	const mode = context.stdin.vim?.mode;

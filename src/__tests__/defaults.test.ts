@@ -50,13 +50,38 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   const USAGE_SWEEP = [10, 50, 65, 70, 75, 80, 83.5, 90, 95];
   const WINDOW_SIZE = 200_000;
 
-  function makeSweepContext(usedPercentage: number): RenderContext {
+  // today-spend recolors at its own thresholds, and vim-mode picks a color per
+  // mode. Both must be varied: they are adjacent on line 2 (api-latency used to
+  // sit between them), so a collision only appears in specific combinations —
+  // pinning either dimension hides it. dailyWarn is 10 and dailyDanger 25.
+  const TODAY_SWEEP = [3, 12, 30];
+  const VIM_SWEEP = ["NORMAL", "INSERT"];
+
+  interface SweepPoint {
+    used: number;
+    today: number;
+    vim: string;
+  }
+
+  function sweepPoints(): SweepPoint[] {
+    const points: SweepPoint[] = [];
+    for (const used of USAGE_SWEEP) {
+      for (const today of TODAY_SWEEP) {
+        for (const vim of VIM_SWEEP) {
+          points.push({ used, today, vim });
+        }
+      }
+    }
+    return points;
+  }
+
+  function makeSweepContext(point: SweepPoint): RenderContext {
     return {
       stdin: {
         model: "claude-sonnet-4-20250514",
         cwd: process.cwd(),
         context_window: {
-          used_percentage: usedPercentage,
+          used_percentage: point.used,
           context_window_size: WINDOW_SIZE,
         },
         cost: {
@@ -64,7 +89,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
           total_lines_added: 12,
           total_lines_removed: 4,
         },
-        vim: { mode: "NORMAL" },
+        vim: { mode: point.vim },
       },
       metrics: {
         byModel: new Map(),
@@ -74,11 +99,15 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       block: null,
       burnRate: { tokensPerMinute: 500, costPerHour: 1, costPerMinute: 0.02 },
       pricing: {},
-      // Kept below sessionWarn/dailyWarn so session-cost/today-spend stay at
-      // their static configured colors and don't confound the sweep with
-      // their own threshold behavior.
+      // sessionCostUsd is deliberately held below sessionWarn. session-cost and
+      // context-percent are adjacent on line 1 and share the same alert palette
+      // (#a67c00 / #c01c28), so they collide once both cross their thresholds.
+      // That collision predates the compact-countdown work — those two were
+      // already neighbours — and is tracked separately in issue #36. Varying
+      // this dimension here would fail the suite on a pre-existing defect
+      // rather than on anything this layout changed.
       sessionCostUsd: 2.5,
-      todayCostUsd: 3.0,
+      todayCostUsd: point.today,
       costByModel: new Map(),
       sessionStartTime: null,
       terminalWidth: 200,
@@ -101,7 +130,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     return { type: config.type, output, priority: config.priority ?? 99 };
   }
 
-  function assertNoAdjacentCollision(rendered: Rendered[], usedPercentage: number, mode: string): void {
+  function assertNoAdjacentCollision(rendered: Rendered[], point: SweepPoint, mode: string): void {
     for (let i = 1; i < rendered.length; i++) {
       const prev = rendered[i - 1]!;
       const curr = rendered[i]!;
@@ -109,19 +138,19 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       expect(
         prev.output.bg,
         `[${mode}] ${prev.type} and ${curr.type} both render bg ${prev.output.bg} ` +
-          `at used_percentage=${usedPercentage}`,
+          `at used_percentage=${point.used}, todayCostUsd=${point.today}, vim=${point.vim}`,
       ).not.toBe(curr.output.bg);
     }
   }
 
   it("never places two rendered segments with the same bg side by side, per line", () => {
-    for (const used of USAGE_SWEEP) {
-      const context = makeSweepContext(used);
+    for (const point of sweepPoints()) {
+      const context = makeSweepContext(point);
       for (const line of DEFAULT_SETTINGS.lines) {
         const rendered = line.widgets
           .map((config) => renderConfig(context, config))
           .filter((r): r is Rendered => r !== null);
-        assertNoAdjacentCollision(rendered, used, "line");
+        assertNoAdjacentCollision(rendered, point, "line");
       }
     }
   });
@@ -130,14 +159,14 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     // renderCompact (src/render/renderer.ts) flattens both lines and sorts
     // by priority, ignoring line boundaries — so adjacency here can differ
     // from the per-line adjacency above.
-    for (const used of USAGE_SWEEP) {
-      const context = makeSweepContext(used);
+    for (const point of sweepPoints()) {
+      const context = makeSweepContext(point);
       const rendered = DEFAULT_SETTINGS.lines
         .flatMap((line) => line.widgets)
         .map((config) => renderConfig(context, config))
         .filter((r): r is Rendered => r !== null)
         .sort((a, b) => a.priority - b.priority);
-      assertNoAdjacentCollision(rendered, used, "compact");
+      assertNoAdjacentCollision(rendered, point, "compact");
     }
   });
 });
