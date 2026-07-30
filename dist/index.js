@@ -2655,27 +2655,29 @@ function isSeparatorOutput(output) {
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
-function checkCache(ttlMs, sessionId) {
+function checkCache(ttlMs, sessionId, costUsd) {
 	const cachePath = getCachePath();
 	try {
 		if (!fs.existsSync(cachePath)) return null;
 		const raw = fs.readFileSync(cachePath, "utf-8");
 		const entry = JSON.parse(raw);
 		if (entry.sessionId !== sessionId) return null;
+		if (entry.costUsd !== costUsd) return null;
 		if (Date.now() - entry.timestamp > ttlMs) return null;
 		return entry.output;
 	} catch {
 		return null;
 	}
 }
-function writeCache(output, sessionId) {
+function writeCache(output, sessionId, costUsd) {
 	const cachePath = getCachePath();
 	try {
 		ensureDir(path.dirname(cachePath));
 		const entry = {
 			output,
 			timestamp: Date.now(),
-			sessionId
+			sessionId,
+			costUsd
 		};
 		fs.writeFileSync(cachePath, JSON.stringify(entry));
 	} catch {}
@@ -2685,15 +2687,12 @@ function writeCache(output, sessionId) {
 //#region src/statusline.ts
 async function runStatusline(stdin, settings) {
 	const sessionId = stdin.session_id;
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId);
-	if (cached !== null) {
-		const stdinCost = stdin.cost?.total_cost_usd;
-		if (stdinCost !== void 0 && settings.costSource !== "calculated") trackDailyCost(sessionId, stdinCost);
-		return cached;
-	}
+	const stdinCost = stdin.cost?.total_cost_usd;
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId, stdinCost);
+	if (cached !== null) return cached;
 	const context = await buildRenderContext(stdin, settings);
 	const output = renderStatusline(context, settings);
-	writeCache(output, sessionId);
+	writeCache(output, sessionId, stdinCost);
 	return output;
 }
 
