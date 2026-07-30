@@ -1307,8 +1307,7 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostUsd = stdinCost;
 		sessionCostSource = "stdin";
 	}
-	const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
-	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
+	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
