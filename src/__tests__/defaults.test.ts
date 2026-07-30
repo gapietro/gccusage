@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
-import { layoutPowerline } from "../render/powerline.js";
-import { normalizeColor } from "../render/color-compare.js";
+import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
+import { colorDistance } from "../render/color-compare.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -136,11 +136,12 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   };
 
   // The renderer paints separators and segment text from the same resolved
-  // {fg, bg} model, so one predicate covers both: a piece whose fg matches its
-  // own bg is invisible — an unreadable segment, or a seam that makes two
-  // segments read as one block. Compare colors the way chalk's bgHex/hex
-  // actually resolve them (normalizeColor), not a raw string/case compare —
-  // "#fff" and "#ffffff" paint identically but aren't equal as strings.
+  // {fg, bg} model, so one predicate covers both: a piece whose fg is too
+  // close to its own bg is unreadable — an illegible segment, or a seam that
+  // makes two segments look like one block. The floor is the same constant
+  // the renderer uses to choose a separator, so this holds by construction
+  // and fails the moment either side drifts. Exact equality is not enough:
+  // "#a67c00" on "#b8860b" are different colors and still unreadable (#40).
   function assertEveryPieceVisible(rendered: Rendered[], point: SweepPoint, mode: string): void {
     const pieces = layoutPowerline(
       rendered.map((r) => r.output),
@@ -158,12 +159,14 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       ).not.toBe("");
 
       if (piece.bg === undefined) continue;
+      const distance = colorDistance(piece.fg, piece.bg);
       expect(
-        normalizeColor(piece.fg),
-        `[${mode}] "${piece.text}" is invisible (fg === bg === ${piece.bg}) at ` +
+        distance,
+        `[${mode}] "${piece.text}" is unreadable: fg ${piece.fg} is only ` +
+          `ΔE ${distance.toFixed(2)} from bg ${piece.bg} (floor ${MIN_SEPARATOR_DELTA}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
           `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
-      ).not.toBe(normalizeColor(piece.bg));
+      ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
     }
   }
 
