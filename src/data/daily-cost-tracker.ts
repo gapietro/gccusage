@@ -73,10 +73,14 @@ export function trackDailyCost(
   if (sessionId) {
     const existing = data.sessions.find((s) => s.sessionId === sessionId);
     if (existing) {
+      // A restarted session reuses the ID with a reset cumulative cost
+      // (cumulative cost never decreases within one process). Fold the
+      // already-accrued today delta into the baseline (as a negative
+      // offset) so prior spend since midnight is preserved.
+      if (costUsd < existing.costUsd) {
+        existing.baselineUsd = -Math.max(0, existing.costUsd - existing.baselineUsd);
+      }
       existing.costUsd = costUsd;
-      // A restarted session reuses the ID with a reset cumulative cost;
-      // keep the baseline consistent so the delta never goes negative.
-      if (costUsd < existing.baselineUsd) existing.baselineUsd = 0;
       existing.updatedAt = now.getTime();
     } else {
       data.sessions.push({ sessionId, costUsd, baselineUsd: 0, updatedAt: now.getTime() });
