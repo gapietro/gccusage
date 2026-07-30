@@ -79,15 +79,16 @@ export async function buildRenderContext(
   }
 
   // Today's cost: JSONL-calculated when the user forces calculated costs,
-  // otherwise our per-session daily tracker (stdin-based). The tracker is
-  // told which source fed it so a source switch isn't read as a restart.
-  const trackedTodayCost = trackDailyCost(
-    stdin.session_id,
-    sessionCostUsd,
-    sessionCostSource,
-  );
+  // otherwise our per-session daily tracker. In forced-calculated mode the
+  // tracked total is never displayed, so we don't touch the store at all —
+  // persisting there would only dirty state nobody reads and add per-session
+  // costs on a different scale to the store's own total (issue #32). The
+  // tracker is told which source fed it so a source switch isn't read as a
+  // restart.
   const todayCostUsd =
-    settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
+    settings.costSource === "calculated"
+      ? calculatedTodayCost
+      : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
