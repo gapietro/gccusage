@@ -1217,8 +1217,8 @@ function trackDailyCost(sessionId, costUsd, now = new Date()) {
 	if (sessionId) {
 		const existing = data.sessions.find((s) => s.sessionId === sessionId);
 		if (existing) {
+			if (costUsd < existing.costUsd) existing.baselineUsd = -Math.max(0, existing.costUsd - existing.baselineUsd);
 			existing.costUsd = costUsd;
-			if (costUsd < existing.baselineUsd) existing.baselineUsd = 0;
 			existing.updatedAt = now.getTime();
 		} else data.sessions.push({
 			sessionId,

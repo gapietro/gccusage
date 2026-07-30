@@ -52,6 +52,36 @@ describe("trackDailyCost", () => {
     expect(total).toBeCloseTo(0.5);
   });
 
+  it("preserves today's accrued spend when a session restarts with a lower cost", () => {
+    const morning = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-a", 15.0, morning); // $15 spent today
+
+    const later = new Date(2026, 6, 29, 11, 0, 0);
+    const total = trackDailyCost("session-a", 1.0, later); // restarted, $1 in new process
+    expect(total).toBeCloseTo(16.0);
+  });
+
+  it("preserves post-midnight spend when a restarted session's cost drops below its baseline", () => {
+    const yesterday = new Date(2026, 6, 28, 23, 0, 0);
+    trackDailyCost("session-a", 10.0, yesterday); // $10 spent yesterday
+
+    const morning = new Date(2026, 6, 29, 9, 0, 0);
+    trackDailyCost("session-a", 15.0, morning); // $5 more today
+
+    const later = new Date(2026, 6, 29, 11, 0, 0);
+    const total = trackDailyCost("session-a", 1.0, later); // restarted, $1 in new process
+    expect(total).toBeCloseTo(6.0);
+  });
+
+  it("accumulates spend across repeated same-day restarts", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-a", 3.0, now);
+    trackDailyCost("session-a", 0.5, new Date(2026, 6, 29, 11, 0, 0)); // restart 1
+    trackDailyCost("session-a", 2.0, new Date(2026, 6, 29, 12, 0, 0));
+    const total = trackDailyCost("session-a", 1.0, new Date(2026, 6, 29, 13, 0, 0)); // restart 2
+    expect(total).toBeCloseTo(6.0); // 3 + 2 + 1
+  });
+
   it("drops sessions not updated for 48h on rollover", () => {
     const twoDaysAgo = new Date(2026, 6, 26, 10, 0, 0);
     trackDailyCost("stale", 9.0, twoDaysAgo);
