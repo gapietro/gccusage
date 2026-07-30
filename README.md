@@ -87,6 +87,13 @@ Create `~/.config/gccusage/settings.json` to customize. You only need to specify
 
 Available themes: `default`, `ocean`, `forest`, `sunset`, `minimal`
 
+Some themes have subtle gradient ramps between segment backgrounds. For `minimal`, `forest`,
+and (to a lesser extent) `ocean`, most consecutive segments are close enough in color that
+the wide `▶` separator would not read against them, so the thin `│` is drawn instead — this
+is deliberate (see `separatorThin` below), not a bug. It only applies to a custom layout
+whose widgets don't set their own `bg`; the default layout's widgets all set one, so the
+theme's colors never come into play there.
+
 ### Separators
 
 ```json
@@ -96,10 +103,10 @@ Available themes: `default`, `ocean`, `forest`, `sunset`, `minimal`
 ```
 
 `separator` is drawn between segments of different colors. When two neighbouring
-segments resolve to the same background — which happens when, say, session cost
-and context usage both cross their warning thresholds at once — the wide glyph
-would be invisible, so `separatorThin` is drawn in the previous segment's text
-color instead.
+segments resolve to backgrounds that are the same — or too close to tell apart,
+which happens when, say, context usage and the compact countdown both cross their
+warning thresholds — the wide glyph would not read against them, so `separatorThin`
+is drawn in the previous segment's text color instead.
 
 ### Custom layout
 

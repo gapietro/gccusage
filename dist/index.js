@@ -2497,8 +2497,7 @@ function getTheme(name) {
 }
 
 //#endregion
-//#region src/render/powerline.ts
-source_default.level = 3;
+//#region src/render/color-compare.ts
 const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 /**
 * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
@@ -2508,9 +2507,7 @@ const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 * same black chalk paints for those inputs. Because the match is unanchored,
 * inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
 * "#112233") rather than black — that mirrors chalk exactly, even though it
-* looks surprising next to the old anchored behavior. Exported so tests can
-* assert visibility through the same lens the renderer uses to compare
-* colors.
+* looks surprising next to a naive anchored implementation.
 */
 function normalizeColor(color) {
 	const match = CHALK_HEX.exec(color);
@@ -2519,9 +2516,102 @@ function normalizeColor(color) {
 	if (digits.length === 3) digits = [...digits].map((c) => c + c).join("");
 	return `#${digits}`;
 }
-function sameColor(a, b) {
-	return normalizeColor(a) === normalizeColor(b);
+const srgbToLinear = (c) => c <= .04045 ? c / 12.92 : Math.pow((c + .055) / 1.055, 2.4);
+const D65_X = .3127 / .329;
+const D65_Y = 1;
+const D65_Z = .3583 / .329;
+/** sRGB hex -> CIE L*a*b* (D65 white point). */
+function hexToLab(hex) {
+	const n = Number.parseInt(hex.slice(1), 16);
+	const r8 = n >> 16 & 255;
+	const g8 = n >> 8 & 255;
+	const b8 = n & 255;
+	const r = srgbToLinear(r8 / 255);
+	const g = srgbToLinear(g8 / 255);
+	const b = srgbToLinear(b8 / 255);
+	const x = (r * .4123907992659593 + g * .357584339383878 + b * .1804807884018343) / D65_X;
+	const y = (r * .2126390058715102 + g * .715168678767756 + b * .0721923153607337) / D65_Y;
+	const z = (r * .0193308187155918 + g * .119194779794626 + b * .9505321522496607) / D65_Z;
+	const f = (t) => t > 216 / 24389 ? Math.cbrt(t) : 841 / 108 * t + 4 / 29;
+	const fx = f(x);
+	const fy = f(y);
+	const fz = f(z);
+	const l = 116 * fy - 16;
+	if (r8 === g8 && g8 === b8) return [
+		l,
+		0,
+		0
+	];
+	return [
+		l,
+		500 * (fx - fy),
+		200 * (fy - fz)
+	];
 }
+const DEG = 180 / Math.PI;
+const RAD = Math.PI / 180;
+/**
+* CIEDE2000 perceptual difference between two colors, after resolving each to
+* the color chalk would actually paint for it.
+*
+* Why CIEDE2000 and not a WCAG contrast ratio: WCAG contrast measures
+* luminance only, for text legibility against a background. It is not a
+* measure of whether two adjacent color patches are distinguishable — purple
+* beside teal scores 1.05:1 by WCAG while being obviously different colors.
+* See the issue #40 design spec for the measurements.
+*
+* Roughly: 0 identical, ~1 a just-noticeable difference, >10 clearly distinct.
+*/
+function colorDistance(a, b) {
+	const [l1, a1, b1] = hexToLab(normalizeColor(a));
+	const [l2, a2, b2] = hexToLab(normalizeColor(b));
+	const c1 = Math.hypot(a1, b1);
+	const c2 = Math.hypot(a2, b2);
+	const cBar = (c1 + c2) / 2;
+	const g = .5 * (1 - Math.sqrt(Math.pow(cBar, 7) / (Math.pow(cBar, 7) + Math.pow(25, 7))));
+	const a1p = (1 + g) * a1;
+	const a2p = (1 + g) * a2;
+	const c1p = Math.hypot(a1p, b1);
+	const c2p = Math.hypot(a2p, b2);
+	const h1p = (Math.atan2(b1, a1p) * DEG + 360) % 360;
+	const h2p = (Math.atan2(b2, a2p) * DEG + 360) % 360;
+	const dLp = l2 - l1;
+	const dCp = c2p - c1p;
+	let dhp = 0;
+	if (c1p * c2p !== 0) {
+		dhp = h2p - h1p;
+		if (dhp > 180) dhp -= 360;
+		else if (dhp < -180) dhp += 360;
+	}
+	const dHp = 2 * Math.sqrt(c1p * c2p) * Math.sin(dhp * RAD / 2);
+	const lBarP = (l1 + l2) / 2;
+	const cBarP = (c1p + c2p) / 2;
+	let hBarP;
+	if (c1p * c2p === 0) hBarP = h1p + h2p;
+	else if (Math.abs(h1p - h2p) <= 180) hBarP = (h1p + h2p) / 2;
+	else hBarP = h1p + h2p < 360 ? (h1p + h2p + 360) / 2 : (h1p + h2p - 360) / 2;
+	const t = 1 - .17 * Math.cos((hBarP - 30) * RAD) + .24 * Math.cos(2 * hBarP * RAD) + .32 * Math.cos((3 * hBarP + 6) * RAD) - .2 * Math.cos((4 * hBarP - 63) * RAD);
+	const sL = 1 + .015 * Math.pow(lBarP - 50, 2) / Math.sqrt(20 + Math.pow(lBarP - 50, 2));
+	const sC = 1 + .045 * cBarP;
+	const sH = 1 + .015 * cBarP * t;
+	const dTheta = 30 * Math.exp(-Math.pow((hBarP - 275) / 25, 2));
+	const rC = 2 * Math.sqrt(Math.pow(cBarP, 7) / (Math.pow(cBarP, 7) + Math.pow(25, 7)));
+	const rT = -Math.sin(2 * dTheta * RAD) * rC;
+	return Math.sqrt(Math.pow(dLp / sL, 2) + Math.pow(dCp / sC, 2) + Math.pow(dHp / sH, 2) + rT * (dCp / sC) * (dHp / sH));
+}
+
+//#endregion
+//#region src/render/powerline.ts
+source_default.level = 3;
+/**
+* Below this CIEDE2000 distance two backgrounds are too close for the wide
+* glyph — painted in the previous segment's bg — to read against the incoming
+* one. Exact matches (ΔE 0) are the degenerate case. Measured across every
+* adjacent pair reachable in the shipped defaults, the nearest values either
+* side of this are 6.54 and 9.14, so the exact constant is not delicate.
+* See the issue #40 design spec.
+*/
+const MIN_SEPARATOR_DELTA = 8;
 /**
 * Resolve widget outputs and the theme into the exact pieces the statusline is
 * painted from. Exported so tests can assert on the real color model rather
@@ -2536,7 +2626,7 @@ function layoutPowerline(outputs, options) {
 		const style = theme.segments[i % theme.segments.length];
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
-		if (prev !== null) pieces.push(sameColor(prev.bg, bg) ? {
+		if (prev !== null) pieces.push(colorDistance(prev.bg, bg) < MIN_SEPARATOR_DELTA ? {
 			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
 			fg: prev.fg,
 			bg

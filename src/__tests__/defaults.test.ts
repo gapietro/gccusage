@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
-import { layoutPowerline, normalizeColor } from "../render/powerline.js";
+import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
+import { colorDistance } from "../render/color-compare.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -135,11 +136,28 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   };
 
   // The renderer paints separators and segment text from the same resolved
-  // {fg, bg} model, so one predicate covers both: a piece whose fg matches its
-  // own bg is invisible — an unreadable segment, or a seam that makes two
-  // segments read as one block. Compare colors the way chalk's bgHex/hex
-  // actually resolve them (normalizeColor), not a raw string/case compare —
-  // "#fff" and "#ffffff" paint identically but aren't equal as strings.
+  // {fg, bg} model, so one predicate covers both — but it has real teeth on
+  // only two of the three piece kinds layoutPowerline emits:
+  //
+  //   - segment text: fg is the widget's/theme's own color vs its own bg —
+  //     a genuine check, unconstrained by the renderer.
+  //   - thin separator: fg = prev.fg vs the incoming bg — also genuine, and
+  //     the path that gets more traffic now that more boundaries fall back
+  //     to it (context-percent/compact-countdown's alert shades, #40).
+  //   - wide separator: fg = prev.bg (set by powerline.ts itself), and the
+  //     renderer only emits a wide separator when
+  //     colorDistance(prev.bg, bg) >= MIN_SEPARATOR_DELTA already held —
+  //     same two arguments, same function, same constant. Asserting it here
+  //     again is a tautology; it cannot fail. It is NOT new coverage for the
+  //     "#a67c00" vs "#b8860b" case from #40 — with this renderer that pair
+  //     can no longer be emitted as a wide separator at all, only thin.
+  //
+  // This also does not guard the palette itself: nudge "#b8860b" to ΔE 1
+  // from "#a67c00" and this sweep still passes, because layoutPowerline just
+  // draws the thin glyph instead — the intended design (see #40), but it
+  // means "fails the moment either side drifts" is only true for the text
+  // and thin-separator pieces, not for how close two theme/widget colors are
+  // allowed to get.
   function assertEveryPieceVisible(rendered: Rendered[], point: SweepPoint, mode: string): void {
     const pieces = layoutPowerline(
       rendered.map((r) => r.output),
@@ -157,12 +175,14 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       ).not.toBe("");
 
       if (piece.bg === undefined) continue;
+      const distance = colorDistance(piece.fg, piece.bg);
       expect(
-        normalizeColor(piece.fg),
-        `[${mode}] "${piece.text}" is invisible (fg === bg === ${piece.bg}) at ` +
+        distance,
+        `[${mode}] "${piece.text}" is unreadable: fg ${piece.fg} is only ` +
+          `ΔE ${distance.toFixed(2)} from bg ${piece.bg} (floor ${MIN_SEPARATOR_DELTA}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
           `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
-      ).not.toBe(normalizeColor(piece.bg));
+      ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
     }
   }
 
