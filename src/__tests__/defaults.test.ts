@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
-import { layoutPowerline, normalizeColor } from "../render/powerline.js";
+import { layoutPowerline } from "../render/powerline.js";
+import { normalizeColor } from "../render/color-compare.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";

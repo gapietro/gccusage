@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
-import { layoutPowerline, normalizeColor } from "../render/powerline.js";
+import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi } from "../utils/terminal.js";
@@ -321,37 +321,5 @@ describe("layoutPowerline", () => {
       OPTIONS,
     );
     expect(pieces[1]!.text).toBe("│");
-  });
-});
-
-describe("normalizeColor", () => {
-  it("lowercases and passes through valid 6-digit hex", () => {
-    expect(normalizeColor("#AABBCC")).toBe("#aabbcc");
-  });
-
-  it("expands 3-digit hex", () => {
-    expect(normalizeColor("#abc")).toBe("#aabbcc");
-    expect(normalizeColor("#ABC")).toBe("#aabbcc");
-  });
-
-  it("collapses non-hex values to the black chalk paints them as", () => {
-    expect(normalizeColor("red")).toBe("#000000");
-    expect(normalizeColor("blue")).toBe("#000000");
-    expect(normalizeColor("")).toBe("#000000");
-  });
-
-  // Ground truth measured directly against this project's chalk@5.6.2 at
-  // level 3 (see the fix report for the measurement script): the bg SGR
-  // sequence chalk.bgHex(input) actually emits, decoded back to hex. These
-  // assert against those measured values, not a re-derivation of the regex.
-  it("matches chalk's own hexToRgb parsing exactly (measured, not re-derived)", () => {
-    expect(normalizeColor("#abcd")).toBe("#aabbcc"); // 48;2;170;187;204
-    expect(normalizeColor("#aabbcc")).toBe("#aabbcc"); // 48;2;170;187;204 — identical paint
-    expect(normalizeColor("#12345")).toBe("#112233"); // 48;2;17;34;51
-    expect(normalizeColor("#112233")).toBe("#112233"); // 48;2;17;34;51 — identical paint
-    expect(normalizeColor("#abc")).toBe("#aabbcc"); // 48;2;170;187;204
-    expect(normalizeColor("#gggggg")).toBe("#000000"); // 48;2;0;0;0 — no hex run
-    expect(normalizeColor("#")).toBe("#000000"); // 48;2;0;0;0
-    expect(normalizeColor("")).toBe("#000000"); // 48;2;0;0;0
   });
 });

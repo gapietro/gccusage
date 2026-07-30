@@ -2497,8 +2497,7 @@ function getTheme(name) {
 }
 
 //#endregion
-//#region src/render/powerline.ts
-source_default.level = 3;
+//#region src/render/color-compare.ts
 const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 /**
 * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
@@ -2508,9 +2507,7 @@ const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 * same black chalk paints for those inputs. Because the match is unanchored,
 * inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
 * "#112233") rather than black — that mirrors chalk exactly, even though it
-* looks surprising next to the old anchored behavior. Exported so tests can
-* assert visibility through the same lens the renderer uses to compare
-* colors.
+* looks surprising next to a naive anchored implementation.
 */
 function normalizeColor(color) {
 	const match = CHALK_HEX.exec(color);
@@ -2519,6 +2516,14 @@ function normalizeColor(color) {
 	if (digits.length === 3) digits = [...digits].map((c) => c + c).join("");
 	return `#${digits}`;
 }
+const D65_X = .3127 / .329;
+const D65_Z = .3583 / .329;
+const DEG = 180 / Math.PI;
+const RAD = Math.PI / 180;
+
+//#endregion
+//#region src/render/powerline.ts
+source_default.level = 3;
 function sameColor(a, b) {
 	return normalizeColor(a) === normalizeColor(b);
 }
