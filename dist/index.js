@@ -675,16 +675,16 @@ const DEFAULT_SETTINGS = {
 				priority: 3
 			},
 			{
+				type: "compact-countdown",
+				fg: "#ffffff",
+				bg: "#1a5fb4",
+				priority: 4
+			},
+			{
 				type: "burn-rate",
 				fg: "#ffffff",
 				bg: "#555555",
 				priority: 7
-			},
-			{
-				type: "cache-hit-rate",
-				fg: "#ffffff",
-				bg: "#1a5fb4",
-				priority: 8
 			}
 		],
 		flex: "left"
@@ -694,30 +694,24 @@ const DEFAULT_SETTINGS = {
 				type: "git-branch",
 				fg: "#ffffff",
 				bg: "#613583",
-				priority: 4
+				priority: 5
 			},
 			{
 				type: "git-changes",
 				fg: "#ffffff",
-				bg: "#613583",
-				priority: 9
+				bg: "#7d4fa8",
+				priority: 8
 			},
 			{
 				type: "lines-changed",
 				fg: "#ffffff",
 				bg: "#0d7377",
-				priority: 10
+				priority: 9
 			},
 			{
 				type: "today-spend",
 				fg: "#ffffff",
 				bg: "#26a269",
-				priority: 5
-			},
-			{
-				type: "api-latency",
-				fg: "#ffffff",
-				bg: "#555555",
 				priority: 6
 			},
 			{ type: "vim-mode" }
@@ -1458,6 +1452,47 @@ const burnRateWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/utils/context-usage.ts
+function sumTokens(counts) {
+	return (counts.input_tokens ?? 0) + (counts.output_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0) + (counts.cache_read_input_tokens ?? 0);
+}
+/**
+* How full the context window is.
+*
+* Deliberately ignores `total_input_tokens` / `total_output_tokens`: those are
+* cumulative across the whole session and exceed the window size on any long
+* session. They are correct for rate math (see burn-rate), never for fullness.
+*/
+function deriveContextUsage(stdin) {
+	const cw = stdin.context_window;
+	if (typeof cw === "object" && cw !== null) {
+		const windowSize = cw.context_window_size ?? null;
+		if (cw.remaining_percentage != null) return {
+			ratio: (100 - cw.remaining_percentage) / 100,
+			windowSize
+		};
+		if (cw.used_percentage != null) return {
+			ratio: cw.used_percentage / 100,
+			windowSize
+		};
+		if (cw.current_usage && windowSize && windowSize > 0) return {
+			ratio: sumTokens(cw.current_usage) / windowSize,
+			windowSize
+		};
+		return null;
+	}
+	if (typeof cw === "number" && cw > 0) {
+		const usage = stdin.token_usage;
+		if (!usage) return null;
+		return {
+			ratio: sumTokens(usage) / cw,
+			windowSize: cw
+		};
+	}
+	return null;
+}
+
+//#endregion
 //#region src/widgets/context-percent.ts
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = .7;
@@ -1473,36 +1508,17 @@ function thresholdBg(ratio, configBg) {
 	return configBg;
 }
 const contextPercentWidget = { render(context, config) {
-	const cw = context.stdin.context_window;
+	const usage = deriveContextUsage(context.stdin);
+	if (!usage) return null;
 	const label = config.label ?? "";
-	let ratio = null;
-	let windowSize = null;
-	if (typeof cw === "object" && cw !== null && cw !== void 0) {
-		windowSize = cw.context_window_size ?? null;
-		if (cw.remaining_percentage != null) ratio = (100 - cw.remaining_percentage) / 100;
-		else if (cw.used_percentage != null) ratio = cw.used_percentage / 100;
-		else if (cw.current_usage && windowSize && windowSize > 0) {
-			const u = cw.current_usage;
-			const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
-			ratio = total / windowSize;
-		}
-	} else if (typeof cw === "number" && cw > 0) {
-		windowSize = cw;
-		const usage = context.stdin.token_usage;
-		if (usage) {
-			const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-			ratio = total / cw;
-		}
-	}
-	if (ratio === null) return null;
-	const bar = buildBar(ratio);
-	const pct = formatPercent(ratio);
-	const size = windowSize ? ` (${formatTokens(windowSize)})` : "";
+	const bar = buildBar(usage.ratio);
+	const pct = formatPercent(usage.ratio);
+	const size = usage.windowSize ? ` (${formatTokens(usage.windowSize)})` : "";
 	const text = label ? `${label} ${bar} ${pct}${size}` : `${bar} ${pct}${size}`;
 	return {
 		text,
 		fg: config.fg,
-		bg: thresholdBg(ratio, config.bg)
+		bg: thresholdBg(usage.ratio, config.bg)
 	};
 } };
 
@@ -1790,8 +1806,8 @@ const linesChangedWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/vim-mode.ts
 const MODE_COLORS = {
-	NORMAL: "#26a269",
-	INSERT: "#a67c00"
+	NORMAL: "#2ec27e",
+	INSERT: "#e5a50a"
 };
 const vimModeWidget = { render(context, config) {
 	const mode = context.stdin.vim?.mode;
@@ -1852,30 +1868,26 @@ const sessionTimerWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/compact-countdown.ts
-const AUTOCOMPACT_BUFFER = .165;
+/** Auto-compact fires once this fraction of the context window is consumed. */
+const AUTOCOMPACT_THRESHOLD = .835;
+const HEADROOM_DANGER = .1;
+const HEADROOM_WARN = .25;
 const compactCountdownWidget = { render(context, config) {
-	const cw = context.stdin.context_window;
-	if (!cw || typeof cw !== "object") return null;
-	const windowSize = cw.context_window_size;
-	if (!windowSize) return null;
-	const totalInput = cw.total_input_tokens ?? 0;
-	const totalOutput = cw.total_output_tokens ?? 0;
-	const usedTokens = totalInput + totalOutput;
-	if (usedTokens === 0) return null;
-	const compactThreshold = windowSize * (1 - AUTOCOMPACT_BUFFER);
-	const remaining = Math.max(0, compactThreshold - usedTokens);
+	const usage = deriveContextUsage(context.stdin);
+	if (!usage || !usage.windowSize) return null;
+	const threshold = usage.windowSize * AUTOCOMPACT_THRESHOLD;
+	const remaining = Math.max(0, Math.round(threshold - usage.ratio * usage.windowSize));
 	if (remaining <= 0) return {
 		text: "Compact imminent!",
 		fg: "#ffffff",
-		bg: "#c01c28"
+		bg: "#a01822"
 	};
-	const ratio = remaining / compactThreshold;
+	const headroom = remaining / threshold;
 	let bg = config.bg;
-	if (ratio < .1) bg = "#c01c28";
-	else if (ratio < .25) bg = "#a67c00";
-	const text = `~${formatTokens(remaining)} left`;
+	if (headroom < HEADROOM_DANGER) bg = "#a01822";
+	else if (headroom < HEADROOM_WARN) bg = "#b8860b";
 	return {
-		text,
+		text: `~${formatTokens(remaining)} left`,
 		fg: config.fg,
 		bg
 	};

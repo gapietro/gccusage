@@ -2,38 +2,32 @@ import type { Widget, WidgetOutput } from "./base.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetConfig } from "../config/schema.js";
 import { formatTokens } from "../utils/format.js";
+import { deriveContextUsage } from "../utils/context-usage.js";
 
-const AUTOCOMPACT_BUFFER = 0.165; // 16.5% buffer before auto-compact triggers
+/** Auto-compact fires once this fraction of the context window is consumed. */
+const AUTOCOMPACT_THRESHOLD = 1 - 0.165;
+
+const HEADROOM_DANGER = 0.1;
+const HEADROOM_WARN = 0.25;
 
 export const compactCountdownWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
-    const cw = context.stdin.context_window;
-    if (!cw || typeof cw !== "object") return null;
+    const usage = deriveContextUsage(context.stdin);
+    // Without a window size a ratio cannot be turned into a token count.
+    if (!usage || !usage.windowSize) return null;
 
-    const windowSize = cw.context_window_size;
-    if (!windowSize) return null;
-
-    // Calculate used tokens
-    const totalInput = cw.total_input_tokens ?? 0;
-    const totalOutput = cw.total_output_tokens ?? 0;
-    const usedTokens = totalInput + totalOutput;
-    if (usedTokens === 0) return null;
-
-    // Auto-compact triggers at (1 - buffer) of context window
-    const compactThreshold = windowSize * (1 - AUTOCOMPACT_BUFFER);
-    const remaining = Math.max(0, compactThreshold - usedTokens);
+    const threshold = usage.windowSize * AUTOCOMPACT_THRESHOLD;
+    const remaining = Math.max(0, Math.round(threshold - usage.ratio * usage.windowSize));
 
     if (remaining <= 0) {
-      return { text: "Compact imminent!", fg: "#ffffff", bg: "#c01c28" };
+      return { text: "Compact imminent!", fg: "#ffffff", bg: "#a01822" };
     }
 
-    // Color code based on proximity
-    const ratio = remaining / compactThreshold;
+    const headroom = remaining / threshold;
     let bg = config.bg;
-    if (ratio < 0.1) bg = "#c01c28"; // red: <10% left
-    else if (ratio < 0.25) bg = "#a67c00"; // amber: <25% left
+    if (headroom < HEADROOM_DANGER) bg = "#a01822"; // red (distinct from context-percent's #c01c28)
+    else if (headroom < HEADROOM_WARN) bg = "#b8860b"; // amber (distinct from context-percent's #a67c00)
 
-    const text = `~${formatTokens(remaining)} left`;
-    return { text, fg: config.fg, bg };
+    return { text: `~${formatTokens(remaining)} left`, fg: config.fg, bg };
   },
 };
