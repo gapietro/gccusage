@@ -63,5 +63,5 @@ export const SettingsSchema = v.object({
 /** Raw parsed settings (lines may be missing if user only overrides powerline/cache). */
 export type PartialSettings = v.InferOutput<typeof SettingsSchema>;
 
-/** Fully resolved settings after merging with defaults — lines is always present. */
-export type Settings = Required<Pick<PartialSettings, "lines">> & Omit<PartialSettings, "lines">;
+/** Fully resolved settings after merging with defaults — all sections present. */
+export type Settings = Required<PartialSettings>;

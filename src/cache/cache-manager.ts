@@ -19,8 +19,8 @@ export function checkCache(ttlMs: number, sessionId?: string): string | null {
     const raw = fs.readFileSync(cachePath, "utf-8");
     const entry = JSON.parse(raw) as CacheEntry;
 
-    // Invalidate on session change
-    if (sessionId && entry.sessionId && entry.sessionId !== sessionId) return null;
+    // Require exact session match (both undefined also matches)
+    if (entry.sessionId !== sessionId) return null;
 
     // TTL check
     if (Date.now() - entry.timestamp > ttlMs) return null;

@@ -43,12 +43,21 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
   const entry: JsonlEntry = {};
 
   if (typeof raw["type"] === "string") entry.type = raw["type"];
-  if (typeof raw["model"] === "string") entry.model = raw["model"];
   if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
   if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
   if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
 
-  const usage = raw["usage"] as Record<string, unknown> | undefined;
+  // Current Claude Code transcripts nest model/usage under `message`;
+  // the legacy flat format keeps them at the top level.
+  const message =
+    typeof raw["message"] === "object" && raw["message"] !== null
+      ? (raw["message"] as Record<string, unknown>)
+      : undefined;
+  const model = message?.["model"] ?? raw["model"];
+  const usage = (message?.["usage"] ?? raw["usage"]) as Record<string, unknown> | undefined;
+
+  if (typeof model === "string") entry.model = model;
+
   if (usage && typeof usage === "object") {
     entry.usage = {
       input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : undefined,
@@ -66,4 +75,17 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
   }
 
   return entry;
+}
+
+export function isEntryFromToday(entry: JsonlEntry, now: Date = new Date()): boolean {
+  if (!entry.timestamp) return false;
+  const ts = new Date(entry.timestamp).getTime();
+  if (Number.isNaN(ts)) return false;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return ts >= midnight.getTime();
+}
+
+export function filterTodayEntries(entries: JsonlEntry[], now: Date = new Date()): JsonlEntry[] {
+  return entries.filter((e) => isEntryFromToday(e, now));
 }
