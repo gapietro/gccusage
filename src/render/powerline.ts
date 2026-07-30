@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import type { WidgetOutput } from "../widgets/base.js";
-import { getTheme, type SegmentStyle } from "./themes.js";
+import { getTheme } from "./themes.js";
 
 // Force truecolor output — chalk disables colors when stdout is a pipe,
 // but statusline output is rendered by Claude Code which supports ANSI.
@@ -12,13 +12,29 @@ export interface PowerlineOptions {
   separatorThin: string;
 }
 
-export function renderPowerlineSegments(
+/** A styled run of text. `bg` is absent only for the closing separator. */
+export interface PowerlinePiece {
+  text: string;
+  fg: string;
+  bg?: string;
+}
+
+function sameColor(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Resolve widget outputs and the theme into the exact pieces the statusline is
+ * painted from. Exported so tests can assert on the real color model rather
+ * than re-deriving theme indexing, which would drift out of sync.
+ */
+export function layoutPowerline(
   outputs: WidgetOutput[],
   options: PowerlineOptions,
-): string {
+): PowerlinePiece[] {
   const theme = getTheme(options.theme);
-  const segments: string[] = [];
-  let prevBg: string | null = null;
+  const pieces: PowerlinePiece[] = [];
+  let prev: { fg: string; bg: string } | null = null;
 
   for (let i = 0; i < outputs.length; i++) {
     const output = outputs[i]!;
@@ -26,20 +42,41 @@ export function renderPowerlineSegments(
     const fg = output.fg ?? style.fg;
     const bg = output.bg ?? style.bg;
 
-    // Separator from previous segment
-    if (prevBg !== null) {
-      segments.push(chalk.hex(prevBg).bgHex(bg)(options.separator));
+    // The wide separator is painted in the previous segment's bg over this
+    // segment's bg, so when those match it is invisible and the two segments
+    // read as one block. Widgets pick their bg from thresholds at render time,
+    // so this is reachable in the shipped defaults — session-cost and
+    // context-percent are adjacent and share an alert palette. Fall back to
+    // the thin separator, drawn in the previous segment's fg. See issue #36.
+    if (prev !== null) {
+      pieces.push(
+        sameColor(prev.bg, bg)
+          ? { text: options.separatorThin, fg: prev.fg, bg }
+          : { text: options.separator, fg: prev.bg, bg },
+      );
     }
 
-    // Segment content
-    segments.push(chalk.hex(fg).bgHex(bg)(` ${output.text} `));
-    prevBg = bg;
+    pieces.push({ text: ` ${output.text} `, fg, bg });
+    prev = { fg, bg };
   }
 
-  // Closing separator
-  if (prevBg !== null) {
-    segments.push(chalk.hex(prevBg)(options.separator));
+  // Closing separator: painted on the terminal's own background.
+  if (prev !== null) {
+    pieces.push({ text: options.separator, fg: prev.bg });
   }
 
-  return segments.join("");
+  return pieces;
+}
+
+export function renderPowerlineSegments(
+  outputs: WidgetOutput[],
+  options: PowerlineOptions,
+): string {
+  return layoutPowerline(outputs, options)
+    .map((piece) =>
+      piece.bg
+        ? chalk.hex(piece.fg).bgHex(piece.bg)(piece.text)
+        : chalk.hex(piece.fg)(piece.text),
+    )
+    .join("");
 }

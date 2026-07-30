@@ -2499,21 +2499,50 @@ function getTheme(name) {
 //#endregion
 //#region src/render/powerline.ts
 source_default.level = 3;
-function renderPowerlineSegments(outputs, options) {
+function sameColor(a, b) {
+	return a.toLowerCase() === b.toLowerCase();
+}
+/**
+* Resolve widget outputs and the theme into the exact pieces the statusline is
+* painted from. Exported so tests can assert on the real color model rather
+* than re-deriving theme indexing, which would drift out of sync.
+*/
+function layoutPowerline(outputs, options) {
 	const theme = getTheme(options.theme);
-	const segments = [];
-	let prevBg = null;
+	const pieces = [];
+	let prev = null;
 	for (let i = 0; i < outputs.length; i++) {
 		const output = outputs[i];
 		const style = theme.segments[i % theme.segments.length];
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
-		if (prevBg !== null) segments.push(source_default.hex(prevBg).bgHex(bg)(options.separator));
-		segments.push(source_default.hex(fg).bgHex(bg)(` ${output.text} `));
-		prevBg = bg;
+		if (prev !== null) pieces.push(sameColor(prev.bg, bg) ? {
+			text: options.separatorThin,
+			fg: prev.fg,
+			bg
+		} : {
+			text: options.separator,
+			fg: prev.bg,
+			bg
+		});
+		pieces.push({
+			text: ` ${output.text} `,
+			fg,
+			bg
+		});
+		prev = {
+			fg,
+			bg
+		};
 	}
-	if (prevBg !== null) segments.push(source_default.hex(prevBg)(options.separator));
-	return segments.join("");
+	if (prev !== null) pieces.push({
+		text: options.separator,
+		fg: prev.bg
+	});
+	return pieces;
+}
+function renderPowerlineSegments(outputs, options) {
+	return layoutPowerline(outputs, options).map((piece) => piece.bg ? source_default.hex(piece.fg).bgHex(piece.bg)(piece.text) : source_default.hex(piece.fg)(piece.text)).join("");
 }
 
 //#endregion

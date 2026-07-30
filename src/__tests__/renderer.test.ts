@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
+import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi } from "../utils/terminal.js";
@@ -153,5 +154,63 @@ describe("renderStatusline", () => {
     // Narrow terminal — should be single-line
     const narrow = renderStatusline(makeContext({ terminalWidth: 60 }), settings);
     expect(narrow.split("\n")).toHaveLength(1);
+  });
+});
+
+describe("layoutPowerline", () => {
+  const OPTIONS = { theme: "default", separator: "▶", separatorThin: "│" };
+
+  it("draws the wide separator in the previous bg when backgrounds differ", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#ffffff", bg: "#26a269" },
+        { text: "b", fg: "#ffffff", bg: "#0d7377" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]).toEqual({ text: "▶", fg: "#26a269", bg: "#0d7377" });
+  });
+
+  it("draws the thin separator in the previous fg when backgrounds match", () => {
+    // session-cost and context-percent both amber: the wide glyph would be
+    // painted #a67c00 on #a67c00 and vanish. This is issue #36.
+    const pieces = layoutPowerline(
+      [
+        { text: "$14.21", fg: "#ffffff", bg: "#a67c00" },
+        { text: "70%", fg: "#ffffff", bg: "#a67c00" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]).toEqual({ text: "│", fg: "#ffffff", bg: "#a67c00" });
+  });
+
+  it("compares backgrounds case-insensitively", () => {
+    // A hand-written settings.json may use uppercase hex for the same color.
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#ffffff", bg: "#A67C00" },
+        { text: "b", fg: "#ffffff", bg: "#a67c00" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("emits no inner separator for a single segment", () => {
+    const pieces = layoutPowerline([{ text: "solo", fg: "#ffffff", bg: "#1a5fb4" }], OPTIONS);
+    expect(pieces).toEqual([
+      { text: " solo ", fg: "#ffffff", bg: "#1a5fb4" },
+      { text: "▶", fg: "#1a5fb4" },
+    ]);
+  });
+
+  it("returns nothing for no outputs", () => {
+    expect(layoutPowerline([], OPTIONS)).toEqual([]);
+  });
+
+  it("falls back to the theme palette when a widget sets no colors", () => {
+    const pieces = layoutPowerline([{ text: "a" }, { text: "b" }], OPTIONS);
+    expect(pieces[0]).toEqual({ text: " a ", fg: "#ffffff", bg: "#5f5faf" });
+    expect(pieces[2]).toEqual({ text: " b ", fg: "#ffffff", bg: "#444444" });
   });
 });

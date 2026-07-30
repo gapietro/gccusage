@@ -87,6 +87,20 @@ Create `~/.config/gccusage/settings.json` to customize. You only need to specify
 
 Available themes: `default`, `ocean`, `forest`, `sunset`, `minimal`
 
+### Separators
+
+```json
+{
+  "powerline": { "separator": "▶", "separatorThin": "│" }
+}
+```
+
+`separator` is drawn between segments of different colors. When two neighbouring
+segments resolve to the same background — which happens when, say, session cost
+and context usage both cross their warning thresholds at once — the wide glyph
+would be invisible, so `separatorThin` is drawn in the previous segment's text
+color instead.
+
 ### Custom layout
 
 ```json
