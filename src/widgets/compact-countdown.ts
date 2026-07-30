@@ -20,13 +20,13 @@ export const compactCountdownWidget: Widget = {
     const remaining = Math.max(0, Math.round(threshold - usage.ratio * usage.windowSize));
 
     if (remaining <= 0) {
-      return { text: "Compact imminent!", fg: "#ffffff", bg: "#c01c28" };
+      return { text: "Compact imminent!", fg: "#ffffff", bg: "#a01822" };
     }
 
     const headroom = remaining / threshold;
     let bg = config.bg;
-    if (headroom < HEADROOM_DANGER) bg = "#c01c28"; // red
-    else if (headroom < HEADROOM_WARN) bg = "#a67c00"; // amber
+    if (headroom < HEADROOM_DANGER) bg = "#a01822"; // red (distinct from context-percent's #c01c28)
+    else if (headroom < HEADROOM_WARN) bg = "#b8860b"; // amber (distinct from context-percent's #a67c00)
 
     return { text: `~${formatTokens(remaining)} left`, fg: config.fg, bg };
   },

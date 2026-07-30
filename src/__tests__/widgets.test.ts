@@ -84,6 +84,24 @@ describe("contextPercentWidget", () => {
     const result = contextPercentWidget.render(makeContext(), { type: "context-percent" });
     expect(result).toBeNull();
   });
+
+  it("renders with the size suffix when used_percentage comes with a window size", () => {
+    const ctx = makeContext({
+      stdin: {
+        context_window: { used_percentage: 25, context_window_size: 200_000 },
+      },
+    });
+    const result = contextPercentWidget.render(ctx, { type: "context-percent" });
+    expect(result!.text).toBe("[===-------] 25% (200.0k)");
+  });
+
+  it("renders without a size suffix when used_percentage has no window size", () => {
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 25 } },
+    });
+    const result = contextPercentWidget.render(ctx, { type: "context-percent" });
+    expect(result!.text).toBe("[===-------] 25%");
+  });
 });
 
 describe("separatorWidget", () => {
@@ -213,7 +231,7 @@ describe("compactCountdownWidget", () => {
       bg: "#1a5fb4",
     });
     expect(result!.text).toBe("~27.0k left");
-    expect(result!.bg).toBe("#a67c00");
+    expect(result!.bg).toBe("#b8860b");
   });
 
   it("turns red under 10% headroom", () => {
@@ -225,7 +243,7 @@ describe("compactCountdownWidget", () => {
       bg: "#1a5fb4",
     });
     expect(result!.text).toBe("~7.0k left");
-    expect(result!.bg).toBe("#c01c28");
+    expect(result!.bg).toBe("#a01822");
   });
 
   it("announces an imminent compact at the threshold", () => {
@@ -234,7 +252,7 @@ describe("compactCountdownWidget", () => {
     });
     const result = compactCountdownWidget.render(ctx, { type: "compact-countdown" });
     expect(result!.text).toBe("Compact imminent!");
-    expect(result!.bg).toBe("#c01c28");
+    expect(result!.bg).toBe("#a01822");
   });
 
   it("announces an imminent compact past the threshold", () => {
@@ -243,6 +261,17 @@ describe("compactCountdownWidget", () => {
     });
     const result = compactCountdownWidget.render(ctx, { type: "compact-countdown" });
     expect(result!.text).toBe("Compact imminent!");
+  });
+
+  it("reports full headroom for a brand-new session with 0% usage", () => {
+    // Pre-fix behavior guarded `usedTokens === 0` and returned null here.
+    // Zero usage is a real, renderable state: full headroom to the threshold.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 0, context_window_size: 200_000 } },
+    });
+    const result = compactCountdownWidget.render(ctx, { type: "compact-countdown" });
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("~167.0k left");
   });
 
   it("returns null without a context window", () => {
