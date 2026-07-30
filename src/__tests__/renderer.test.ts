@@ -274,6 +274,54 @@ describe("layoutPowerline", () => {
     // even though it's rendering the wide glyph.
     expect(pieces[1]).toEqual({ text: "▶", fg: "#ffffff", bg: "#a67c00" });
   });
+
+  it("falls back to the wide separator when separatorThin is whitespace-only", () => {
+    // " " is truthy but has no ink — same merge bug as "", just missed by a
+    // naive `|| options.separator` fallback. Issue #36.
+    const pieces = layoutPowerline(
+      [
+        { text: "$14.21", fg: "#ffffff", bg: "#a67c00" },
+        { text: "70%", fg: "#ffffff", bg: "#a67c00" },
+      ],
+      { ...OPTIONS, separatorThin: " " },
+    );
+    expect(pieces[1]).toEqual({ text: "▶", fg: "#ffffff", bg: "#a67c00" });
+  });
+
+  it("draws the thin separator for #abcd vs #aabbcc (unanchored 3-run match)", () => {
+    // chalk's regex is unanchored: it finds "abc" inside "#abcd" the same way
+    // it finds "aabbcc" directly, so both paint 170;187;204. Issue #36.
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#000000", bg: "#abcd" },
+        { text: "b", fg: "#000000", bg: "#aabbcc" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("draws the thin separator for #12345 vs #112233 (unanchored 3-run match)", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#000000", bg: "#12345" },
+        { text: "b", fg: "#000000", bg: "#112233" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
+
+  it("draws the thin separator for #gggggg vs '' (both paint black — no hex run in either)", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#000000", bg: "#gggggg" },
+        { text: "b", fg: "#000000", bg: "" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[1]!.text).toBe("│");
+  });
 });
 
 describe("normalizeColor", () => {
@@ -290,5 +338,20 @@ describe("normalizeColor", () => {
     expect(normalizeColor("red")).toBe("#000000");
     expect(normalizeColor("blue")).toBe("#000000");
     expect(normalizeColor("")).toBe("#000000");
+  });
+
+  // Ground truth measured directly against this project's chalk@5.6.2 at
+  // level 3 (see the fix report for the measurement script): the bg SGR
+  // sequence chalk.bgHex(input) actually emits, decoded back to hex. These
+  // assert against those measured values, not a re-derivation of the regex.
+  it("matches chalk's own hexToRgb parsing exactly (measured, not re-derived)", () => {
+    expect(normalizeColor("#abcd")).toBe("#aabbcc"); // 48;2;170;187;204
+    expect(normalizeColor("#aabbcc")).toBe("#aabbcc"); // 48;2;170;187;204 — identical paint
+    expect(normalizeColor("#12345")).toBe("#112233"); // 48;2;17;34;51
+    expect(normalizeColor("#112233")).toBe("#112233"); // 48;2;17;34;51 — identical paint
+    expect(normalizeColor("#abc")).toBe("#aabbcc"); // 48;2;170;187;204
+    expect(normalizeColor("#gggggg")).toBe("#000000"); // 48;2;0;0;0 — no hex run
+    expect(normalizeColor("#")).toBe("#000000"); // 48;2;0;0;0
+    expect(normalizeColor("")).toBe("#000000"); // 48;2;0;0;0
   });
 });

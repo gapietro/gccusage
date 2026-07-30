@@ -2499,25 +2499,25 @@ function getTheme(name) {
 //#endregion
 //#region src/render/powerline.ts
 source_default.level = 3;
-const HEX6 = /^#?([0-9a-f]{6})$/;
-const HEX3 = /^#?([0-9a-f]{3})$/;
+const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 /**
 * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
-* it: lowercase, expand 3-digit hex to 6, and collapse anything that isn't a
-* valid hex color (named colors, empty strings, garbage) to the same black
-* chalk paints for those inputs. Exported so tests can assert visibility
-* through the same lens the renderer uses to compare colors.
+* it: find the first embedded 6-digit (or 3-digit) hex run per chalk's own
+* unanchored regex, expand a 3-digit match to 6, lowercase it, and collapse
+* anything with no such run (named colors, empty strings, garbage) to the
+* same black chalk paints for those inputs. Because the match is unanchored,
+* inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
+* "#112233") rather than black — that mirrors chalk exactly, even though it
+* looks surprising next to the old anchored behavior. Exported so tests can
+* assert visibility through the same lens the renderer uses to compare
+* colors.
 */
 function normalizeColor(color) {
-	const lower = color.toLowerCase();
-	const six = HEX6.exec(lower);
-	if (six) return `#${six[1]}`;
-	const three = HEX3.exec(lower);
-	if (three) {
-		const [r, g, b] = three[1];
-		return `#${r}${r}${g}${g}${b}${b}`;
-	}
-	return "#000000";
+	const match = CHALK_HEX.exec(color);
+	if (!match) return "#000000";
+	let digits = match[0].toLowerCase();
+	if (digits.length === 3) digits = [...digits].map((c) => c + c).join("");
+	return `#${digits}`;
 }
 function sameColor(a, b) {
 	return normalizeColor(a) === normalizeColor(b);
@@ -2537,7 +2537,7 @@ function layoutPowerline(outputs, options) {
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
 		if (prev !== null) pieces.push(sameColor(prev.bg, bg) ? {
-			text: options.separatorThin || options.separator,
+			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
 			fg: prev.fg,
 			bg
 		} : {
