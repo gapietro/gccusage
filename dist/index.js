@@ -618,7 +618,7 @@ const PowerlineConfigSchema = object({
 	enabled: optional(boolean(), false),
 	theme: optional(string(), "default"),
 	separator: optional(string(), ""),
-	separatorThin: optional(string(), "")
+	separatorThin: optional(string(), "│")
 });
 const CacheConfigSchema = object({
 	statuslineTtlMs: optional(number(), 5e3),
@@ -2499,21 +2499,70 @@ function getTheme(name) {
 //#endregion
 //#region src/render/powerline.ts
 source_default.level = 3;
-function renderPowerlineSegments(outputs, options) {
+const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
+/**
+* Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
+* it: find the first embedded 6-digit (or 3-digit) hex run per chalk's own
+* unanchored regex, expand a 3-digit match to 6, lowercase it, and collapse
+* anything with no such run (named colors, empty strings, garbage) to the
+* same black chalk paints for those inputs. Because the match is unanchored,
+* inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
+* "#112233") rather than black — that mirrors chalk exactly, even though it
+* looks surprising next to the old anchored behavior. Exported so tests can
+* assert visibility through the same lens the renderer uses to compare
+* colors.
+*/
+function normalizeColor(color) {
+	const match = CHALK_HEX.exec(color);
+	if (!match) return "#000000";
+	let digits = match[0].toLowerCase();
+	if (digits.length === 3) digits = [...digits].map((c) => c + c).join("");
+	return `#${digits}`;
+}
+function sameColor(a, b) {
+	return normalizeColor(a) === normalizeColor(b);
+}
+/**
+* Resolve widget outputs and the theme into the exact pieces the statusline is
+* painted from. Exported so tests can assert on the real color model rather
+* than re-deriving theme indexing, which would drift out of sync.
+*/
+function layoutPowerline(outputs, options) {
 	const theme = getTheme(options.theme);
-	const segments = [];
-	let prevBg = null;
+	const pieces = [];
+	let prev = null;
 	for (let i = 0; i < outputs.length; i++) {
 		const output = outputs[i];
 		const style = theme.segments[i % theme.segments.length];
 		const fg = output.fg ?? style.fg;
 		const bg = output.bg ?? style.bg;
-		if (prevBg !== null) segments.push(source_default.hex(prevBg).bgHex(bg)(options.separator));
-		segments.push(source_default.hex(fg).bgHex(bg)(` ${output.text} `));
-		prevBg = bg;
+		if (prev !== null) pieces.push(sameColor(prev.bg, bg) ? {
+			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
+			fg: prev.fg,
+			bg
+		} : {
+			text: options.separator,
+			fg: prev.bg,
+			bg
+		});
+		pieces.push({
+			text: ` ${output.text} `,
+			fg,
+			bg
+		});
+		prev = {
+			fg,
+			bg
+		};
 	}
-	if (prevBg !== null) segments.push(source_default.hex(prevBg)(options.separator));
-	return segments.join("");
+	if (prev !== null) pieces.push({
+		text: options.separator,
+		fg: prev.bg
+	});
+	return pieces;
+}
+function renderPowerlineSegments(outputs, options) {
+	return layoutPowerline(outputs, options).map((piece) => piece.bg ? source_default.hex(piece.fg).bgHex(piece.bg)(piece.text) : source_default.hex(piece.fg)(piece.text)).join("");
 }
 
 //#endregion
@@ -2607,7 +2656,7 @@ function renderLine(outputs, settings, context, flex) {
 		line = renderPowerlineSegments(nonSeparator, {
 			theme: powerline.theme ?? "default",
 			separator: powerline.separator ?? "",
-			separatorThin: powerline.separatorThin ?? ""
+			separatorThin: powerline.separatorThin ?? "│"
 		});
 	} else {
 		const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));

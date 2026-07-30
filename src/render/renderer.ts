@@ -55,7 +55,7 @@ function renderLine(
     line = renderPowerlineSegments(nonSeparator, {
       theme: powerline.theme ?? "default",
       separator: powerline.separator ?? "\uE0B0",
-      separatorThin: powerline.separatorThin ?? "\uE0B1",
+      separatorThin: powerline.separatorThin ?? "\u2502",
     });
   } else {
     const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));

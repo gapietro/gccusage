@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
+import { layoutPowerline, normalizeColor } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -39,26 +40,28 @@ describe("DEFAULT_SETTINGS", () => {
 });
 
 describe("DEFAULT_SETTINGS rendered adjacency", () => {
-  // The powerline separator is drawn in the previous segment's *runtime* bg
-  // over the next segment's runtime bg. Several widgets (context-percent,
-  // compact-countdown, session-cost, today-spend) override bg from thresholds
-  // at render time, so a static comparison of configured `bg` values isn't
-  // enough — two widgets with different configured colors can still collide
-  // once thresholds kick in. These tests render the real widget outputs
-  // across a sweep of context-usage values and check actual adjacency.
+  // Several widgets (context-percent, compact-countdown, session-cost,
+  // today-spend, vim-mode) override bg from thresholds at render time, so a
+  // static comparison of configured colors proves nothing. These tests render
+  // the real widget outputs across a cross product of every threshold
+  // dimension, push them through the renderer's own styling pass, and assert
+  // nothing comes out invisible.
 
   const USAGE_SWEEP = [10, 50, 65, 70, 75, 80, 83.5, 90, 95];
   const WINDOW_SIZE = 200_000;
 
-  // today-spend recolors at its own thresholds, and vim-mode picks a color per
-  // mode. Both must be varied: they are adjacent on line 2 (api-latency used to
-  // sit between them), so a collision only appears in specific combinations —
-  // pinning either dimension hides it. dailyWarn is 10 and dailyDanger 25.
+  // Every widget in the default layout that recolors itself from a threshold
+  // gets its own axis. Pinning any one of them hides collisions that only
+  // appear in specific combinations — that blind spot is what issue #36 was
+  // filed about. sessionWarn 5 / sessionDanger 15, dailyWarn 10 /
+  // dailyDanger 25, and vim-mode picks a color per mode.
+  const SESSION_SWEEP = [2.5, 8, 20];
   const TODAY_SWEEP = [3, 12, 30];
   const VIM_SWEEP = ["NORMAL", "INSERT"];
 
   interface SweepPoint {
     used: number;
+    session: number;
     today: number;
     vim: string;
   }
@@ -66,9 +69,11 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   function sweepPoints(): SweepPoint[] {
     const points: SweepPoint[] = [];
     for (const used of USAGE_SWEEP) {
-      for (const today of TODAY_SWEEP) {
-        for (const vim of VIM_SWEEP) {
-          points.push({ used, today, vim });
+      for (const session of SESSION_SWEEP) {
+        for (const today of TODAY_SWEEP) {
+          for (const vim of VIM_SWEEP) {
+            points.push({ used, session, today, vim });
+          }
         }
       }
     }
@@ -99,14 +104,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       block: null,
       burnRate: { tokensPerMinute: 500, costPerHour: 1, costPerMinute: 0.02 },
       pricing: {},
-      // sessionCostUsd is deliberately held below sessionWarn. session-cost and
-      // context-percent are adjacent on line 1 and share the same alert palette
-      // (#a67c00 / #c01c28), so they collide once both cross their thresholds.
-      // That collision predates the compact-countdown work — those two were
-      // already neighbours — and is tracked separately in issue #36. Varying
-      // this dimension here would fail the suite on a pre-existing defect
-      // rather than on anything this layout changed.
-      sessionCostUsd: 2.5,
+      sessionCostUsd: point.session,
       todayCostUsd: point.today,
       costByModel: new Map(),
       sessionStartTime: null,
@@ -130,32 +128,57 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     return { type: config.type, output, priority: config.priority ?? 99 };
   }
 
-  function assertNoAdjacentCollision(rendered: Rendered[], point: SweepPoint, mode: string): void {
-    for (let i = 1; i < rendered.length; i++) {
-      const prev = rendered[i - 1]!;
-      const curr = rendered[i]!;
-      if (prev.output.bg === undefined || curr.output.bg === undefined) continue;
+  const POWERLINE_OPTIONS = {
+    theme: DEFAULT_SETTINGS.powerline.theme,
+    separator: DEFAULT_SETTINGS.powerline.separator,
+    separatorThin: DEFAULT_SETTINGS.powerline.separatorThin,
+  };
+
+  // The renderer paints separators and segment text from the same resolved
+  // {fg, bg} model, so one predicate covers both: a piece whose fg matches its
+  // own bg is invisible — an unreadable segment, or a seam that makes two
+  // segments read as one block. Compare colors the way chalk's bgHex/hex
+  // actually resolve them (normalizeColor), not a raw string/case compare —
+  // "#fff" and "#ffffff" paint identically but aren't equal as strings.
+  function assertEveryPieceVisible(rendered: Rendered[], point: SweepPoint, mode: string): void {
+    const pieces = layoutPowerline(
+      rendered.map((r) => r.output),
+      POWERLINE_OPTIONS,
+    );
+    const order = rendered.map((r) => r.type).join(" > ");
+    for (const piece of pieces) {
+      // A piece with no ink (empty or whitespace-only text) is invisible
+      // regardless of color — e.g. a misconfigured empty separatorThin.
       expect(
-        prev.output.bg,
-        `[${mode}] ${prev.type} and ${curr.type} both render bg ${prev.output.bg} ` +
-          `at used_percentage=${point.used}, todayCostUsd=${point.today}, vim=${point.vim}`,
-      ).not.toBe(curr.output.bg);
+        piece.text.trim(),
+        `[${mode}] piece has no visible characters at ` +
+          `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
+          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+      ).not.toBe("");
+
+      if (piece.bg === undefined) continue;
+      expect(
+        normalizeColor(piece.fg),
+        `[${mode}] "${piece.text}" is invisible (fg === bg === ${piece.bg}) at ` +
+          `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
+          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+      ).not.toBe(normalizeColor(piece.bg));
     }
   }
 
-  it("never places two rendered segments with the same bg side by side, per line", () => {
+  it("never renders an invisible piece (fg === bg), per line", () => {
     for (const point of sweepPoints()) {
       const context = makeSweepContext(point);
       for (const line of DEFAULT_SETTINGS.lines) {
         const rendered = line.widgets
           .map((config) => renderConfig(context, config))
           .filter((r): r is Rendered => r !== null);
-        assertNoAdjacentCollision(rendered, point, "line");
+        assertEveryPieceVisible(rendered, point, "line");
       }
     }
   });
 
-  it("never places two rendered segments with the same bg side by side, in compact mode", () => {
+  it("never renders an invisible piece (fg === bg), in compact mode", () => {
     // renderCompact (src/render/renderer.ts) flattens both lines and sorts
     // by priority, ignoring line boundaries — so adjacency here can differ
     // from the per-line adjacency above.
@@ -166,7 +189,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         .map((config) => renderConfig(context, config))
         .filter((r): r is Rendered => r !== null)
         .sort((a, b) => a.priority - b.priority);
-      assertNoAdjacentCollision(rendered, point, "compact");
+      assertEveryPieceVisible(rendered, point, "compact");
     }
   });
 });
