@@ -30,6 +30,18 @@ describe("deriveContextUsage", () => {
     expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
   });
 
+  it("remaining_percentage beats used_percentage when both are present", () => {
+    // When both fields exist, the higher-priority remaining_percentage must win
+    const usage = deriveContextUsage({
+      context_window: {
+        remaining_percentage: 93,
+        used_percentage: 50,
+        context_window_size: 1_000_000,
+      },
+    });
+    expect(usage).toEqual({ ratio: 0.07, windowSize: 1_000_000 });
+  });
+
   it("returns a null windowSize when the size is absent", () => {
     const usage = deriveContextUsage({ context_window: { used_percentage: 25 } });
     expect(usage).toEqual({ ratio: 0.25, windowSize: null });
@@ -47,6 +59,24 @@ describe("deriveContextUsage", () => {
         },
       },
     });
+    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
+  });
+
+  it("used_percentage beats current_usage when both are present", () => {
+    // When both fields exist, the higher-priority used_percentage must win
+    const usage = deriveContextUsage({
+      context_window: {
+        used_percentage: 25,
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 100_000,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+    // used_percentage (25) yields ratio 0.25, whereas current_usage would yield 0.5
     expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
   });
 
