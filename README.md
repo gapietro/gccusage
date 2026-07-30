@@ -3,8 +3,8 @@
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
 
 ```
- Opus 4.6 ▶ $14.21 ▶ [========--] 82% (200.0k) ▶ 11.6k tok/m ▶ Cache: 99% ▶
- main ▶ +307 -43 ▶ Today: $14.50 ▶ API: 9m 55s ▶
+ Opus 4.6 ▶ $14.21 ▶ [========--] 82% (200.0k) ▶ ~3.0k left ▶ 11.6k tok/m ▶
+ main ▶ +2 ~5 -1 ▶ +307 -43 ▶ Today: $14.50 ▶
 ```
 
 ## Prerequisites
