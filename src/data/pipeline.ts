@@ -12,7 +12,7 @@ import {
   calculateBurnRate,
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
-import { trackDailyCost } from "./daily-cost-tracker.js";
+import { trackDailyCost, type CostSource } from "./daily-cost-tracker.js";
 import { trackTurn } from "./turn-tracker.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
@@ -68,18 +68,24 @@ export async function buildRenderContext(
   // Determine cost source (cost.total_cost_usd works for both formats)
   const stdinCost = stdin.cost?.total_cost_usd;
   let sessionCostUsd: number;
-  if (settings.costSource === "stdin" && stdinCost !== undefined) {
-    sessionCostUsd = stdinCost;
-  } else if (settings.costSource === "calculated") {
+  let sessionCostSource: CostSource;
+  if (settings.costSource === "calculated" || stdinCost === undefined) {
+    // "calculated", or "stdin"/"auto" falling back when stdin has no cost
     sessionCostUsd = calculatedSessionCost;
+    sessionCostSource = "calculated";
   } else {
-    // auto: prefer stdin if available
-    sessionCostUsd = stdinCost ?? calculatedSessionCost;
+    sessionCostUsd = stdinCost;
+    sessionCostSource = "stdin";
   }
 
   // Today's cost: JSONL-calculated when the user forces calculated costs,
-  // otherwise our per-session daily tracker (stdin-based).
-  const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd);
+  // otherwise our per-session daily tracker (stdin-based). The tracker is
+  // told which source fed it so a source switch isn't read as a restart.
+  const trackedTodayCost = trackDailyCost(
+    stdin.session_id,
+    sessionCostUsd,
+    sessionCostSource,
+  );
   const todayCostUsd =
     settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
 
