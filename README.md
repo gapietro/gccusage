@@ -143,7 +143,7 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `burn-rate` | Token consumption rate (tok/min) |
 | `cache-hit-rate` | Prompt cache hit percentage |
 | `token-breakdown` | Input vs output token counts |
-| `compact-countdown` | Estimated tokens remaining before auto-compact |
+| `compact-countdown` | Estimated tokens remaining before auto-compact ([see note](#about-the-auto-compact-estimate)) |
 | `git-branch` | Current git branch |
 | `git-changes` | Staged/unstaged file counts |
 | `lines-changed` | Lines added/removed in session |
@@ -161,6 +161,18 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `per-model` | Cost breakdown by model |
 | `session-clock` | Session start time |
 | `cwd` | Current working directory |
+
+### About the auto-compact estimate
+
+`compact-countdown` assumes auto-compact fires once **83.5%** of the context
+window is consumed — a 16.5% buffer. That figure is an estimate of Claude Code's
+internal behavior, not a value it reports, and it has not been verified against a
+measured session. It may also differ between 200k and 1M context windows.
+
+Treat the number as a guide, not a guarantee: if the buffer is larger than 16.5%
+the widget warns late, and if smaller it warns early. Note that
+`context-percent`'s own red threshold sits at 90%, which is above this estimate —
+so under the current model a session compacts before that red state is reached.
 
 ### Widget options
 
