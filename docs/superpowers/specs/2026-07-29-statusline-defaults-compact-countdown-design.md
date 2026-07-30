@@ -68,11 +68,18 @@ full the context is. `compact-countdown` needs exactly the same basis. Extract i
 ```ts
 // src/utils/context-usage.ts
 export interface ContextUsage {
-  ratio: number;       // 0..1, fraction of the window consumed
-  windowSize: number;  // tokens
+  ratio: number;              // 0..1, fraction of the window consumed
+  windowSize: number | null;  // tokens; null when stdin omits context_window_size
 }
 export function deriveContextUsage(stdin: StatusJson): ContextUsage | null;
 ```
+
+`windowSize` must be nullable. `context-percent` renders today when
+`used_percentage` is present but `context_window_size` is absent — it just omits
+the ` (200.0k)` suffix. A non-null `windowSize` would turn that case into a
+`null` render, so the "no behavior change" claim would be false.
+`compact-countdown` needs a real window size to convert a ratio into tokens, so
+it returns `null` when `windowSize` is null.
 
 Fallback order, preserved exactly from the current `context-percent`:
 
@@ -175,8 +182,13 @@ widget reference table needs no change — it already lists all 25 widgets,
 - `pipeline.test.ts` and `statusline.test.ts` pass `DEFAULT_SETTINGS` as input and
   assert on caching identity and cost behavior, not on rendered segment text —
   unaffected.
-- `renderer.test.ts` needs checking for any assumption about default segment
-  counts or priorities.
+- `renderer.test.ts` builds its own inline `lines` arrays in every case and never
+  imports `DEFAULT_SETTINGS` — unaffected (confirmed).
+
+New guard test: walk every line in `DEFAULT_SETTINGS` and assert that no two
+adjacent widgets share a `bg`, and that every `type` resolves via `getWidget`.
+The invisible-separator defect was in the shipped defaults for months; this
+closes that class of bug rather than just the one instance.
 
 ## Out of scope
 
