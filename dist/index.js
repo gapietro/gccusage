@@ -1212,18 +1212,22 @@ function writeDailyCostFile(data) {
 * Record the current session's cumulative cost and return today's total
 * across all sessions (spend since local midnight only).
 */
-function trackDailyCost(sessionId, costUsd, now = new Date()) {
+function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 	const data = readDailyCostFile(now);
 	if (sessionId) {
 		const existing = data.sessions.find((s) => s.sessionId === sessionId);
 		if (existing) {
-			if (costUsd < existing.costUsd) existing.baselineUsd = -Math.max(0, existing.costUsd - existing.baselineUsd);
+			const accruedToday = Math.max(0, existing.costUsd - existing.baselineUsd);
+			if (existing.source !== void 0 && existing.source !== source) existing.baselineUsd = costUsd - accruedToday;
+			else if (costUsd < existing.costUsd) existing.baselineUsd = -accruedToday;
 			existing.costUsd = costUsd;
+			existing.source = source;
 			existing.updatedAt = now.getTime();
 		} else data.sessions.push({
 			sessionId,
 			costUsd,
 			baselineUsd: 0,
+			source,
 			updatedAt: now.getTime()
 		});
 		writeDailyCostFile(data);
@@ -1295,10 +1299,15 @@ async function buildRenderContext(stdin, settings) {
 	const calculatedTodayCost = calculateTotalCost(todayCostByModel);
 	const stdinCost = stdin.cost?.total_cost_usd;
 	let sessionCostUsd;
-	if (settings.costSource === "stdin" && stdinCost !== void 0) sessionCostUsd = stdinCost;
-	else if (settings.costSource === "calculated") sessionCostUsd = calculatedSessionCost;
-	else sessionCostUsd = stdinCost ?? calculatedSessionCost;
-	const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd);
+	let sessionCostSource;
+	if (settings.costSource === "calculated" || stdinCost === void 0) {
+		sessionCostUsd = calculatedSessionCost;
+		sessionCostSource = "calculated";
+	} else {
+		sessionCostUsd = stdinCost;
+		sessionCostSource = "stdin";
+	}
+	const trackedTodayCost = trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackedTodayCost;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
@@ -2655,30 +2664,45 @@ function isSeparatorOutput(output) {
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
-function checkCache(ttlMs, sessionId) {
+function checkCache(ttlMs, sessionId, costUsd) {
 	const cachePath = getCachePath();
 	try {
 		if (!fs.existsSync(cachePath)) return null;
 		const raw = fs.readFileSync(cachePath, "utf-8");
 		const entry = JSON.parse(raw);
 		if (entry.sessionId !== sessionId) return null;
+		if (entry.costUsd !== costUsd) return null;
 		if (Date.now() - entry.timestamp > ttlMs) return null;
 		return entry.output;
 	} catch {
 		return null;
 	}
 }
-function writeCache(output, sessionId) {
+function writeCache(output, sessionId, costUsd) {
 	const cachePath = getCachePath();
 	try {
 		ensureDir(path.dirname(cachePath));
 		const entry = {
 			output,
 			timestamp: Date.now(),
-			sessionId
+			sessionId,
+			costUsd
 		};
 		fs.writeFileSync(cachePath, JSON.stringify(entry));
 	} catch {}
+}
+
+//#endregion
+//#region src/statusline.ts
+async function runStatusline(stdin, settings) {
+	const sessionId = stdin.session_id;
+	const stdinCost = stdin.cost?.total_cost_usd;
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId, stdinCost);
+	if (cached !== null) return cached;
+	const context = await buildRenderContext(stdin, settings);
+	const output = renderStatusline(context, settings);
+	writeCache(output, sessionId, stdinCost);
+	return output;
 }
 
 //#endregion
@@ -2783,15 +2807,7 @@ async function main() {
 	let raw = "";
 	if (!isTTY) raw = await readStdin();
 	const stdin = parseStatusJson(raw) ?? {};
-	const sessionId = stdin.session_id;
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId);
-	if (cached !== null) {
-		process.stdout.write(cached);
-		return;
-	}
-	const context = await buildRenderContext(stdin, settings);
-	const output = renderStatusline(context, settings);
-	writeCache(output, sessionId);
+	const output = await runStatusline(stdin, settings);
 	process.stdout.write(output);
 }
 main().catch(() => {

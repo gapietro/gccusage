@@ -40,3 +40,25 @@ describe("checkCache session matching", () => {
     expect(checkCache(60000, undefined)).toBeNull();
   });
 });
+
+describe("checkCache cost matching", () => {
+  it("returns cached output when the cost is unchanged", () => {
+    writeCache("output-a", "session-a", 1.25);
+    expect(checkCache(60000, "session-a", 1.25)).toBe("output-a");
+  });
+
+  it("misses when the requested cost differs from the cached cost", () => {
+    writeCache("output-a", "session-a", 1.25);
+    expect(checkCache(60000, "session-a", 2.5)).toBeNull();
+  });
+
+  it("misses when the cache entry has no cost but one is requested", () => {
+    writeCache("output-a", "session-a", undefined);
+    expect(checkCache(60000, "session-a", 1.25)).toBeNull();
+  });
+
+  it("misses when the cache entry has a cost but none is requested", () => {
+    writeCache("output-a", "session-a", 1.25);
+    expect(checkCache(60000, "session-a", undefined)).toBeNull();
+  });
+});
