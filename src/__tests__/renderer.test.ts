@@ -322,4 +322,53 @@ describe("layoutPowerline", () => {
     );
     expect(pieces[1]!.text).toBe("│");
   });
+
+  // The wide glyph is painted in the previous segment's bg over this one's, so
+  // near-identical backgrounds make it unreadable even though they differ.
+  // Below MIN_SEPARATOR_DELTA the thin glyph is used instead. Measured ΔE2000
+  // for each pair is in the comment; the two above-threshold cases are the
+  // regression guard on the constant. See issue #40.
+  it("draws the thin separator when backgrounds are perceptually close", () => {
+    // ΔE 4.61 — context-percent warn beside compact-countdown warn.
+    const warn = layoutPowerline(
+      [
+        { text: "70%", fg: "#ffffff", bg: "#a67c00" },
+        { text: "~28k left", fg: "#ffffff", bg: "#b8860b" },
+      ],
+      OPTIONS,
+    );
+    expect(warn[1]).toEqual({ text: "│", fg: "#ffffff", bg: "#b8860b" });
+
+    // ΔE 6.54 — context-percent danger beside compact-countdown danger.
+    const danger = layoutPowerline(
+      [
+        { text: "95%", fg: "#ffffff", bg: "#c01c28" },
+        { text: "Compact imminent!", fg: "#ffffff", bg: "#a01822" },
+      ],
+      OPTIONS,
+    );
+    expect(danger[1]).toEqual({ text: "│", fg: "#ffffff", bg: "#a01822" });
+  });
+
+  it("keeps the wide separator for backgrounds just above the threshold", () => {
+    // ΔE 9.14 — today-spend beside vim-mode NORMAL, in the shipped defaults.
+    const vim = layoutPowerline(
+      [
+        { text: "Today: $3.00", fg: "#ffffff", bg: "#26a269" },
+        { text: "NORMAL", fg: "#ffffff", bg: "#2ec27e" },
+      ],
+      OPTIONS,
+    );
+    expect(vim[1]).toEqual({ text: "▶", fg: "#26a269", bg: "#2ec27e" });
+
+    // ΔE 9.63 — git-branch beside git-changes, in the shipped defaults.
+    const git = layoutPowerline(
+      [
+        { text: "main", fg: "#ffffff", bg: "#613583" },
+        { text: "+2 ~1", fg: "#ffffff", bg: "#7d4fa8" },
+      ],
+      OPTIONS,
+    );
+    expect(git[1]).toEqual({ text: "▶", fg: "#613583", bg: "#7d4fa8" });
+  });
 });

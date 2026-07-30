@@ -96,10 +96,10 @@ Available themes: `default`, `ocean`, `forest`, `sunset`, `minimal`
 ```
 
 `separator` is drawn between segments of different colors. When two neighbouring
-segments resolve to the same background — which happens when, say, session cost
-and context usage both cross their warning thresholds at once — the wide glyph
-would be invisible, so `separatorThin` is drawn in the previous segment's text
-color instead.
+segments resolve to backgrounds that are the same — or too close to tell apart,
+which happens when, say, context usage and the compact countdown both cross their
+warning thresholds — the wide glyph would not read against them, so `separatorThin`
+is drawn in the previous segment's text color instead.
 
 ### Custom layout
 
