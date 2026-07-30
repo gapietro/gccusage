@@ -2682,6 +2682,22 @@ function writeCache(output, sessionId) {
 }
 
 //#endregion
+//#region src/statusline.ts
+async function runStatusline(stdin, settings) {
+	const sessionId = stdin.session_id;
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId);
+	if (cached !== null) {
+		const stdinCost = stdin.cost?.total_cost_usd;
+		if (stdinCost !== void 0 && settings.costSource !== "calculated") trackDailyCost(sessionId, stdinCost);
+		return cached;
+	}
+	const context = await buildRenderContext(stdin, settings);
+	const output = renderStatusline(context, settings);
+	writeCache(output, sessionId);
+	return output;
+}
+
+//#endregion
 //#region src/cli.ts
 async function runCli(args) {
 	const command = args[0] ?? "today";
@@ -2783,15 +2799,7 @@ async function main() {
 	let raw = "";
 	if (!isTTY) raw = await readStdin();
 	const stdin = parseStatusJson(raw) ?? {};
-	const sessionId = stdin.session_id;
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId);
-	if (cached !== null) {
-		process.stdout.write(cached);
-		return;
-	}
-	const context = await buildRenderContext(stdin, settings);
-	const output = renderStatusline(context, settings);
-	writeCache(output, sessionId);
+	const output = await runStatusline(stdin, settings);
 	process.stdout.write(output);
 }
 main().catch(() => {
