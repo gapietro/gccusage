@@ -87,6 +87,13 @@ Create `~/.config/gccusage/settings.json` to customize. You only need to specify
 
 Available themes: `default`, `ocean`, `forest`, `sunset`, `minimal`
 
+Some themes have subtle gradient ramps between segment backgrounds. For `minimal`, `forest`,
+and (to a lesser extent) `ocean`, most consecutive segments are close enough in color that
+the wide `▶` separator would not read against them, so the thin `│` is drawn instead — this
+is deliberate (see `separatorThin` below), not a bug. It only applies to a custom layout
+whose widgets don't set their own `bg`; the default layout's widgets all set one, so the
+theme's colors never come into play there.
+
 ### Separators
 
 ```json

@@ -52,6 +52,17 @@ describe("colorDistance", () => {
     ["#000000", "#ffffff", 100.0],
     ["#808080", "#ffffff", 33.239],
 
+    // One-sided chroma-zero: a grey beside a *chromatic* color, as opposed to
+    // the two rows above which are grey-vs-grey (chroma 0 on BOTH sides, so
+    // hBarP = h1p + h2p and dCp/dHp are all 0 there — those rows exercise the
+    // lightness term only). These pin the undefined-hue branch somewhere its
+    // value actually feeds dCp/dHp/hBarP. Live path: burn-rate is #555555, a
+    // pure grey, adjacent to compact-countdown in the shipped default bar.
+    // Verified against culori by a reviewer; this implementation already
+    // reproduces them.
+    ["#808080", "#0d7377", 22.3895],
+    ["#000000", "#c01c28", 40.0335],
+
     // Red/magenta pairs whose hues straddle the 0/360 boundary (hue ~6-9°
     // vs hue ~358-359°, per culori's lch65), which is what exposes the
     // hue-average wraparound bug specifically.

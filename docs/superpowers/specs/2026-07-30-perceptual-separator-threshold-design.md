@@ -83,6 +83,42 @@ A WCAG-style 3:1 floor was rejected: no boundary in the default layout reaches 1
 every separator would become thin and the powerline arrow would disappear from the bar
 entirely.
 
+### Addendum (final review, 2026-07-30): effect on built-in theme ramps
+
+The enumeration above covers only the adjacent background pairs reachable through
+`DEFAULT_SETTINGS`' explicit widget `bg` values. It does not cover `THEMES`
+(`src/render/themes.ts`) directly, because every widget in `DEFAULT_SETTINGS` sets its own
+`bg`, so a theme's segment colors are never actually read there — `layoutPowerline` only
+falls through to `style.bg` when `output.bg` is absent.
+
+That fallback IS reachable: it is exactly the shape the README's "Change theme" example
+implies — a custom `~/.config/gccusage/settings.json` with widgets that omit `bg` and rely
+on the theme's ramp. Nobody had measured `MIN_SEPARATOR_DELTA`'s effect on the theme ramps
+themselves. Measured during final review, `colorDistance` between each theme's consecutive
+segment backgrounds (wrapping segment N-1 back to segment 0, since `layoutPowerline` cycles
+with `i % theme.segments.length` and a 5th+ segment reuses `segments[0]`):
+
+| theme | boundaries below ΔE 8 | consecutive-pair distances (wrapping N-1 → 0) |
+|---|---|---|
+| `default` | 1 of 4 | 26.58, 9.68, **3.15**, 34.33 |
+| `ocean` | 2 of 4 | 9.38, **7.31**, **5.74**, 20.87 |
+| `forest` | 3 of 4 | **7.20**, **5.53**, **6.12**, 18.35 |
+| `sunset` | 0 of 4 | 10.91, 9.63, 8.91, 28.53 |
+| `minimal` | 3 of 4 | **4.13**, **3.15**, **2.43**, 9.70 |
+
+**Decision: accept, do not re-shade.** The wide arrow at, e.g., `minimal`'s ΔE 2.43 boundary
+was already invisible before this branch — `minimal` users previously saw a bar with no
+visible segment boundary there at all. Falling back to the thin separator gives them one.
+That is a functional improvement, not a regression to fix by adjusting the theme palettes.
+Re-shading `minimal`, `forest`, or `ocean` to push every ramp step above ΔE 8 was considered
+and rejected: it's a cosmetic redesign of themes nobody has reported a problem with, done in
+response to a test the branch itself introduces, and out of scope for a threshold fix.
+
+This is now a **stated** decision rather than a silent side effect, pinned by
+`src/__tests__/themes.test.ts` (exact below-threshold count per theme, plus a check that the
+thin-separator fallback is itself legible for every below-threshold pair) and documented in
+the README's "Change theme" section.
+
 ## Design
 
 ### 1. New module: `src/render/color-compare.ts`
@@ -178,9 +214,18 @@ All existing separator tests must keep passing unchanged — identical backgroun
 
 `src/__tests__/defaults.test.ts` tightens its per-piece assertion from "fg differs from bg"
 to `colorDistance(piece.fg, piece.bg) >= MIN_SEPARATOR_DELTA`, still skipping the closing
-separator (no `bg`). This holds by construction — a wide separator is only emitted above
-the threshold, and a thin one is a light foreground on a dark background — which is what
-makes it a useful regression guard rather than a restatement.
+separator (no `bg`). This has real teeth on two of the three piece kinds emitted:
+segment text (fg is the widget's/theme's own color vs its own bg) and the thin separator
+(fg = prev.fg vs the incoming bg, genuinely unconstrained by the renderer). For a wide
+separator it is a tautology — `powerline.ts` sets that piece's `fg = prev.bg`, and the
+renderer only emitted a wide separator because `colorDistance(prev.bg, bg) >=
+MIN_SEPARATOR_DELTA` already held, same two arguments and constant — so it cannot fail
+there. It also does not guard the palette itself: moving a color to ΔE 1 from its neighbor
+does not fail this sweep, because `layoutPowerline` simply falls back to the thin glyph —
+by design, but worth being explicit that "fails the moment either side drifts" holds only
+for the text and thin-separator pieces, not for how close two colors are allowed to get.
+(Corrected during final review — see the "theme ramps" addendum above; the original
+draft of this paragraph overstated both points.)
 
 `MIN_SEPARATOR_DELTA` is exported from `powerline.ts` so the test binds to the real
 constant instead of duplicating the number.

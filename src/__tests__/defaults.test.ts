@@ -136,12 +136,28 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   };
 
   // The renderer paints separators and segment text from the same resolved
-  // {fg, bg} model, so one predicate covers both: a piece whose fg is too
-  // close to its own bg is unreadable — an illegible segment, or a seam that
-  // makes two segments look like one block. The floor is the same constant
-  // the renderer uses to choose a separator, so this holds by construction
-  // and fails the moment either side drifts. Exact equality is not enough:
-  // "#a67c00" on "#b8860b" are different colors and still unreadable (#40).
+  // {fg, bg} model, so one predicate covers both — but it has real teeth on
+  // only two of the three piece kinds layoutPowerline emits:
+  //
+  //   - segment text: fg is the widget's/theme's own color vs its own bg —
+  //     a genuine check, unconstrained by the renderer.
+  //   - thin separator: fg = prev.fg vs the incoming bg — also genuine, and
+  //     the path that gets more traffic now that more boundaries fall back
+  //     to it (context-percent/compact-countdown's alert shades, #40).
+  //   - wide separator: fg = prev.bg (set by powerline.ts itself), and the
+  //     renderer only emits a wide separator when
+  //     colorDistance(prev.bg, bg) >= MIN_SEPARATOR_DELTA already held —
+  //     same two arguments, same function, same constant. Asserting it here
+  //     again is a tautology; it cannot fail. It is NOT new coverage for the
+  //     "#a67c00" vs "#b8860b" case from #40 — with this renderer that pair
+  //     can no longer be emitted as a wide separator at all, only thin.
+  //
+  // This also does not guard the palette itself: nudge "#b8860b" to ΔE 1
+  // from "#a67c00" and this sweep still passes, because layoutPowerline just
+  // draws the thin glyph instead — the intended design (see #40), but it
+  // means "fails the moment either side drifts" is only true for the text
+  // and thin-separator pieces, not for how close two theme/widget colors are
+  // allowed to get.
   function assertEveryPieceVisible(rendered: Rendered[], point: SweepPoint, mode: string): void {
     const pieces = layoutPowerline(
       rendered.map((r) => r.output),
