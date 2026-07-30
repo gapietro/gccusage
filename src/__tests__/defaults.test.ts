@@ -155,7 +155,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     }
   }
 
-  it("never places two rendered segments with the same bg side by side, per line", () => {
+  it("never renders an invisible piece (fg === bg), per line", () => {
     for (const point of sweepPoints()) {
       const context = makeSweepContext(point);
       for (const line of DEFAULT_SETTINGS.lines) {
@@ -167,7 +167,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     }
   });
 
-  it("never places two rendered segments with the same bg side by side, in compact mode", () => {
+  it("never renders an invisible piece (fg === bg), in compact mode", () => {
     // renderCompact (src/render/renderer.ts) flattens both lines and sorts
     // by priority, ignoring line boundaries — so adjacency here can differ
     // from the per-line adjacency above.
