@@ -1,0 +1,89 @@
+import { describe, it, expect } from "vitest";
+import { deriveContextUsage } from "../utils/context-usage.js";
+
+describe("deriveContextUsage", () => {
+  it("prefers remaining_percentage", () => {
+    const usage = deriveContextUsage({
+      context_window: { remaining_percentage: 93, context_window_size: 1_000_000 },
+    });
+    expect(usage).toEqual({ ratio: 0.07, windowSize: 1_000_000 });
+  });
+
+  it("ignores cumulative token totals when a percentage is available", () => {
+    // total_input_tokens/total_output_tokens are cumulative across the session
+    // and dwarf the window; they must not influence fullness.
+    const usage = deriveContextUsage({
+      context_window: {
+        remaining_percentage: 93,
+        context_window_size: 1_000_000,
+        total_input_tokens: 2_600_000,
+        total_output_tokens: 90_000,
+      },
+    });
+    expect(usage!.ratio).toBeCloseTo(0.07, 10);
+  });
+
+  it("falls back to used_percentage", () => {
+    const usage = deriveContextUsage({
+      context_window: { used_percentage: 25, context_window_size: 200_000 },
+    });
+    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
+  });
+
+  it("returns a null windowSize when the size is absent", () => {
+    const usage = deriveContextUsage({ context_window: { used_percentage: 25 } });
+    expect(usage).toEqual({ ratio: 0.25, windowSize: null });
+  });
+
+  it("falls back to summing current_usage", () => {
+    const usage = deriveContextUsage({
+      context_window: {
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 30_000,
+          output_tokens: 5_000,
+          cache_creation_input_tokens: 10_000,
+          cache_read_input_tokens: 5_000,
+        },
+      },
+    });
+    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
+  });
+
+  it("supports the legacy numeric context_window with token_usage", () => {
+    const usage = deriveContextUsage({
+      context_window: 200_000,
+      token_usage: {
+        input_tokens: 45_000,
+        output_tokens: 5_000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000 });
+  });
+
+  it("returns null when there is no context window at all", () => {
+    expect(deriveContextUsage({})).toBeNull();
+  });
+
+  it("returns null when current_usage is the only basis but the size is missing", () => {
+    // All four counts are required by the inferred type: CurrentUsageSchema
+    // declares them with valibot defaults, so they are non-optional on output.
+    const usage = deriveContextUsage({
+      context_window: {
+        current_usage: {
+          input_tokens: 1000,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+    expect(usage).toBeNull();
+  });
+
+  it("returns null for a legacy numeric window with no token_usage", () => {
+    expect(deriveContextUsage({ context_window: 200_000 })).toBeNull();
+  });
+});
