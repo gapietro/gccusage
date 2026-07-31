@@ -58,5 +58,12 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=23.6.0",
+      "onFail": "warn"
+    }
   }
 }

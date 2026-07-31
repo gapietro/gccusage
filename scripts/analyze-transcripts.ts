@@ -1,9 +1,16 @@
 /**
  * Transcript analysis for issue #49 — what a token-efficiency meter should measure.
  *
- * Requires Node >= 23.6, which strips TypeScript types natively. On older
- * Node this file fails to parse; there is no build step and no dependency
- * to install.
+ * Runs under Node with no build step and no dependency to install, which
+ * requires native TypeScript type stripping — unflagged in Node 23.6 and
+ * backported to 22.x. On a Node without it this file fails to parse before
+ * any of its code runs, so it cannot report the problem itself; the symptom
+ * is a SyntaxError on a type annotation. `process.features.typescript`
+ * tells you whether the current Node qualifies.
+ *
+ * This is a development tool. It is not part of the published package
+ * (`files` ships `dist` only), so it does not constrain `engines.node`,
+ * which governs the bundled statusline that consumers actually install.
  *
  *   npm run analyze                    # markdown tables
  *   npm run analyze -- --json          # machine-readable aggregates

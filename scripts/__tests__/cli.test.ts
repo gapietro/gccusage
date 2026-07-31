@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs } from "../lib/cli.ts";
+import { nodeRunsTypeScript } from "./node-ts-support.ts";
 
 let dir: string;
 
@@ -67,7 +68,8 @@ describe("parseArgs", () => {
   });
 });
 
-describe("analyze-transcripts CLI", () => {
+// Spawns the real entry point, so it needs a Node that runs .ts directly.
+describe.skipIf(!nodeRunsTypeScript)("analyze-transcripts CLI", () => {
   function run(args: string[]): { status: number; stderr: string; stdout: string } {
     try {
       const stdout = execFileSync(

@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildReport, renderMarkdown } from "../lib/report.ts";
+import { nodeRunsTypeScript } from "./node-ts-support.ts";
 
 let root: string;
 
@@ -114,7 +115,8 @@ describe("renderMarkdown", () => {
   });
 });
 
-describe("CLI", () => {
+// Spawns the real entry point, so it needs a Node that runs .ts directly.
+describe.skipIf(!nodeRunsTypeScript)("CLI", () => {
   it("prints markdown by default and JSON with --json", () => {
     seedSession("-Users-me-alpha", "sess-1", 10);
 
