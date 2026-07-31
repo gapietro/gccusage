@@ -712,11 +712,14 @@ Run:
 
 ```bash
 npm run build
-rm -f ~/.cache/gccusage/statusline-cache.json
-echo '{"session_id":"plan-check","model":{"id":"claude-opus-5","display_name":"Opus 5"},"cost":{"total_cost_usd":1.23},"context_window":{"used_percentage":42}}' | node dist/index.js; echo
+mkdir -p /tmp/gcc-bad-cache
+rm -f /tmp/gcc-bad-cache/gccusage/statusline-cache.json
+echo '{"session_id":"plan-check","model":{"id":"claude-opus-5","display_name":"Opus 5"},"cost":{"total_cost_usd":1.23},"context_window":{"used_percentage":42}}' | XDG_CACHE_HOME=/tmp/gcc-bad-cache node dist/index.js; echo
 ```
 
 Expected: the normal two-line powerline bar. Confirm it is unchanged from before this branch — the defaults are all hex, so nothing should move.
+
+(`XDG_CACHE_HOME` is redirected to a temp dir here, and in every other step that runs the binary below, so `plan-check` entries never land in the real `~/.cache/gccusage/`.)
 
 - [ ] **Step 4: Verify the error path does not poison the cache**
 
@@ -725,12 +728,12 @@ Run:
 ```bash
 mkdir -p /tmp/gcc-bad/gccusage
 printf '{"lines":[{"widgets":[{"type":"model","bg":"196"}]}]}' > /tmp/gcc-bad/gccusage/settings.json
-echo '{"session_id":"plan-check"}' | XDG_CONFIG_HOME=/tmp/gcc-bad node dist/index.js; echo
+echo '{"session_id":"plan-check"}' | XDG_CONFIG_HOME=/tmp/gcc-bad XDG_CACHE_HOME=/tmp/gcc-bad-cache node dist/index.js; echo
 printf '{"lines":[{"widgets":[{"type":"model","bg":"#26a269"}]}]}' > /tmp/gcc-bad/gccusage/settings.json
-echo '{"session_id":"plan-check"}' | XDG_CONFIG_HOME=/tmp/gcc-bad node dist/index.js; echo
+echo '{"session_id":"plan-check","model":{"id":"claude-opus-5","display_name":"Opus 5"}}' | XDG_CONFIG_HOME=/tmp/gcc-bad XDG_CACHE_HOME=/tmp/gcc-bad-cache node dist/index.js; echo
 ```
 
-Expected: the first command prints the error line; the second immediately prints a rendered bar. If the second still shows the error, the early return is happening after the cache write — go back to Task 2 Step 9.
+Expected: the first command prints the error line; the second immediately prints a rendered bar. (The second command's stdin includes a `model` field so the single `model` widget actually has something to render — without it the command would print 0 bytes, which looks identical to a crash.) If the second still shows the error, the early return is happening after the cache write — go back to Task 2 Step 9.
 
 - [ ] **Step 5: Verify a malformed config file**
 
@@ -738,8 +741,8 @@ Run:
 
 ```bash
 printf 'not json{{{' > /tmp/gcc-bad/gccusage/settings.json
-echo '{"session_id":"plan-check"}' | XDG_CONFIG_HOME=/tmp/gcc-bad node dist/index.js; echo
-rm -rf /tmp/gcc-bad
+echo '{"session_id":"plan-check"}' | XDG_CONFIG_HOME=/tmp/gcc-bad XDG_CACHE_HOME=/tmp/gcc-bad-cache node dist/index.js; echo
+rm -rf /tmp/gcc-bad /tmp/gcc-bad-cache
 ```
 
 Expected: an error line containing `invalid JSON`, not a silently-default bar.

@@ -71,15 +71,29 @@ export interface ConfigLoad {
   error?: string;
 }
 
+/** Cap on the `received` value embedded in an error line, in characters. */
+const MAX_RECEIVED_LENGTH = 120;
+
+/** Truncate an already-stringified `received` value so one bad field can't blow up the line. */
+function truncateReceived(received: string): string {
+  if (received.length <= MAX_RECEIVED_LENGTH) return received;
+  return `${received.slice(0, MAX_RECEIVED_LENGTH)}…`;
+}
+
 /** One line describing why the config file was rejected. */
 function describeIssues(issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]]): string {
   const [first, ...rest] = issues;
   const dotPath = v.getDotPath(first);
   const where = dotPath ? `${dotPath}: ` : "";
   const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
+  // valibot's own type-mismatch ("schema" kind) messages already embed the
+  // received value (e.g. "Invalid type: Expected Array but received \"nope\"").
+  // Only `v.check` failures ("validation" kind) have a message that doesn't
+  // mention the value, so only those need the explicit `(got …)` suffix.
   // `first.received` is already quoted by valibot ("196" comes back as the
-  // 5-character string `"196"`), so it is interpolated bare.
-  return `${where}${first.message} (got ${first.received})${more}`;
+  // 5-character string `"196"`), so it is interpolated bare, just capped.
+  const suffix = first.kind === "validation" ? ` (got ${truncateReceived(first.received)})` : "";
+  return `${where}${first.message}${suffix}${more}`;
 }
 
 export function loadSettings(): ConfigLoad {

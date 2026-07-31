@@ -174,6 +174,16 @@ describe("loadSettings", () => {
     expect(error).toContain("(+1 more)");
   });
 
+  it("reports a root-level type mismatch without a dot-path prefix", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("3");
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("Invalid type: Expected Object but received 3");
+    expect(error).not.toContain("null:");
+  });
+
   it("accepts a named color and hex side by side", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(

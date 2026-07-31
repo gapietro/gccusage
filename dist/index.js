@@ -1307,13 +1307,21 @@ function mergeSettings(defaults, raw, validated) {
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
 }
+/** Cap on the `received` value embedded in an error line, in characters. */
+const MAX_RECEIVED_LENGTH = 120;
+/** Truncate an already-stringified `received` value so one bad field can't blow up the line. */
+function truncateReceived(received) {
+	if (received.length <= MAX_RECEIVED_LENGTH) return received;
+	return `${received.slice(0, MAX_RECEIVED_LENGTH)}…`;
+}
 /** One line describing why the config file was rejected. */
 function describeIssues(issues) {
 	const [first, ...rest] = issues;
 	const dotPath = getDotPath(first);
 	const where = dotPath ? `${dotPath}: ` : "";
 	const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
-	return `${where}${first.message} (got ${first.received})${more}`;
+	const suffix = first.kind === "validation" ? ` (got ${truncateReceived(first.received)})` : "";
+	return `${where}${first.message}${suffix}${more}`;
 }
 function loadSettings() {
 	const configPath = getConfigPath();

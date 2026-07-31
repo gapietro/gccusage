@@ -27,8 +27,8 @@
                   "description": "Widget type"
                 },
                 "label": { "type": "string", "description": "Optional label prefix" },
-                "fg": { "type": "string", "description": "Foreground color (named, hex, or ansi256)" },
-                "bg": { "type": "string", "description": "Background color (named, hex, or ansi256)" },
+                "fg": { "type": "string", "description": "Foreground color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)" },
+                "bg": { "type": "string", "description": "Background color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)" },
                 "icon": { "type": "string", "description": "Icon prefix" },
                 "format": { "type": "string", "description": "Custom format string" },
                 "command": { "type": "string", "description": "Shell command (custom-command widget)" },

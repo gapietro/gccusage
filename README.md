@@ -217,6 +217,15 @@ stricter than it looks: `"#12345"` (a typo) and `"196"` (an ansi256 code) are
 errors, not colors. ansi256 codes are not supported — see
 [issue #42](https://github.com/gapietro/gccusage/issues/42).
 
+This applies to any config load failure, not just colors — malformed JSON, a
+wrong type (`"enabled": "yes"`), or an unknown field value anywhere in the
+file all replace the statusline with the same kind of error line, rather than
+silently falling back to defaults. It looks like this:
+
+```
+⚠ gccusage config  ~/.config/gccusage/settings.json — lines.0.widgets.0.bg: must be a color name or #rgb/#rrggbb hex (got "196")
+```
+
 ### Custom command widget
 
 ```json
