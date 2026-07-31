@@ -5,6 +5,15 @@ export interface ContextUsage {
   ratio: number;
   /** Window size in tokens, or null when stdin did not report one. */
   windowSize: number | null;
+  /**
+   * Tokens occupying the window: exact when stdin reported the breakdown,
+   * otherwise derived from `ratio`, otherwise null.
+   *
+   * Prefer this over `ratio` for token maths. `used_percentage` is a whole
+   * number, which at a 1M window quantises to 10k-token steps — against a
+   * 33k-token compaction budget that is up to +/-5k of error.
+   */
+  usedTokens: number | null;
 }
 
 interface TokenCounts {
@@ -23,6 +32,16 @@ function sumTokens(counts: TokenCounts): number {
   );
 }
 
+function withTokens(
+  ratio: number,
+  windowSize: number | null,
+  exact: number | undefined,
+): ContextUsage {
+  const usedTokens =
+    exact ?? (windowSize !== null ? Math.round(ratio * windowSize) : null);
+  return { ratio, windowSize, usedTokens };
+}
+
 /**
  * How full the context window is.
  *
@@ -35,16 +54,18 @@ export function deriveContextUsage(stdin: StatusJson): ContextUsage | null {
 
   if (typeof cw === "object" && cw !== null) {
     const windowSize = cw.context_window_size ?? null;
+    // Exact when present, regardless of which field supplies the ratio.
+    const exact = cw.current_usage ? sumTokens(cw.current_usage) : undefined;
 
     // remaining_percentage accounts for all tokens (input, output, system).
     if (cw.remaining_percentage != null) {
-      return { ratio: (100 - cw.remaining_percentage) / 100, windowSize };
+      return withTokens((100 - cw.remaining_percentage) / 100, windowSize, exact);
     }
     if (cw.used_percentage != null) {
-      return { ratio: cw.used_percentage / 100, windowSize };
+      return withTokens(cw.used_percentage / 100, windowSize, exact);
     }
-    if (cw.current_usage && windowSize && windowSize > 0) {
-      return { ratio: sumTokens(cw.current_usage) / windowSize, windowSize };
+    if (exact !== undefined && windowSize && windowSize > 0) {
+      return withTokens(exact / windowSize, windowSize, exact);
     }
     return null;
   }
@@ -53,7 +74,8 @@ export function deriveContextUsage(stdin: StatusJson): ContextUsage | null {
   if (typeof cw === "number" && cw > 0) {
     const usage = stdin.token_usage;
     if (!usage) return null;
-    return { ratio: sumTokens(usage) / cw, windowSize: cw };
+    const exact = sumTokens(usage);
+    return withTokens(exact / cw, cw, exact);
   }
 
   return null;

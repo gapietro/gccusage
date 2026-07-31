@@ -2041,6 +2041,14 @@ const burnRateWidget = { render(context, config) {
 function sumTokens(counts) {
 	return (counts.input_tokens ?? 0) + (counts.output_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0) + (counts.cache_read_input_tokens ?? 0);
 }
+function withTokens(ratio, windowSize, exact) {
+	const usedTokens = exact ?? (windowSize !== null ? Math.round(ratio * windowSize) : null);
+	return {
+		ratio,
+		windowSize,
+		usedTokens
+	};
+}
 /**
 * How full the context window is.
 *
@@ -2052,27 +2060,17 @@ function deriveContextUsage(stdin) {
 	const cw = stdin.context_window;
 	if (typeof cw === "object" && cw !== null) {
 		const windowSize = cw.context_window_size ?? null;
-		if (cw.remaining_percentage != null) return {
-			ratio: (100 - cw.remaining_percentage) / 100,
-			windowSize
-		};
-		if (cw.used_percentage != null) return {
-			ratio: cw.used_percentage / 100,
-			windowSize
-		};
-		if (cw.current_usage && windowSize && windowSize > 0) return {
-			ratio: sumTokens(cw.current_usage) / windowSize,
-			windowSize
-		};
+		const exact = cw.current_usage ? sumTokens(cw.current_usage) : void 0;
+		if (cw.remaining_percentage != null) return withTokens((100 - cw.remaining_percentage) / 100, windowSize, exact);
+		if (cw.used_percentage != null) return withTokens(cw.used_percentage / 100, windowSize, exact);
+		if (exact !== void 0 && windowSize && windowSize > 0) return withTokens(exact / windowSize, windowSize, exact);
 		return null;
 	}
 	if (typeof cw === "number" && cw > 0) {
 		const usage = stdin.token_usage;
 		if (!usage) return null;
-		return {
-			ratio: sumTokens(usage) / cw,
-			windowSize: cw
-		};
+		const exact = sumTokens(usage);
+		return withTokens(exact / cw, cw, exact);
 	}
 	return null;
 }
