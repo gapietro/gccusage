@@ -26,19 +26,36 @@ export function percentile(values: number[], p: number): number {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (idx - lo);
 }
 
+/**
+ * Extremes by reduction, not `Math.min(...values)`. Spreading a large array
+ * into an argument list throws RangeError somewhere above ~125k elements,
+ * and this instrument is meant to be re-runnable against corpora bigger
+ * than the one it was written on (`--projects-dir`).
+ */
+function extremes(values: number[]): { min: number; max: number } {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
 export function summarize(values: number[]): Summary {
   const n = values.length;
   const sum = values.reduce((acc, v) => acc + v, 0);
+  const { min, max } = extremes(values);
   return {
     n,
-    min: n === 0 ? Number.NaN : Math.min(...values),
+    min: n === 0 ? Number.NaN : min,
     p10: percentile(values, 0.1),
     p25: percentile(values, 0.25),
     p50: percentile(values, 0.5),
     p75: percentile(values, 0.75),
     p90: percentile(values, 0.9),
     p99: percentile(values, 0.99),
-    max: n === 0 ? Number.NaN : Math.max(...values),
+    max: n === 0 ? Number.NaN : max,
     mean: n === 0 ? Number.NaN : sum / n,
   };
 }

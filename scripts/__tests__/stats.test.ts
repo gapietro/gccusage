@@ -46,6 +46,15 @@ describe("summarize", () => {
     expect(s.p50).toBeNaN();
     expect(s.mean).toBeNaN();
   });
+
+  it("summarises an array too large to spread into Math.min", () => {
+    // Math.min(...values) throws RangeError somewhere above ~125k arguments.
+    const values = Array.from({ length: 500_000 }, (_, i) => i);
+    const s = summarize(values);
+    expect(s.min).toBe(0);
+    expect(s.max).toBe(499_999);
+    expect(s.n).toBe(500_000);
+  });
 });
 
 describe("costEquivalent", () => {
