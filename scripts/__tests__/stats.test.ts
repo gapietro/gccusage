@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { percentile, summarize, costEquivalent, COST_WEIGHTS } from "../lib/stats.js";
+import { percentile, summarize, costEquivalent, COST_WEIGHTS } from "../lib/stats.ts";
 
 describe("percentile", () => {
   it("returns NaN for an empty array", () => {

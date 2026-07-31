@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscript } from "../lib/parse.js";
+import { parseTranscript } from "../lib/parse.ts";
 
 function lines(...records: unknown[]): string[] {
   return records.map((r) => JSON.stringify(r));
