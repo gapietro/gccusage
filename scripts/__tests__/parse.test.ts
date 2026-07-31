@@ -98,6 +98,23 @@ describe("parseTranscript", () => {
     );
   });
 
+  it("measures result size in UTF-8 bytes, not UTF-16 code units", () => {
+    const record = parseTranscript(
+      lines({
+        type: "user",
+        toolUseResult: "你好",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_1" }] },
+      }),
+      "sess-1",
+    );
+
+    // Two CJK characters plus two quotes: 2 string chars but 6 UTF-8 bytes, plus 2.
+    expect(record.toolResults[0]!.bytes).toBe(8);
+    expect(record.toolResults[0]!.bytes).not.toBe(
+      JSON.stringify("你好").length,
+    );
+  });
+
   it("records an unattributable tool result with a null tool name", () => {
     const record = parseTranscript(
       lines({
