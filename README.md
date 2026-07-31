@@ -164,7 +164,7 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `burn-rate` | Token consumption rate (tok/min) |
 | `cache-hit-rate` | Prompt cache hit percentage |
 | `token-breakdown` | Input vs output token counts |
-| `compact-countdown` | Estimated tokens remaining before auto-compact ([see note](#about-the-auto-compact-estimate)) |
+| `compact-countdown` | Tokens remaining before auto-compact ([see note](#about-the-auto-compact-countdown)) |
 | `git-branch` | Current git branch |
 | `git-changes` | Staged/unstaged file counts |
 | `lines-changed` | Lines added/removed in session |
@@ -183,17 +183,30 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `session-clock` | Session start time |
 | `cwd` | Current working directory |
 
-### About the auto-compact estimate
+### About the auto-compact countdown
 
-`compact-countdown` assumes auto-compact fires once **83.5%** of the context
-window is consumed — a 16.5% buffer. That figure is an estimate of Claude Code's
-internal behavior, not a value it reports, and it has not been verified against a
-measured session. It may also differ between 200k and 1M context windows.
+`compact-countdown` and `context-percent` both predict the same event: Claude
+Code's auto-compact. It fires once the context reaches **`window size − 33,000`
+tokens** — a fixed reserve (20,000 tokens of output headroom plus a 13,000-token
+compaction reserve), not a percentage of the window.
 
-Treat the number as a guide, not a guarantee: if the buffer is larger than 16.5%
-the widget warns late, and if smaller it warns early. Note that
-`context-percent`'s own red threshold sits at 90%, which is above this estimate —
-so under the current model a session compacts before that red state is reached.
+| Window | Compacts at | As a percentage |
+|--------|------------:|----------------:|
+| 200k | 167,000 | 83.5% |
+| 1M | 967,000 | 96.7% |
+
+Both widgets turn amber 20,000 tokens before that point — Claude Code's own
+internal warning level — and red 5,000 tokens before it, so the two segments
+change together.
+
+The rule is derived from Claude Code 2.1.220 rather than reported by it, so it
+can drift when Claude Code changes. Two Claude Code settings also change the
+answer and are invisible to a statusline command, so the prediction will be
+wrong if you use them:
+
+- `autoCompactWindow` (or the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` environment
+  variable) shrinks the window, so compaction fires earlier than shown.
+- `autoCompactEnabled: false` disables compaction entirely, so it never fires.
 
 ### Widget options
 

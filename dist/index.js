@@ -2041,6 +2041,15 @@ const burnRateWidget = { render(context, config) {
 function sumTokens(counts) {
 	return (counts.input_tokens ?? 0) + (counts.output_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0) + (counts.cache_read_input_tokens ?? 0);
 }
+function withTokens(ratio, windowSize, exact) {
+	const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
+	const usedTokens = exact !== void 0 && exact > 0 ? Math.max(exact, derived ?? exact) : derived;
+	return {
+		ratio,
+		windowSize,
+		usedTokens
+	};
+}
 /**
 * How full the context window is.
 *
@@ -2052,29 +2061,71 @@ function deriveContextUsage(stdin) {
 	const cw = stdin.context_window;
 	if (typeof cw === "object" && cw !== null) {
 		const windowSize = cw.context_window_size ?? null;
-		if (cw.remaining_percentage != null) return {
-			ratio: (100 - cw.remaining_percentage) / 100,
-			windowSize
-		};
-		if (cw.used_percentage != null) return {
-			ratio: cw.used_percentage / 100,
-			windowSize
-		};
-		if (cw.current_usage && windowSize && windowSize > 0) return {
-			ratio: sumTokens(cw.current_usage) / windowSize,
-			windowSize
-		};
+		const exact = cw.current_usage ? sumTokens(cw.current_usage) : void 0;
+		if (cw.remaining_percentage != null) return withTokens((100 - cw.remaining_percentage) / 100, windowSize, exact);
+		if (cw.used_percentage != null) return withTokens(cw.used_percentage / 100, windowSize, exact);
+		if (exact !== void 0 && windowSize && windowSize > 0) return withTokens(exact / windowSize, windowSize, exact);
 		return null;
 	}
 	if (typeof cw === "number" && cw > 0) {
 		const usage = stdin.token_usage;
 		if (!usage) return null;
-		return {
-			ratio: sumTokens(usage) / cw,
-			windowSize: cw
-		};
+		const exact = sumTokens(usage);
+		return withTokens(exact / cw, cw, exact);
 	}
 	return null;
+}
+
+//#endregion
+//#region src/utils/autocompact.ts
+/**
+* Auto-compact prediction.
+*
+* Derived from the shipped Claude Code binary (VERSION "2.1.220",
+* BUILD_TIME 2026-07-24), not from a measured session. The relevant
+* de-minified functions:
+*
+*   CSe(model, setting) = aY(...).window - Math.min(maxOutputTokens, 20000)
+*   Sfo(eff)            = eff - 13000
+*   uMu(tokens, eff)    = tokens >= Sfo(eff) ? "compact" : ...
+*
+* `cst()` gives a default max_output_tokens of 32000, so that Math.min always
+* clamps to 20000 for current models. The threshold is therefore a fixed token
+* reserve, not a fraction of the window. The same binary corroborates this with
+* a hardcoded precompute default of 967000 for a 1M window (1_000_000 - 33_000).
+* See issue #37.
+*
+* Assumes Claude Code's defaults: auto-compact enabled and `autoCompactWindow`
+* unset. Neither is visible in the statusline payload, so a user who changes
+* either will see these predictions miss — `autoCompactWindow` makes compaction
+* fire earlier than predicted, and `autoCompactEnabled: false` means it never
+* fires at all.
+*/
+/** Output headroom Claude Code holds back: min(maxOutputTokens, 20_000). */
+const OUTPUT_RESERVE = 2e4;
+/** Fixed compaction reserve, on top of the output headroom. */
+const COMPACT_RESERVE = 13e3;
+/** Total tokens reserved below the window size. */
+const AUTOCOMPACT_RESERVE = OUTPUT_RESERVE + COMPACT_RESERVE;
+/** Amber band: Claude Code's own "warn" level sits 20k before the threshold. */
+const AMBER_TOKENS = 2e4;
+/** Red band: the last warning before compaction. */
+const RED_TOKENS = 5e3;
+/**
+* Token count at which auto-compact fires.
+*
+* Null when the window is too small for the reserve to make sense — callers
+* should fall back rather than render a negative countdown.
+*/
+function compactThresholdTokens(windowSize) {
+	if (!Number.isFinite(windowSize) || windowSize <= AUTOCOMPACT_RESERVE) return null;
+	return windowSize - AUTOCOMPACT_RESERVE;
+}
+/** Tokens left before auto-compact, clamped at zero. Null when unmodellable. */
+function tokensUntilCompact(usedTokens, windowSize) {
+	const threshold = compactThresholdTokens(windowSize);
+	if (threshold === null) return null;
+	return Math.max(0, Math.round(threshold - usedTokens));
 }
 
 //#endregion
@@ -2087,9 +2138,22 @@ function buildBar(ratio) {
 	const empty = BAR_WIDTH - filled;
 	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
-function thresholdBg(ratio, configBg) {
-	if (ratio >= THRESHOLD_DANGER) return "#c01c28";
-	if (ratio >= THRESHOLD_WARN) return "#a67c00";
+/**
+* Alert colour.
+*
+* Measured against the auto-compact point rather than raw fullness, so this
+* segment and compact-countdown change on the same turn at any window size.
+* The percentage thresholds remain for payloads that report no window size.
+*/
+function thresholdBg(usage, configBg) {
+	const remaining = usage.usedTokens !== null && usage.windowSize !== null ? tokensUntilCompact(usage.usedTokens, usage.windowSize) : null;
+	if (remaining !== null) {
+		if (remaining <= RED_TOKENS) return "#c01c28";
+		if (remaining <= AMBER_TOKENS) return "#a67c00";
+		return configBg;
+	}
+	if (usage.ratio >= THRESHOLD_DANGER) return "#c01c28";
+	if (usage.ratio >= THRESHOLD_WARN) return "#a67c00";
 	return configBg;
 }
 const contextPercentWidget = { render(context, config) {
@@ -2103,7 +2167,7 @@ const contextPercentWidget = { render(context, config) {
 	return {
 		text,
 		fg: config.fg,
-		bg: thresholdBg(usage.ratio, config.bg)
+		bg: thresholdBg(usage, config.bg)
 	};
 } };
 
@@ -2453,24 +2517,19 @@ const sessionTimerWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/compact-countdown.ts
-/** Auto-compact fires once this fraction of the context window is consumed. */
-const AUTOCOMPACT_THRESHOLD = .835;
-const HEADROOM_DANGER = .1;
-const HEADROOM_WARN = .25;
 const compactCountdownWidget = { render(context, config) {
 	const usage = deriveContextUsage(context.stdin);
-	if (!usage || !usage.windowSize) return null;
-	const threshold = usage.windowSize * AUTOCOMPACT_THRESHOLD;
-	const remaining = Math.max(0, Math.round(threshold - usage.ratio * usage.windowSize));
+	if (!usage || !usage.windowSize || usage.usedTokens === null) return null;
+	const remaining = tokensUntilCompact(usage.usedTokens, usage.windowSize);
+	if (remaining === null) return null;
 	if (remaining <= 0) return {
 		text: "Compact imminent!",
 		fg: "#ffffff",
 		bg: "#a01822"
 	};
-	const headroom = remaining / threshold;
 	let bg = config.bg;
-	if (headroom < HEADROOM_DANGER) bg = "#a01822";
-	else if (headroom < HEADROOM_WARN) bg = "#b8860b";
+	if (remaining <= RED_TOKENS) bg = "#a01822";
+	else if (remaining <= AMBER_TOKENS) bg = "#b8860b";
 	return {
 		text: `~${formatTokens(remaining)} left`,
 		fg: config.fg,

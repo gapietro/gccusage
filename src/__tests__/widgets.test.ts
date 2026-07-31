@@ -102,6 +102,99 @@ describe("contextPercentWidget", () => {
     const result = contextPercentWidget.render(ctx, { type: "context-percent" });
     expect(result!.text).toBe("[===-------] 25%");
   });
+
+  it("turns amber at Claude Code's warn level, not at 70%", () => {
+    // 147k of 200k used leaves 20k before compaction.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 73.5, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#a67c00");
+  });
+
+  it("turns red 5k before compaction, so the red state is reachable", () => {
+    // The old 90% danger threshold sat above the 83.5% compaction point at a
+    // 200k window, so a session compacted before it could ever turn red.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 81, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#c01c28");
+  });
+
+  it("keeps the configured background at 70% of a 200k window", () => {
+    // 140k used leaves 27k — outside both bands under the derived rule.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 70, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#0d7377");
+  });
+
+  it("scales the bands to a 1M window", () => {
+    const amber = contextPercentWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 94.7, context_window_size: 1_000_000 } },
+      }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(amber!.bg).toBe("#a67c00");
+
+    // 90% of a 1M window is 900k used — 67k of headroom left, no alert.
+    const calm = contextPercentWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 90, context_window_size: 1_000_000 } },
+      }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(calm!.bg).toBe("#0d7377");
+  });
+
+  it("falls back to percentage thresholds when no window size is reported", () => {
+    const warn = contextPercentWidget.render(
+      makeContext({ stdin: { context_window: { used_percentage: 75 } } }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(warn!.bg).toBe("#a67c00");
+
+    const danger = contextPercentWidget.render(
+      makeContext({ stdin: { context_window: { used_percentage: 95 } } }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(danger!.bg).toBe("#c01c28");
+  });
+
+  it("turns red from a current_usage breakdown, not just used_percentage", () => {
+    // Production payloads carry current_usage, not a synthetic percentage.
+    // 162k of 200k used leaves exactly 5k before the 167k threshold.
+    const ctx = makeContext({
+      stdin: {
+        context_window: {
+          context_window_size: 200_000,
+          current_usage: {
+            input_tokens: 100_000,
+            output_tokens: 2_000,
+            cache_creation_input_tokens: 30_000,
+            cache_read_input_tokens: 30_000,
+          },
+        },
+      },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#c01c28");
+  });
 });
 
 describe("separatorWidget", () => {
@@ -166,7 +259,9 @@ describe("compactCountdownWidget", () => {
       },
     });
     const result = compactCountdownWidget.render(ctx, { type: "compact-countdown" });
-    expect(result!.text).toBe("~765.0k left");
+    // 7% of 1M is 70k used; the threshold is 967k, so 897k remains. The old
+    // 83.5% constant put the threshold at 835k and reported 765k.
+    expect(result!.text).toBe("~897.0k left");
   });
 
   it("derives headroom from used_percentage", () => {
@@ -222,7 +317,23 @@ describe("compactCountdownWidget", () => {
     expect(result!.bg).toBe("#1a5fb4");
   });
 
-  it("turns amber under 25% headroom", () => {
+  it("turns amber exactly 20k before the threshold", () => {
+    // 73.5% of 200k is 147k used; the threshold is 167k, so 20k remains —
+    // Claude Code's own warn level, and the boundary is inclusive.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 73.5, context_window_size: 200_000 } },
+    });
+    const result = compactCountdownWidget.render(ctx, {
+      type: "compact-countdown",
+      bg: "#1a5fb4",
+    });
+    expect(result!.text).toBe("~20.0k left");
+    expect(result!.bg).toBe("#b8860b");
+  });
+
+  it("keeps the configured background just outside the amber band", () => {
+    // 70% of 200k is 140k used, leaving 27k — comfortably above the band.
+    // The old fraction-based rule called this amber.
     const ctx = makeContext({
       stdin: { context_window: { used_percentage: 70, context_window_size: 200_000 } },
     });
@@ -231,10 +342,24 @@ describe("compactCountdownWidget", () => {
       bg: "#1a5fb4",
     });
     expect(result!.text).toBe("~27.0k left");
-    expect(result!.bg).toBe("#b8860b");
+    expect(result!.bg).toBe("#1a5fb4");
   });
 
-  it("turns red under 10% headroom", () => {
+  it("turns red exactly 5k before the threshold", () => {
+    // 81% of 200k is 162k used, leaving 5k. Inclusive boundary.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 81, context_window_size: 200_000 } },
+    });
+    const result = compactCountdownWidget.render(ctx, {
+      type: "compact-countdown",
+      bg: "#1a5fb4",
+    });
+    expect(result!.text).toBe("~5.0k left");
+    expect(result!.bg).toBe("#a01822");
+  });
+
+  it("is amber, not red, at 7k remaining", () => {
+    // 80% of 200k is 160k used, leaving 7k — inside amber, outside red.
     const ctx = makeContext({
       stdin: { context_window: { used_percentage: 80, context_window_size: 200_000 } },
     });
@@ -243,7 +368,7 @@ describe("compactCountdownWidget", () => {
       bg: "#1a5fb4",
     });
     expect(result!.text).toBe("~7.0k left");
-    expect(result!.bg).toBe("#a01822");
+    expect(result!.bg).toBe("#b8860b");
   });
 
   it("announces an imminent compact at the threshold", () => {
@@ -284,5 +409,50 @@ describe("compactCountdownWidget", () => {
     const ctx = makeContext({ stdin: { context_window: { used_percentage: 25 } } });
     const result = compactCountdownWidget.render(ctx, { type: "compact-countdown" });
     expect(result).toBeNull();
+  });
+
+  it("scales the bands to a 1M window instead of a fixed fraction", () => {
+    // 94.7% of 1M is 947k used, leaving 20k — amber. Under the old rule this
+    // was long past "Compact imminent!", 112k tokens too early.
+    const amber = compactCountdownWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 94.7, context_window_size: 1_000_000 } },
+      }),
+      { type: "compact-countdown", bg: "#1a5fb4" },
+    );
+    expect(amber!.text).toBe("~20.0k left");
+    expect(amber!.bg).toBe("#b8860b");
+
+    const imminent = compactCountdownWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 96.7, context_window_size: 1_000_000 } },
+      }),
+      { type: "compact-countdown", bg: "#1a5fb4" },
+    );
+    expect(imminent!.text).toBe("Compact imminent!");
+  });
+
+  it("turns red from a current_usage breakdown, not just used_percentage", () => {
+    // Production payloads carry current_usage, not a synthetic percentage.
+    // 162k of 200k used leaves exactly 5k before the 167k threshold.
+    const ctx = makeContext({
+      stdin: {
+        context_window: {
+          context_window_size: 200_000,
+          current_usage: {
+            input_tokens: 100_000,
+            output_tokens: 2_000,
+            cache_creation_input_tokens: 30_000,
+            cache_read_input_tokens: 30_000,
+          },
+        },
+      },
+    });
+    const result = compactCountdownWidget.render(ctx, {
+      type: "compact-countdown",
+      bg: "#1a5fb4",
+    });
+    expect(result!.text).toBe("~5.0k left");
+    expect(result!.bg).toBe("#a01822");
   });
 });

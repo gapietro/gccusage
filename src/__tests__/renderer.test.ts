@@ -4,6 +4,7 @@ import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi } from "../utils/terminal.js";
+import { DEFAULT_SETTINGS } from "../config/defaults.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -442,5 +443,56 @@ describe("layoutPowerline", () => {
     // no colors" above — this test exists specifically to pin that the
     // bg-without-fg contrast derivation does NOT fire here.
     expect(pieces[0]).toEqual({ text: " a ", fg: "#ffffff", bg: "#5f5faf" });
+  });
+});
+
+describe("default bar adjacency across the alert bands", () => {
+  // context-percent and compact-countdown sit next to each other on line 1 and
+  // now enter their bands on the same turn by construction. Their alert shades
+  // are ΔE 4.61 (amber) and 6.54 (red) apart — both under MIN_SEPARATOR_DELTA —
+  // so the wide glyph would be invisible and the thin one must be drawn.
+  // Assert on rendered output: a config-level check cannot see this, because
+  // both widgets override bg at render time. See issues #36, #40.
+  function renderDefaultBar(usedPercentage: number, windowSize: number): string {
+    const context = makeContext({
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        context_window: {
+          used_percentage: usedPercentage,
+          context_window_size: windowSize,
+        },
+      },
+      terminalWidth: 400,
+    });
+    const settings = makeSettings({
+      lines: DEFAULT_SETTINGS.lines,
+      powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    });
+    return stripAnsi(renderStatusline(context, settings)).split("\n")[0]!;
+  }
+
+  // context-percent's text ends with the window-size suffix ")", and
+  // compact-countdown's begins with "~" or "Compact". Matching that specific
+  // junction keeps the assertion about these two segments — a whole-line
+  // search for the glyph would also see every other pair on the bar.
+  function separatorBetweenAlertSegments(line: string): string | undefined {
+    return /\)\s*(│|▶)\s*(?:~|Compact)/.exec(line)?.[1];
+  }
+
+  it.each([
+    ["amber band, 200k", 73.5, 200_000],
+    ["red band, 200k", 81, 200_000],
+    ["compact imminent, 200k", 83.5, 200_000],
+    ["amber band, 1M", 94.7, 1_000_000],
+    ["red band, 1M", 96.2, 1_000_000],
+  ])("draws a thin separator between the two alert segments (%s)", (_label, pct, size) => {
+    const line = renderDefaultBar(pct, size);
+    expect(separatorBetweenAlertSegments(line)).toBe("│");
+  });
+
+  it("uses the wide separator when neither segment is alerting", () => {
+    const line = renderDefaultBar(25, 200_000);
+    expect(separatorBetweenAlertSegments(line)).toBe("▶");
   });
 });
