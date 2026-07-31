@@ -1,13 +1,15 @@
 import * as v from "valibot";
+import { isValidColor } from "../render/colors.js";
 
-const ColorSchema = v.union([
-  // A named color from NAMED_COLORS (src/render/colors.ts) or a hex string.
-  // This is not validated against either grammar: an unrecognized name or an
-  // unparseable hex value falls back to black at render time rather than
-  // erroring here. ansi256 codes are NOT supported — see issue #42
-  // (https://github.com/gapietro/gccusage/issues/42).
+// A widget color: a named color from NAMED_COLORS (src/render/colors.ts) or an
+// anchored `#rgb`/`#rrggbb` hex. Anything else is a config load error rather
+// than a render-time fallback — chalk's hex regex is unanchored, so values
+// like "196" or "#12345" would otherwise paint an unrelated color instead of
+// failing. ansi256 codes are deliberately unsupported (issue #42).
+const ColorSchema = v.pipe(
   v.string(),
-]);
+  v.check(isValidColor, "must be a color name or #rgb/#rrggbb hex"),
+);
 
 const WidgetConfigSchema = v.object({
   type: v.string(),

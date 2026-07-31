@@ -128,4 +128,62 @@ describe("loadSettings", () => {
     expect(error).toContain("cannot read config");
     expect(error).toContain("EACCES");
   });
+
+  // Issue #42: "196" is an ansi256 code that chalk's unanchored hex regex
+  // paints as #119966. It must be rejected, not silently misparsed.
+  it("rejects an ansi256 code in a widget color", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", bg: "196" }] }],
+      }),
+    );
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("lines.0.widgets.0.bg");
+    expect(error).toContain("must be a color name or #rgb/#rrggbb hex");
+    expect(error).toContain('"196"');
+  });
+
+  it("rejects a near-miss hex typo", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", fg: "#12345" }] }],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("lines.0.widgets.0.fg");
+    expect(error).toContain('"#12345"');
+  });
+
+  it("counts the second bad color rather than listing it", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [
+          { widgets: [{ type: "model", bg: "196" }, { type: "cwd", bg: "grey1" }] },
+        ],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("lines.0.widgets.0.bg");
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("accepts a named color and hex side by side", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", fg: "red", bg: "#1a5fb4" }] }],
+      }),
+    );
+
+    const { settings, error } = loadSettings();
+    expect(error).toBeUndefined();
+    expect(settings.lines[0]?.widgets[0]?.fg).toBe("red");
+  });
 });
