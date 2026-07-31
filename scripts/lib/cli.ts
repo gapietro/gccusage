@@ -16,14 +16,44 @@ export const USAGE =
 const DIR_FLAG = "--projects-dir";
 const DIR_ASSIGN = `${DIR_FLAG}=`;
 
-function checkDir(value: string): string | null {
+function checkDir(value: string, label: string = DIR_FLAG): string | null {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(value);
   } catch {
-    return `${DIR_FLAG}: no such directory: ${value}`;
+    return `${label}: no such directory: ${value}`;
   }
-  return stat.isDirectory() ? null : `${DIR_FLAG}: not a directory: ${value}`;
+  return stat.isDirectory() ? null : `${label}: not a directory: ${value}`;
+}
+
+/**
+ * Settle which directory to analyse, validating the default as strictly as
+ * an explicit one.
+ *
+ * `--projects-dir` was already rejected when it did not exist, but the
+ * default path was passed through unchecked — so a wrong explicit path
+ * exited 1 while a wrong *default* printed a full all-zero report and
+ * exited 0. That is the worse of the two: it looks like a finding about an
+ * idle corpus rather than a failure to find one.
+ *
+ * `fallback` is injected so this is testable without mutating the
+ * environment's home directory.
+ */
+export function resolveProjectsDir(
+  options: CliOptions,
+  fallback: () => string,
+): { ok: true; dir: string } | { ok: false; error: string } {
+  if (options.projectsDir !== undefined) return { ok: true, dir: options.projectsDir };
+
+  const dir = fallback();
+  const problem = checkDir(dir, "default projects directory");
+  if (problem) {
+    return {
+      ok: false,
+      error: `${problem}\npass ${DIR_FLAG} <path> to analyse a different location`,
+    };
+  }
+  return { ok: true, dir };
 }
 
 /**

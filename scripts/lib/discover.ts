@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 export interface SessionPaths {
@@ -20,8 +21,16 @@ export function projectLabel(index: number): string {
   return `proj-${suffix}`;
 }
 
+/**
+ * Where Claude Code keeps its transcripts.
+ *
+ * Uses `os.homedir()` rather than `process.env.HOME`: on Windows only
+ * `USERPROFILE` is set, and an unset or empty `HOME` made `path.join` return
+ * a *relative* `.claude/projects`, which then resolved against the current
+ * working directory and quietly produced an all-zero report.
+ */
 export function defaultProjectsDir(): string {
-  return path.join(process.env["HOME"] ?? "", ".claude", "projects");
+  return path.join(os.homedir(), ".claude", "projects");
 }
 
 function listDir(dir: string): fs.Dirent[] {

@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseArgs } from "../lib/cli.ts";
+import { parseArgs, resolveProjectsDir } from "../lib/cli.ts";
+import { defaultProjectsDir } from "../lib/discover.ts";
 import { nodeRunsTypeScript } from "./node-ts-support.ts";
 
 let dir: string;
@@ -96,5 +97,44 @@ describe.skipIf(!nodeRunsTypeScript)("analyze-transcripts CLI", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("unrecognised argument: --projekts-dir");
     expect(result.stdout).toBe("");
+  });
+});
+
+describe("resolveProjectsDir", () => {
+  it("passes an explicit directory straight through", () => {
+    const result = resolveProjectsDir({ projectsDir: dir, json: false }, () => "/unused");
+    expect(result).toEqual({ ok: true, dir });
+  });
+
+  it("accepts a default directory that exists", () => {
+    const result = resolveProjectsDir({ projectsDir: undefined, json: false }, () => dir);
+    expect(result).toEqual({ ok: true, dir });
+  });
+
+  it("rejects a missing default instead of reporting an empty corpus", () => {
+    // The dangerous case: before this check, an unresolvable home directory
+    // produced a full all-zero report at exit 0, which reads as "your corpus
+    // is empty" rather than "I could not find your corpus".
+    const missing = path.join(dir, "not-there");
+    const result = resolveProjectsDir({ projectsDir: undefined, json: false }, () => missing);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toContain("default projects directory");
+    expect(result.error).toContain("--projects-dir");
+  });
+
+  it("rejects a relative default, which is what an unset HOME used to produce", () => {
+    const result = resolveProjectsDir(
+      { projectsDir: undefined, json: false },
+      () => path.join(".claude", "projects"),
+    );
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("defaultProjectsDir", () => {
+  it("is absolute, so it cannot resolve against the current directory", () => {
+    expect(path.isAbsolute(defaultProjectsDir())).toBe(true);
+    expect(defaultProjectsDir().endsWith(path.join(".claude", "projects"))).toBe(true);
   });
 });

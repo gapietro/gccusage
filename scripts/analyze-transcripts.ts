@@ -19,7 +19,7 @@
  * Output is anonymised: project directories are reported as proj-a, proj-b,
  * and so on, and no prompt text, file contents, or paths are ever emitted.
  */
-import { parseArgs, USAGE } from "./lib/cli.ts";
+import { parseArgs, resolveProjectsDir, USAGE } from "./lib/cli.ts";
 import { defaultProjectsDir } from "./lib/discover.ts";
 import { buildReport, renderMarkdown } from "./lib/report.ts";
 
@@ -31,10 +31,17 @@ function main(argv: string[]): void {
     process.exit(1);
   }
 
-  const { projectsDir, json } = parsed.options;
-  const report = buildReport(projectsDir ?? defaultProjectsDir());
+  const resolved = resolveProjectsDir(parsed.options, defaultProjectsDir);
+  if (!resolved.ok) {
+    console.error(resolved.error);
+    process.exit(1);
+  }
+
+  const report = buildReport(resolved.dir);
   process.stdout.write(
-    json ? `${JSON.stringify(report, null, 2)}\n` : `${renderMarkdown(report)}\n`,
+    parsed.options.json
+      ? `${JSON.stringify(report, null, 2)}\n`
+      : `${renderMarkdown(report)}\n`,
   );
 }
 
