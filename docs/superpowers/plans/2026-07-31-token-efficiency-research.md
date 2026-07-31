@@ -1119,8 +1119,6 @@ describe("scoreSignals", () => {
 });
 ```
 
-Note: in the first `scoreSignals` test, `sessionMetrics` is called with an array rather than a `SessionRecord` on the `metrics` line — that is deliberate dead weight removed by `void metrics`. If TypeScript rejects it, delete the `metrics` constant and the `void metrics;` line entirely; only `many` matters.
-
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/analysis.test.ts`
