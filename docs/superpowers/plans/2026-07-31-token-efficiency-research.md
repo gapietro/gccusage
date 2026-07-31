@@ -275,7 +275,17 @@ Expected: exits 0 with no output. If it reports "No inputs were found", the `inc
 - [ ] **Step 8: Run the full suite**
 
 Run: `npm test`
-Expected: all existing tests plus the 12 new ones pass. If vitest does *not* pick up `scripts/__tests__/stats.test.ts`, check for a `vitest.config.*` file — there was none at plan time, so vitest's default `include` of `**/*.{test,spec}.?(c|m)[jt]s?(x)` applies and the file is collected automatically.
+Expected: all existing tests plus the 12 new ones pass, **and `scripts/__tests__/stats.test.ts` appears among the collected files.**
+
+`vitest.config.ts` pins `include` to `src/**/__tests__/**/*.test.ts`, so a `scripts/` test passes when named directly but is invisible to `npm test`. Add the second glob:
+
+```typescript
+    include: ["src/**/__tests__/**/*.test.ts", "scripts/**/__tests__/**/*.test.ts"],
+```
+
+Commit that change separately, with its own message — it is a repo-wide test-discovery fix, not part of the statistics helpers. Leave the `coverage` block alone: the research script is dev tooling and does not belong in the shipped coverage numbers.
+
+(An earlier draft of this plan asserted no vitest config existed. It does; the check that produced that claim aborted on a shell glob no-match before listing it. Every later task in this plan depends on `scripts/` tests being collected.)
 
 - [ ] **Step 9: Commit**
 
