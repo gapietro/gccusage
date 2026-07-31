@@ -1,6 +1,6 @@
 import chalk from "chalk";
 
-const NAMED_COLORS: Record<string, string> = {
+export const NAMED_COLORS: Record<string, string> = {
   red: "#ff0000",
   green: "#00ff00",
   blue: "#0000ff",
@@ -15,8 +15,24 @@ const NAMED_COLORS: Record<string, string> = {
   pink: "#ff69b4",
 };
 
-function resolveColor(color: string): string {
-  return NAMED_COLORS[color.toLowerCase()] ?? color;
+/**
+ * Substitute a known color name with its hex value; pass anything else through
+ * untouched (trimmed) so the caller's own parsing (chalk's, or `colorize`'s
+ * `startsWith("#")` guard) still applies.
+ *
+ * Uses `Object.hasOwn` rather than `NAMED_COLORS[key] ?? color` because
+ * `NAMED_COLORS` is a plain object literal: inherited `Object.prototype`
+ * members (`constructor`, `__proto__`, `toString`, `valueOf`, ...) are truthy
+ * lookups there too, so `??` never falls through for those keys and the
+ * caller receives a function or `[object Object]` instead of a string. On the
+ * powerline path that value flows into `colorDistance` -> `normalizeColor` ->
+ * this function again, where `.toLowerCase()` on a non-string throws and
+ * blanks the entire statusline (see the fix report).
+ */
+export function resolveColor(color: string): string {
+  const trimmed = color.trim();
+  const key = trimmed.toLowerCase();
+  return Object.hasOwn(NAMED_COLORS, key) ? NAMED_COLORS[key]! : trimmed;
 }
 
 export function colorize(text: string, fg?: string, bg?: string): string {

@@ -1,7 +1,12 @@
 import * as v from "valibot";
 
 const ColorSchema = v.union([
-  v.string(), // named color, hex, or ansi256
+  // A named color from NAMED_COLORS (src/render/colors.ts) or a hex string.
+  // This is not validated against either grammar: an unrecognized name or an
+  // unparseable hex value falls back to black at render time rather than
+  // erroring here. ansi256 codes are NOT supported — see issue #42
+  // (https://github.com/gapietro/gccusage/issues/42).
+  v.string(),
 ]);
 
 const WidgetConfigSchema = v.object({

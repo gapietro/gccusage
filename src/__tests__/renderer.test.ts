@@ -238,9 +238,12 @@ describe("layoutPowerline", () => {
     expect(pieces[1]!.text).toBe("│");
   });
 
-  it("draws the thin separator for two different named colors (both paint black)", () => {
-    // chalk.bgHex("red") and chalk.bgHex("blue") both fail hex parsing and
-    // paint 48;2;0;0;0 — identical backgrounds despite distinct config values.
+  it("draws the wide separator for two named colors that resolve apart", () => {
+    // "red" and "blue" resolve to #ff0000 and #0000ff — ΔE 52.88, far above
+    // MIN_SEPARATOR_DELTA — so the separator decision follows the colors
+    // actually painted. This test previously asserted the thin glyph, because
+    // both names failed chalk's hex parse and painted black. That was the
+    // defect this change fixes.
     const pieces = layoutPowerline(
       [
         { text: "a", fg: "#ffffff", bg: "red" },
@@ -248,7 +251,15 @@ describe("layoutPowerline", () => {
       ],
       OPTIONS,
     );
-    expect(pieces[1]!.text).toBe("│");
+    expect(pieces[1]).toEqual({ text: "▶", fg: "#ff0000", bg: "#0000ff" });
+  });
+
+  it("resolves named colors to the same pieces as their mapped hex", () => {
+    // The property the separator logic rests on: comparison and painting must
+    // agree about what a config value means.
+    const named = layoutPowerline([{ text: "a", fg: "white", bg: "red" }], OPTIONS);
+    const hex = layoutPowerline([{ text: "a", fg: "#ffffff", bg: "#ff0000" }], OPTIONS);
+    expect(named).toEqual(hex);
   });
 
   it("still draws the wide separator for a genuinely different pair", () => {
@@ -370,5 +381,66 @@ describe("layoutPowerline", () => {
       OPTIONS,
     );
     expect(git[1]).toEqual({ text: "▶", fg: "#613583", bg: "#7d4fa8" });
+  });
+
+  // Regression for the crash where an Object.prototype key (e.g.
+  // "constructor") reached colorDistance -> normalizeColor -> resolveColor
+  // and threw on `.toLowerCase()` on a non-string, blanking the whole
+  // statusline. Needs two segments — colorDistance is only invoked for the
+  // separator between adjacent pieces, never for a lone segment.
+  it("does not throw when a widget bg is an Object.prototype key, and resolves it to a string", () => {
+    let pieces: ReturnType<typeof layoutPowerline> = [];
+    expect(() => {
+      pieces = layoutPowerline(
+        [
+          { text: "a", fg: "#ffffff", bg: "constructor" },
+          { text: "b", fg: "#ffffff", bg: "#0d7377" },
+        ],
+        OPTIONS,
+      );
+    }).not.toThrow();
+    expect(typeof pieces[0]!.bg).toBe("string");
+  });
+
+  it("derives a contrasting foreground when a widget sets bg but not fg", () => {
+    const light = layoutPowerline(
+      [
+        { text: "a", bg: "white" },
+        { text: "b", fg: "#ffffff", bg: "#0d7377" },
+      ],
+      OPTIONS,
+    );
+    expect(light[0]).toEqual({ text: " a ", fg: "#000000", bg: "#ffffff" });
+
+    const dark = layoutPowerline(
+      [
+        { text: "a", bg: "#000000" },
+        { text: "b", fg: "#ffffff", bg: "#0d7377" },
+      ],
+      OPTIONS,
+    );
+    expect(dark[0]).toEqual({ text: " a ", fg: "#ffffff", bg: "#000000" });
+  });
+
+  it("respects an explicit fg even when bg is also set", () => {
+    const pieces = layoutPowerline(
+      [
+        { text: "a", fg: "#123456", bg: "white" },
+        { text: "b", fg: "#ffffff", bg: "#0d7377" },
+      ],
+      OPTIONS,
+    );
+    expect(pieces[0]).toEqual({ text: " a ", fg: "#123456", bg: "#ffffff" });
+  });
+
+  it("uses the theme's own fg/bg pair unchanged when a widget sets neither", () => {
+    const pieces = layoutPowerline(
+      [{ text: "a" }, { text: "b" }],
+      OPTIONS,
+    );
+    // Same expectation as "falls back to the theme palette when a widget sets
+    // no colors" above — this test exists specifically to pin that the
+    // bg-without-fg contrast derivation does NOT fire here.
+    expect(pieces[0]).toEqual({ text: " a ", fg: "#ffffff", bg: "#5f5faf" });
   });
 });

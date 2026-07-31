@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import type { WidgetOutput } from "../widgets/base.js";
 import { getTheme } from "./themes.js";
-import { colorDistance } from "./color-compare.js";
+import { colorDistance, contrastingForeground } from "./color-compare.js";
+import { resolveColor } from "./colors.js";
 
 // Force truecolor output — chalk disables colors when stdout is a pipe,
 // but statusline output is rendered by Claude Code which supports ANSI.
@@ -46,8 +47,20 @@ export function layoutPowerline(
   for (let i = 0; i < outputs.length; i++) {
     const output = outputs[i]!;
     const style = theme.segments[i % theme.segments.length]!;
-    const fg = output.fg ?? style.fg;
-    const bg = output.bg ?? style.bg;
+    // Resolve here rather than at paint time so the pieces this function
+    // returns carry the colors that will actually be painted — the separator
+    // decision below and every test depend on that.
+    const bg = resolveColor(output.bg ?? style.bg);
+    // A widget that sets its own `bg` but leaves `fg` unset would otherwise
+    // fall back to the *theme's* fg — chosen to pair with the theme's own bg,
+    // not whatever the widget (or a user config) picked. That can land white
+    // text on a white bg. Only kick in when the widget supplied a bg without
+    // a fg: if neither is set, the theme's fg/bg are a designed pair and
+    // should render unchanged; if the widget set fg explicitly, honor it.
+    const fg =
+      output.bg !== undefined && output.fg === undefined
+        ? contrastingForeground(bg)
+        : resolveColor(output.fg ?? style.fg);
 
     // The wide separator is painted in the previous segment's bg over this
     // segment's bg, so when those are the same — or merely too close to tell
