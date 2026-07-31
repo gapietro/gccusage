@@ -102,6 +102,76 @@ describe("contextPercentWidget", () => {
     const result = contextPercentWidget.render(ctx, { type: "context-percent" });
     expect(result!.text).toBe("[===-------] 25%");
   });
+
+  it("turns amber at Claude Code's warn level, not at 70%", () => {
+    // 147k of 200k used leaves 20k before compaction.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 73.5, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#a67c00");
+  });
+
+  it("turns red 5k before compaction, so the red state is reachable", () => {
+    // The old 90% danger threshold sat above the 83.5% compaction point at a
+    // 200k window, so a session compacted before it could ever turn red.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 81, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#c01c28");
+  });
+
+  it("keeps the configured background at 70% of a 200k window", () => {
+    // 140k used leaves 27k — outside both bands under the derived rule.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 70, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#0d7377");
+  });
+
+  it("scales the bands to a 1M window", () => {
+    const amber = contextPercentWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 94.7, context_window_size: 1_000_000 } },
+      }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(amber!.bg).toBe("#a67c00");
+
+    // 90% of a 1M window is 900k used — 67k of headroom left, no alert.
+    const calm = contextPercentWidget.render(
+      makeContext({
+        stdin: { context_window: { used_percentage: 90, context_window_size: 1_000_000 } },
+      }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(calm!.bg).toBe("#0d7377");
+  });
+
+  it("falls back to percentage thresholds when no window size is reported", () => {
+    const warn = contextPercentWidget.render(
+      makeContext({ stdin: { context_window: { used_percentage: 75 } } }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(warn!.bg).toBe("#a67c00");
+
+    const danger = contextPercentWidget.render(
+      makeContext({ stdin: { context_window: { used_percentage: 95 } } }),
+      { type: "context-percent", bg: "#0d7377" },
+    );
+    expect(danger!.bg).toBe("#c01c28");
+  });
 });
 
 describe("separatorWidget", () => {

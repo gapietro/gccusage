@@ -2076,6 +2076,58 @@ function deriveContextUsage(stdin) {
 }
 
 //#endregion
+//#region src/utils/autocompact.ts
+/**
+* Auto-compact prediction.
+*
+* Derived from the shipped Claude Code binary (VERSION "2.1.220",
+* BUILD_TIME 2026-07-24), not from a measured session. The relevant
+* de-minified functions:
+*
+*   CSe(model, setting) = aY(...).window - Math.min(maxOutputTokens, 20000)
+*   Sfo(eff)            = eff - 13000
+*   uMu(tokens, eff)    = tokens >= Sfo(eff) ? "compact" : ...
+*
+* `cst()` gives a default max_output_tokens of 32000, so that Math.min always
+* clamps to 20000 for current models. The threshold is therefore a fixed token
+* reserve, not a fraction of the window. The same binary corroborates this with
+* a hardcoded precompute default of 967000 for a 1M window (1_000_000 - 33_000).
+* See issue #37.
+*
+* Assumes Claude Code's defaults: auto-compact enabled and `autoCompactWindow`
+* unset. Neither is visible in the statusline payload, so a user who changes
+* either will see these predictions miss — `autoCompactWindow` makes compaction
+* fire earlier than predicted, and `autoCompactEnabled: false` means it never
+* fires at all.
+*/
+/** Output headroom Claude Code holds back: min(maxOutputTokens, 20_000). */
+const OUTPUT_RESERVE = 2e4;
+/** Fixed compaction reserve, on top of the output headroom. */
+const COMPACT_RESERVE = 13e3;
+/** Total tokens reserved below the window size. */
+const AUTOCOMPACT_RESERVE = OUTPUT_RESERVE + COMPACT_RESERVE;
+/** Amber band: Claude Code's own "warn" level sits 20k before the threshold. */
+const AMBER_TOKENS = 2e4;
+/** Red band: the last warning before compaction. */
+const RED_TOKENS = 5e3;
+/**
+* Token count at which auto-compact fires.
+*
+* Null when the window is too small for the reserve to make sense — callers
+* should fall back rather than render a negative countdown.
+*/
+function compactThresholdTokens(windowSize) {
+	if (!Number.isFinite(windowSize) || windowSize <= AUTOCOMPACT_RESERVE) return null;
+	return windowSize - AUTOCOMPACT_RESERVE;
+}
+/** Tokens left before auto-compact, clamped at zero. Null when unmodellable. */
+function tokensUntilCompact(usedTokens, windowSize) {
+	const threshold = compactThresholdTokens(windowSize);
+	if (threshold === null) return null;
+	return Math.max(0, Math.round(threshold - usedTokens));
+}
+
+//#endregion
 //#region src/widgets/context-percent.ts
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = .7;
@@ -2085,9 +2137,22 @@ function buildBar(ratio) {
 	const empty = BAR_WIDTH - filled;
 	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
-function thresholdBg(ratio, configBg) {
-	if (ratio >= THRESHOLD_DANGER) return "#c01c28";
-	if (ratio >= THRESHOLD_WARN) return "#a67c00";
+/**
+* Alert colour.
+*
+* Measured against the auto-compact point rather than raw fullness, so this
+* segment and compact-countdown change on the same turn at any window size.
+* The percentage thresholds remain for payloads that report no window size.
+*/
+function thresholdBg(usage, configBg) {
+	const remaining = usage.usedTokens !== null && usage.windowSize !== null ? tokensUntilCompact(usage.usedTokens, usage.windowSize) : null;
+	if (remaining !== null) {
+		if (remaining <= RED_TOKENS) return "#c01c28";
+		if (remaining <= AMBER_TOKENS) return "#a67c00";
+		return configBg;
+	}
+	if (usage.ratio >= THRESHOLD_DANGER) return "#c01c28";
+	if (usage.ratio >= THRESHOLD_WARN) return "#a67c00";
 	return configBg;
 }
 const contextPercentWidget = { render(context, config) {
@@ -2101,7 +2166,7 @@ const contextPercentWidget = { render(context, config) {
 	return {
 		text,
 		fg: config.fg,
-		bg: thresholdBg(usage.ratio, config.bg)
+		bg: thresholdBg(usage, config.bg)
 	};
 } };
 
@@ -2448,58 +2513,6 @@ const sessionTimerWidget = { render(context, config) {
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/utils/autocompact.ts
-/**
-* Auto-compact prediction.
-*
-* Derived from the shipped Claude Code binary (VERSION "2.1.220",
-* BUILD_TIME 2026-07-24), not from a measured session. The relevant
-* de-minified functions:
-*
-*   CSe(model, setting) = aY(...).window - Math.min(maxOutputTokens, 20000)
-*   Sfo(eff)            = eff - 13000
-*   uMu(tokens, eff)    = tokens >= Sfo(eff) ? "compact" : ...
-*
-* `cst()` gives a default max_output_tokens of 32000, so that Math.min always
-* clamps to 20000 for current models. The threshold is therefore a fixed token
-* reserve, not a fraction of the window. The same binary corroborates this with
-* a hardcoded precompute default of 967000 for a 1M window (1_000_000 - 33_000).
-* See issue #37.
-*
-* Assumes Claude Code's defaults: auto-compact enabled and `autoCompactWindow`
-* unset. Neither is visible in the statusline payload, so a user who changes
-* either will see these predictions miss — `autoCompactWindow` makes compaction
-* fire earlier than predicted, and `autoCompactEnabled: false` means it never
-* fires at all.
-*/
-/** Output headroom Claude Code holds back: min(maxOutputTokens, 20_000). */
-const OUTPUT_RESERVE = 2e4;
-/** Fixed compaction reserve, on top of the output headroom. */
-const COMPACT_RESERVE = 13e3;
-/** Total tokens reserved below the window size. */
-const AUTOCOMPACT_RESERVE = OUTPUT_RESERVE + COMPACT_RESERVE;
-/** Amber band: Claude Code's own "warn" level sits 20k before the threshold. */
-const AMBER_TOKENS = 2e4;
-/** Red band: the last warning before compaction. */
-const RED_TOKENS = 5e3;
-/**
-* Token count at which auto-compact fires.
-*
-* Null when the window is too small for the reserve to make sense — callers
-* should fall back rather than render a negative countdown.
-*/
-function compactThresholdTokens(windowSize) {
-	if (!Number.isFinite(windowSize) || windowSize <= AUTOCOMPACT_RESERVE) return null;
-	return windowSize - AUTOCOMPACT_RESERVE;
-}
-/** Tokens left before auto-compact, clamped at zero. Null when unmodellable. */
-function tokensUntilCompact(usedTokens, windowSize) {
-	const threshold = compactThresholdTokens(windowSize);
-	if (threshold === null) return null;
-	return Math.max(0, Math.round(threshold - usedTokens));
-}
 
 //#endregion
 //#region src/widgets/compact-countdown.ts
