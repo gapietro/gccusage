@@ -12,22 +12,22 @@
  * Output is anonymised: project directories are reported as proj-a, proj-b,
  * and so on, and no prompt text, file contents, or paths are ever emitted.
  */
+import { parseArgs, USAGE } from "./lib/cli.ts";
 import { defaultProjectsDir } from "./lib/discover.ts";
 import { buildReport, renderMarkdown } from "./lib/report.ts";
 
 function main(argv: string[]): void {
-  const asJson = argv.includes("--json");
-  const dirFlag = argv.indexOf("--projects-dir");
-  const projectsDir = dirFlag !== -1 ? argv[dirFlag + 1] : undefined;
-
-  if (dirFlag !== -1 && !projectsDir) {
-    console.error("--projects-dir requires a path");
+  const parsed = parseArgs(argv);
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    console.error(USAGE);
     process.exit(1);
   }
 
+  const { projectsDir, json } = parsed.options;
   const report = buildReport(projectsDir ?? defaultProjectsDir());
   process.stdout.write(
-    asJson ? `${JSON.stringify(report, null, 2)}\n` : `${renderMarkdown(report)}\n`,
+    json ? `${JSON.stringify(report, null, 2)}\n` : `${renderMarkdown(report)}\n`,
   );
 }
 
