@@ -202,10 +202,16 @@ Every widget supports:
 | Option | Type | Description |
 |--------|------|-------------|
 | `type` | string | Widget type (required) |
-| `fg` | string | Foreground color (hex) |
-| `bg` | string | Background color (hex) |
+| `fg` | string | Foreground color (hex, or a named color — see below) |
+| `bg` | string | Background color (hex, or a named color — see below) |
 | `label` | string | Custom label prefix |
 | `priority` | number | Compact mode priority (lower = kept first) |
+
+`fg`/`bg` accept a hex color (`"#ff0000"`) or one of these named colors:
+`red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `white`, `black`, `gray`
+(and `grey`), `orange`, `pink`. There is no validation on these fields, so an
+unrecognized name (a typo, or a name not in this list) silently renders as
+black rather than erroring.
 
 ### Custom command widget
 

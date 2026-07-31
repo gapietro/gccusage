@@ -1,8 +1,11 @@
 import * as v from "valibot";
 
 const ColorSchema = v.union([
-  // Named colors (see NAMED_COLORS in src/render/colors.ts) and hex, in either
-  // 3- or 6-digit form. ansi256 codes are NOT supported — see the linked issue.
+  // A named color from NAMED_COLORS (src/render/colors.ts) or a hex string.
+  // This is not validated against either grammar: an unrecognized name or an
+  // unparseable hex value falls back to black at render time rather than
+  // erroring here. ansi256 codes are NOT supported — see issue #42
+  // (https://github.com/gapietro/gccusage/issues/42).
   v.string(),
 ]);
 

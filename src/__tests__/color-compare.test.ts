@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { colorDistance, normalizeColor } from "../render/color-compare.js";
+import { colorDistance, normalizeColor, contrastingForeground } from "../render/color-compare.js";
 import { NAMED_COLORS } from "../render/colors.js";
 
 describe("normalizeColor", () => {
@@ -49,6 +49,35 @@ describe("normalizeColor", () => {
     expect(normalizeColor("#gggggg")).toBe("#000000"); // 48;2;0;0;0 — no hex run
     expect(normalizeColor("#")).toBe("#000000"); // 48;2;0;0;0
     expect(normalizeColor("")).toBe("#000000"); // 48;2;0;0;0
+  });
+
+  // resolveColor uses Object.hasOwn now, but NAMED_COLORS is still a plain
+  // object literal, so anything reaching into Object.prototype must still
+  // fail to resolve as a name and fall through to the hex parse (which finds
+  // no hex run in any of these) rather than returning a function/object.
+  it("collapses Object.prototype property names to black rather than resolving them", () => {
+    expect(normalizeColor("constructor")).toBe("#000000");
+    expect(normalizeColor("__proto__")).toBe("#000000");
+    expect(normalizeColor("toString")).toBe("#000000");
+    expect(normalizeColor("valueOf")).toBe("#000000");
+  });
+
+  it("trims whitespace around a named color before resolving", () => {
+    expect(normalizeColor(" red")).toBe("#ff0000");
+    expect(normalizeColor("red ")).toBe("#ff0000");
+    expect(normalizeColor(" RED ")).toBe("#ff0000");
+  });
+});
+
+describe("contrastingForeground", () => {
+  it("picks a dark foreground for a light background", () => {
+    expect(contrastingForeground("white")).toBe("#000000");
+    expect(contrastingForeground("#ffffff")).toBe("#000000");
+  });
+
+  it("picks a light foreground for a dark background", () => {
+    expect(contrastingForeground("#000000")).toBe("#ffffff");
+    expect(contrastingForeground("black")).toBe("#ffffff");
   });
 });
 

@@ -2369,11 +2369,22 @@ const NAMED_COLORS = {
 };
 /**
 * Substitute a known color name with its hex value; pass anything else through
-* untouched so the caller's own parsing (chalk's, or `colorize`'s
+* untouched (trimmed) so the caller's own parsing (chalk's, or `colorize`'s
 * `startsWith("#")` guard) still applies.
+*
+* Uses `Object.hasOwn` rather than `NAMED_COLORS[key] ?? color` because
+* `NAMED_COLORS` is a plain object literal: inherited `Object.prototype`
+* members (`constructor`, `__proto__`, `toString`, `valueOf`, ...) are truthy
+* lookups there too, so `??` never falls through for those keys and the
+* caller receives a function or `[object Object]` instead of a string. On the
+* powerline path that value flows into `colorDistance` -> `normalizeColor` ->
+* this function again, where `.toLowerCase()` on a non-string throws and
+* blanks the entire statusline (see the fix report).
 */
 function resolveColor(color) {
-	return NAMED_COLORS[color.toLowerCase()] ?? color;
+	const trimmed = color.trim();
+	const key = trimmed.toLowerCase();
+	return Object.hasOwn(NAMED_COLORS, key) ? NAMED_COLORS[key] : trimmed;
 }
 function colorize(text, fg, bg) {
 	let result = source_default;
@@ -2568,6 +2579,43 @@ const RAD = Math.PI / 180;
 *
 * Roughly: 0 identical, ~1 a just-noticeable difference, >10 clearly distinct.
 */
+const CONTRAST_DARK = "#000000";
+const CONTRAST_LIGHT = "#ffffff";
+/**
+* WCAG relative luminance of an sRGB hex color (the `L` term from the WCAG
+* 2.x contrast-ratio formula), via the same sRGB->linear conversion `hexToLab`
+* already uses.
+*/
+function relativeLuminance(hex) {
+	const n = Number.parseInt(hex.slice(1), 16);
+	const r = srgbToLinear((n >> 16 & 255) / 255);
+	const g = srgbToLinear((n >> 8 & 255) / 255);
+	const b = srgbToLinear((n & 255) / 255);
+	return .2126 * r + .7152 * g + .0722 * b;
+}
+/**
+* Pick a near-black or near-white foreground for legibility against `bg`,
+* whichever has more WCAG contrast.
+*
+* This is deliberately WCAG relative luminance, not the CIEDE2000
+* `colorDistance` above, even though both live in this file and the codebase
+* otherwise prefers CIEDE2000 for color comparisons (see the separator logic
+* in powerline.ts). The two are answering different questions: CIEDE2000
+* asks "do these two color *patches* look different from each other" —
+* relevant to whether a separator glyph reads against an adjacent segment.
+* WCAG luminance asks "is this *text* readable against this background" —
+* a legibility question with its own well-established, purpose-built formula
+* that ignores hue/chroma entirely (bright yellow text and bright yellow
+* background can be perceptually "different colors" by CIEDE2000 while both
+* being unreadable together). Using CIEDE2000 here, or WCAG for the
+* separator, would each be answering the wrong question for its use site.
+*/
+function contrastingForeground(bg) {
+	const luminance = relativeLuminance(normalizeColor(bg));
+	const contrastWithDark = (luminance + .05) / .05;
+	const contrastWithLight = 1.05 / (luminance + .05);
+	return contrastWithDark >= contrastWithLight ? CONTRAST_DARK : CONTRAST_LIGHT;
+}
 function colorDistance(a, b) {
 	const [l1, a1, b1] = hexToLab(normalizeColor(a));
 	const [l2, a2, b2] = hexToLab(normalizeColor(b));
@@ -2630,8 +2678,8 @@ function layoutPowerline(outputs, options) {
 	for (let i = 0; i < outputs.length; i++) {
 		const output = outputs[i];
 		const style = theme.segments[i % theme.segments.length];
-		const fg = resolveColor(output.fg ?? style.fg);
 		const bg = resolveColor(output.bg ?? style.bg);
+		const fg = output.bg !== void 0 && output.fg === void 0 ? contrastingForeground(bg) : resolveColor(output.fg ?? style.fg);
 		if (prev !== null) pieces.push(colorDistance(prev.bg, bg) < MIN_SEPARATOR_DELTA ? {
 			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
 			fg: prev.fg,

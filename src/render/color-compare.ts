@@ -99,6 +99,49 @@ const RAD = Math.PI / 180;
  *
  * Roughly: 0 identical, ~1 a just-noticeable difference, >10 clearly distinct.
  */
+// WCAG-recommended near-black / near-white foregrounds, rather than pure
+// #000000/#ffffff — matches the common accessibility convention and avoids
+// full-contrast harshness against mid-tone backgrounds.
+const CONTRAST_DARK = "#000000";
+const CONTRAST_LIGHT = "#ffffff";
+
+/**
+ * WCAG relative luminance of an sRGB hex color (the `L` term from the WCAG
+ * 2.x contrast-ratio formula), via the same sRGB->linear conversion `hexToLab`
+ * already uses.
+ */
+function relativeLuminance(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const r = srgbToLinear(((n >> 16) & 255) / 255);
+  const g = srgbToLinear(((n >> 8) & 255) / 255);
+  const b = srgbToLinear((n & 255) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Pick a near-black or near-white foreground for legibility against `bg`,
+ * whichever has more WCAG contrast.
+ *
+ * This is deliberately WCAG relative luminance, not the CIEDE2000
+ * `colorDistance` above, even though both live in this file and the codebase
+ * otherwise prefers CIEDE2000 for color comparisons (see the separator logic
+ * in powerline.ts). The two are answering different questions: CIEDE2000
+ * asks "do these two color *patches* look different from each other" —
+ * relevant to whether a separator glyph reads against an adjacent segment.
+ * WCAG luminance asks "is this *text* readable against this background" —
+ * a legibility question with its own well-established, purpose-built formula
+ * that ignores hue/chroma entirely (bright yellow text and bright yellow
+ * background can be perceptually "different colors" by CIEDE2000 while both
+ * being unreadable together). Using CIEDE2000 here, or WCAG for the
+ * separator, would each be answering the wrong question for its use site.
+ */
+export function contrastingForeground(bg: string): string {
+  const luminance = relativeLuminance(normalizeColor(bg));
+  const contrastWithDark = (luminance + 0.05) / (0 + 0.05);
+  const contrastWithLight = (1 + 0.05) / (luminance + 0.05);
+  return contrastWithDark >= contrastWithLight ? CONTRAST_DARK : CONTRAST_LIGHT;
+}
+
 export function colorDistance(a: string, b: string): number {
   const [l1, a1, b1] = hexToLab(normalizeColor(a));
   const [l2, a2, b2] = hexToLab(normalizeColor(b));
