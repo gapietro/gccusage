@@ -71,13 +71,17 @@ export interface ConfigLoad {
   error?: string;
 }
 
-/** Cap on the `received` value embedded in an error line, in characters. */
-const MAX_RECEIVED_LENGTH = 120;
+/** Cap on each unbounded fragment of an error line, in characters. */
+const MAX_FRAGMENT_LENGTH = 120;
 
-/** Truncate an already-stringified `received` value so one bad field can't blow up the line. */
-function truncateReceived(received: string): string {
-  if (received.length <= MAX_RECEIVED_LENGTH) return received;
-  return `${received.slice(0, MAX_RECEIVED_LENGTH)}…`;
+/**
+ * Cap one fragment of the error line. Applied per fragment rather than to the
+ * finished line so the structure around it — the dot path, the `(+N more)`
+ * count — always survives, whatever the config file contains.
+ */
+function truncate(text: string): string {
+  if (text.length <= MAX_FRAGMENT_LENGTH) return text;
+  return `${text.slice(0, MAX_FRAGMENT_LENGTH)}…`;
 }
 
 /** One line describing why the config file was rejected. */
@@ -92,8 +96,12 @@ function describeIssues(issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]
   // mention the value, so only those need the explicit `(got …)` suffix.
   // `first.received` is already quoted by valibot ("196" comes back as the
   // 5-character string `"196"`), so it is interpolated bare, just capped.
-  const suffix = first.kind === "validation" ? ` (got ${truncateReceived(first.received)})` : "";
-  return `${where}${first.message}${suffix}${more}`;
+  const suffix = first.kind === "validation" ? ` (got ${truncate(first.received)})` : "";
+  // The message needs the same cap: a "schema" kind message embeds the received
+  // value itself, so a 10 KB string in a mistyped field would otherwise emit a
+  // 10 KB statusline. (JSON.parse errors need no cap — Node truncates its own
+  // snippet — so the two paths below are already bounded.)
+  return `${where}${truncate(first.message)}${suffix}${more}`;
 }
 
 export function loadSettings(): ConfigLoad {

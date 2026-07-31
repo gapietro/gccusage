@@ -1307,12 +1307,16 @@ function mergeSettings(defaults, raw, validated) {
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
 }
-/** Cap on the `received` value embedded in an error line, in characters. */
-const MAX_RECEIVED_LENGTH = 120;
-/** Truncate an already-stringified `received` value so one bad field can't blow up the line. */
-function truncateReceived(received) {
-	if (received.length <= MAX_RECEIVED_LENGTH) return received;
-	return `${received.slice(0, MAX_RECEIVED_LENGTH)}…`;
+/** Cap on each unbounded fragment of an error line, in characters. */
+const MAX_FRAGMENT_LENGTH = 120;
+/**
+* Cap one fragment of the error line. Applied per fragment rather than to the
+* finished line so the structure around it — the dot path, the `(+N more)`
+* count — always survives, whatever the config file contains.
+*/
+function truncate(text) {
+	if (text.length <= MAX_FRAGMENT_LENGTH) return text;
+	return `${text.slice(0, MAX_FRAGMENT_LENGTH)}…`;
 }
 /** One line describing why the config file was rejected. */
 function describeIssues(issues) {
@@ -1320,8 +1324,8 @@ function describeIssues(issues) {
 	const dotPath = getDotPath(first);
 	const where = dotPath ? `${dotPath}: ` : "";
 	const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
-	const suffix = first.kind === "validation" ? ` (got ${truncateReceived(first.received)})` : "";
-	return `${where}${first.message}${suffix}${more}`;
+	const suffix = first.kind === "validation" ? ` (got ${truncate(first.received)})` : "";
+	return `${where}${truncate(first.message)}${suffix}${more}`;
 }
 function loadSettings() {
 	const configPath = getConfigPath();

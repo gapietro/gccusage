@@ -196,4 +196,52 @@ describe("loadSettings", () => {
     expect(error).toBeUndefined();
     expect(settings.lines[0]?.widgets[0]?.fg).toBe("red");
   });
+
+  // The error line replaces the whole statusline, so it must stay readable no
+  // matter what the config file contains. valibot's own type-mismatch messages
+  // embed the received value ("Expected Array but received \"xxx…\""), which is
+  // unbounded — capping `received` alone does not cover them.
+  it("caps a huge value embedded in a valibot type-mismatch message", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: "x".repeat(10000) }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toBeDefined();
+    expect(error!.length).toBeLessThan(400);
+    expect(error).toContain("lines:");
+    expect(error).toContain("…");
+  });
+
+  it("caps a huge value in a color error while keeping the issue count", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [
+          {
+            widgets: [
+              { type: "model", bg: "y".repeat(10000) },
+              { type: "cwd", bg: "196" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error!.length).toBeLessThan(400);
+    // Truncation must not swallow the structure around it.
+    expect(error).toContain("lines.0.widgets.0.bg:");
+    expect(error).toContain("must be a color name or #rgb/#rrggbb hex");
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("leaves a short message untouched", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ lines: "nope" }));
+
+    const { error } = loadSettings();
+    expect(error).toBe('lines: Invalid type: Expected Array but received "nope"');
+  });
 });
