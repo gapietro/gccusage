@@ -101,9 +101,12 @@ contained.
 
 A missing file stays silent: not having a config is the normal case, not a failure.
 
+Validation runs through `v.safeParse` rather than `v.parse` in a `try`, so the issues arrive
+typed with no `ValiError` narrowing; `JSON.parse` keeps its own `try`/`catch`.
+
 The `error` is a single-line string built from whichever failure occurred:
 
-- `v.ValiError` → first issue as `` `${dotPath}: ${message} (got ${received})` ``, then
+- schema issues → first issue as `` `${dotPath}: ${message} (got ${received})` ``, then
   `` ` (+${n} more)` `` when `issues.length > 1`. Use `v.getDotPath(issue)`; when it is `null`
   (a root-level issue) omit the `path: ` prefix rather than printing `null`.
 
