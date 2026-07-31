@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { colorDistance, normalizeColor } from "../render/color-compare.js";
+import { NAMED_COLORS } from "../render/colors.js";
 
 describe("normalizeColor", () => {
   it("lowercases and passes through valid 6-digit hex", () => {
@@ -11,10 +12,28 @@ describe("normalizeColor", () => {
     expect(normalizeColor("#ABC")).toBe("#aabbcc");
   });
 
-  it("collapses non-hex values to the black chalk paints them as", () => {
-    expect(normalizeColor("red")).toBe("#000000");
-    expect(normalizeColor("blue")).toBe("#000000");
+  it("resolves named colors before falling back to chalk's hex parse", () => {
+    expect(normalizeColor("red")).toBe("#ff0000");
+    expect(normalizeColor("blue")).toBe("#0000ff");
+  });
+
+  it("is case-insensitive for named colors", () => {
+    expect(normalizeColor("RED")).toBe("#ff0000");
+    expect(normalizeColor("Red")).toBe("#ff0000");
+  });
+
+  it("collapses values that are neither a known name nor hex", () => {
     expect(normalizeColor("")).toBe("#000000");
+    expect(normalizeColor("#")).toBe("#000000");
+    expect(normalizeColor("banana")).toBe("#000000");
+  });
+
+  // Guards the property the separator logic rests on: every name in the map
+  // must resolve, so adding an entry without wiring it up fails here.
+  it("resolves every entry in NAMED_COLORS", () => {
+    for (const [name, hex] of Object.entries(NAMED_COLORS)) {
+      expect(normalizeColor(name), name).toBe(hex);
+    }
   });
 
   // Ground truth measured directly against this project's chalk@5.6.2 at
@@ -95,7 +114,10 @@ describe("colorDistance", () => {
   it("normalizes before comparing, so equivalent spellings are identical", () => {
     expect(colorDistance("#fff", "#ffffff")).toBe(0);
     expect(colorDistance("#ABC", "#aabbcc")).toBe(0);
-    // chalk paints both of these black.
-    expect(colorDistance("red", "")).toBe(0);
+    // "red" now resolves to #ff0000 while "" is still the black chalk paints
+    // it as, so these are far apart rather than both black. Measured ΔE is
+    // 50.41; the assertion is loose because the exact figure is not the point
+    // — that it clears MIN_SEPARATOR_DELTA by a wide margin is.
+    expect(colorDistance("red", "")).toBeGreaterThan(40);
   });
 });

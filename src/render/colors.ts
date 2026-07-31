@@ -1,6 +1,6 @@
 import chalk from "chalk";
 
-const NAMED_COLORS: Record<string, string> = {
+export const NAMED_COLORS: Record<string, string> = {
   red: "#ff0000",
   green: "#00ff00",
   blue: "#0000ff",
@@ -15,7 +15,12 @@ const NAMED_COLORS: Record<string, string> = {
   pink: "#ff69b4",
 };
 
-function resolveColor(color: string): string {
+/**
+ * Substitute a known color name with its hex value; pass anything else through
+ * untouched so the caller's own parsing (chalk's, or `colorize`'s
+ * `startsWith("#")` guard) still applies.
+ */
+export function resolveColor(color: string): string {
   return NAMED_COLORS[color.toLowerCase()] ?? color;
 }
 

@@ -2,6 +2,8 @@
 // and how far apart two painted colors look. Kept out of powerline.ts so that
 // file stays about layout.
 
+import { resolveColor } from "./colors.js";
+
 // Mirrors chalk's own `hexToRgb`, which is deliberately *unanchored* — it
 // scans the string for the first 6-run (preferred) or 3-run of hex digits
 // anywhere inside it, rather than requiring the whole string to be a clean
@@ -12,16 +14,21 @@ const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 
 /**
  * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
- * it: find the first embedded 6-digit (or 3-digit) hex run per chalk's own
- * unanchored regex, expand a 3-digit match to 6, lowercase it, and collapse
- * anything with no such run (named colors, empty strings, garbage) to the
- * same black chalk paints for those inputs. Because the match is unanchored,
- * inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
- * "#112233") rather than black — that mirrors chalk exactly, even though it
- * looks surprising next to a naive anchored implementation.
+ * it: resolve known color names via `resolveColor` first, then find the first
+ * embedded 6-digit (or 3-digit) hex run per chalk's own unanchored regex,
+ * expand a 3-digit match to 6, lowercase it, and collapse anything with no
+ * such run (values that are neither a known name nor hex, empty strings,
+ * garbage) to the same black chalk paints for those inputs. Because the match
+ * is unanchored, inputs like "#abcd" or "#12345" resolve to a real color
+ * ("#aabbcc", "#112233") rather than black — that mirrors chalk exactly, even
+ * though it looks surprising next to a naive anchored implementation.
  */
 export function normalizeColor(color: string): string {
-  const match = CHALK_HEX.exec(color);
+  // Named colors first: the renderer substitutes them before chalk sees them,
+  // so the comparison must do the same or it would judge "red" to be the black
+  // chalk paints for an unparseable string. Anything else falls through to
+  // chalk's own hex parse below, unchanged.
+  const match = CHALK_HEX.exec(resolveColor(color));
   if (!match) return "#000000";
   let digits = match[0].toLowerCase();
   if (digits.length === 3) {

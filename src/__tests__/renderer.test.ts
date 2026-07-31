@@ -238,9 +238,12 @@ describe("layoutPowerline", () => {
     expect(pieces[1]!.text).toBe("│");
   });
 
-  it("draws the thin separator for two different named colors (both paint black)", () => {
-    // chalk.bgHex("red") and chalk.bgHex("blue") both fail hex parsing and
-    // paint 48;2;0;0;0 — identical backgrounds despite distinct config values.
+  it("draws the wide separator for two named colors that resolve apart", () => {
+    // "red" and "blue" resolve to #ff0000 and #0000ff — ΔE 52.88, far above
+    // MIN_SEPARATOR_DELTA — so the separator decision follows the colors
+    // actually painted. This test previously asserted the thin glyph, because
+    // both names failed chalk's hex parse and painted black. That was the
+    // defect this change fixes.
     const pieces = layoutPowerline(
       [
         { text: "a", fg: "#ffffff", bg: "red" },
@@ -248,7 +251,15 @@ describe("layoutPowerline", () => {
       ],
       OPTIONS,
     );
-    expect(pieces[1]!.text).toBe("│");
+    expect(pieces[1]).toEqual({ text: "▶", fg: "#ff0000", bg: "#0000ff" });
+  });
+
+  it("resolves named colors to the same pieces as their mapped hex", () => {
+    // The property the separator logic rests on: comparison and painting must
+    // agree about what a config value means.
+    const named = layoutPowerline([{ text: "a", fg: "white", bg: "red" }], OPTIONS);
+    const hex = layoutPowerline([{ text: "a", fg: "#ffffff", bg: "#ff0000" }], OPTIONS);
+    expect(named).toEqual(hex);
   });
 
   it("still draws the wide separator for a genuinely different pair", () => {

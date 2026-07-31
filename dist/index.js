@@ -2367,6 +2367,11 @@ const NAMED_COLORS = {
 	orange: "#ff8800",
 	pink: "#ff69b4"
 };
+/**
+* Substitute a known color name with its hex value; pass anything else through
+* untouched so the caller's own parsing (chalk's, or `colorize`'s
+* `startsWith("#")` guard) still applies.
+*/
 function resolveColor(color) {
 	return NAMED_COLORS[color.toLowerCase()] ?? color;
 }
@@ -2501,16 +2506,17 @@ function getTheme(name) {
 const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 /**
 * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
-* it: find the first embedded 6-digit (or 3-digit) hex run per chalk's own
-* unanchored regex, expand a 3-digit match to 6, lowercase it, and collapse
-* anything with no such run (named colors, empty strings, garbage) to the
-* same black chalk paints for those inputs. Because the match is unanchored,
-* inputs like "#abcd" or "#12345" resolve to a real color ("#aabbcc",
-* "#112233") rather than black — that mirrors chalk exactly, even though it
-* looks surprising next to a naive anchored implementation.
+* it: resolve known color names via `resolveColor` first, then find the first
+* embedded 6-digit (or 3-digit) hex run per chalk's own unanchored regex,
+* expand a 3-digit match to 6, lowercase it, and collapse anything with no
+* such run (values that are neither a known name nor hex, empty strings,
+* garbage) to the same black chalk paints for those inputs. Because the match
+* is unanchored, inputs like "#abcd" or "#12345" resolve to a real color
+* ("#aabbcc", "#112233") rather than black — that mirrors chalk exactly, even
+* though it looks surprising next to a naive anchored implementation.
 */
 function normalizeColor(color) {
-	const match = CHALK_HEX.exec(color);
+	const match = CHALK_HEX.exec(resolveColor(color));
 	if (!match) return "#000000";
 	let digits = match[0].toLowerCase();
 	if (digits.length === 3) digits = [...digits].map((c) => c + c).join("");
@@ -2624,8 +2630,8 @@ function layoutPowerline(outputs, options) {
 	for (let i = 0; i < outputs.length; i++) {
 		const output = outputs[i];
 		const style = theme.segments[i % theme.segments.length];
-		const fg = output.fg ?? style.fg;
-		const bg = output.bg ?? style.bg;
+		const fg = resolveColor(output.fg ?? style.fg);
+		const bg = resolveColor(output.bg ?? style.bg);
 		if (prev !== null) pieces.push(colorDistance(prev.bg, bg) < MIN_SEPARATOR_DELTA ? {
 			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
 			fg: prev.fg,
