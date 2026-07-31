@@ -15,7 +15,7 @@
 - **No new dependencies.** Node ≥23.6 strips TypeScript types natively; the script runs as `node scripts/analyze-transcripts.ts`. The repo's `engines` field says `node >=18` and `npm run dev` invokes `bun`, which is **not installed on this machine** — do not use bun in any step.
 - **Nothing under `src/`.** This plan touches `scripts/`, `docs/`, `package.json`, and `tsconfig.scripts.json` only. Because no `src/` file changes, **no `npm run build` and no `git add -f dist/index.js` is required.** If a task ever needs a `src/` change, stop and flag it — the rebuild rule applies again.
 - **Anonymised output only.** Project directory names map to stable `proj-a`, `proj-b`, … labels. Numeric aggregates and tool names may be emitted. Prompt text, file contents, file paths, and directory names must never reach stdout or the findings doc.
-- **Imports use the `.js` extension** on relative paths (`from "./stats.js"`), matching the existing `src/` code under `"moduleResolution": "bundler"` + `"verbatimModuleSyntax": true`.
+- **Relative imports inside `scripts/` use the `.ts` extension** (`from "./stats.ts"`) — the opposite of the `.js` convention `src/` uses. This is not a style choice. `src/` is bundled by tsdown, which rewrites specifiers; `scripts/` is executed directly by Node, and **Node does not resolve a `.js` specifier to a `.ts` file** — it fails with `ERR_MODULE_NOT_FOUND`. Vitest resolves `.js`→`.ts` happily, so a `.js` specifier here passes every test and fails only when the CLI is actually run. `tsconfig.scripts.json` therefore sets `"allowImportingTsExtensions": true`, which TypeScript permits because that config is `noEmit`.
 - **Type-only imports use `import type`** — `verbatimModuleSyntax` is on, so a value import of a type is a compile error.
 - Branch is already created: `research/token-efficiency-49`. Commit after every task.
 - Percentiles in the script use **linear interpolation**; the scoping probes in the spec used floor-index selection. Small differences from the spec's preliminary readings (e.g. p50 97.5% vs 97.4%) are expected and are **not** a discrepancy. A difference of more than ~1 percentage point is.
@@ -47,7 +47,7 @@ Create `scripts/__tests__/stats.test.ts`:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { percentile, summarize, costEquivalent, COST_WEIGHTS } from "../lib/stats.js";
+import { percentile, summarize, costEquivalent, COST_WEIGHTS } from "../lib/stats.ts";
 
 describe("percentile", () => {
   it("returns NaN for an empty array", () => {
@@ -146,7 +146,7 @@ describe("COST_WEIGHTS", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/stats.test.ts`
-Expected: FAIL — `Failed to resolve import "../lib/stats.js"`.
+Expected: FAIL — `Failed to resolve import "../lib/stats.ts"`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -249,7 +249,8 @@ Create `tsconfig.scripts.json`:
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["scripts"]
 }
@@ -337,7 +338,7 @@ Create `scripts/__tests__/parse.test.ts`:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { parseTranscript } from "../lib/parse.js";
+import { parseTranscript } from "../lib/parse.ts";
 
 function lines(...records: unknown[]): string[] {
   return records.map((r) => JSON.stringify(r));
@@ -488,7 +489,7 @@ describe("parseTranscript", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/parse.test.ts`
-Expected: FAIL — `Failed to resolve import "../lib/parse.js"`.
+Expected: FAIL — `Failed to resolve import "../lib/parse.ts"`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -716,7 +717,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { discoverSessions, projectLabel } from "../lib/discover.js";
+import { discoverSessions, projectLabel } from "../lib/discover.ts";
 
 let root: string;
 
@@ -798,7 +799,7 @@ describe("discoverSessions", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/discover.test.ts`
-Expected: FAIL — `Failed to resolve import "../lib/discover.js"`.
+Expected: FAIL — `Failed to resolve import "../lib/discover.ts"`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -896,7 +897,7 @@ Expected: PASS, 8 tests.
 Run:
 ```bash
 node --input-type=module -e '
-import { discoverSessions, defaultProjectsDir } from "./scripts/lib/discover.js";
+import { discoverSessions, defaultProjectsDir } from "./scripts/lib/discover.ts";
 const s = discoverSessions(defaultProjectsDir());
 console.log("main sessions:", s.length);
 console.log("subagent transcripts:", s.reduce((n, x) => n + x.subagentPaths.length, 0));
@@ -956,7 +957,7 @@ Create `scripts/__tests__/analysis.test.ts`:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import type { SessionRecord } from "../lib/parse.js";
+import type { SessionRecord } from "../lib/parse.ts";
 import {
   MIN_TURNS,
   sessionMetrics,
@@ -964,7 +965,7 @@ import {
   toolProfiles,
   compareDelegation,
   scoreSignals,
-} from "../lib/analysis.js";
+} from "../lib/analysis.ts";
 
 function turn(
   inputTokens: number,
@@ -1123,15 +1124,15 @@ Note: in the first `scoreSignals` test, `sessionMetrics` is called with an array
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/analysis.test.ts`
-Expected: FAIL — `Failed to resolve import "../lib/analysis.js"`.
+Expected: FAIL — `Failed to resolve import "../lib/analysis.ts"`.
 
 - [ ] **Step 3: Write the implementation**
 
 Create `scripts/lib/analysis.ts`:
 
 ```typescript
-import type { SessionRecord } from "./parse.js";
-import { type Summary, summarize, costEquivalent, COST_WEIGHTS } from "./stats.js";
+import type { SessionRecord } from "./parse.ts";
+import { type Summary, summarize, costEquivalent, COST_WEIGHTS } from "./stats.ts";
 
 /** Sessions below this many assistant turns are too short to characterise. */
 export const MIN_TURNS = 5;
@@ -1372,7 +1373,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildReport, renderMarkdown } from "../lib/report.js";
+import { buildReport, renderMarkdown } from "../lib/report.ts";
 
 let root: string;
 
@@ -1507,16 +1508,16 @@ describe("CLI", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run scripts/__tests__/report.test.ts`
-Expected: FAIL — `Failed to resolve import "../lib/report.js"`.
+Expected: FAIL — `Failed to resolve import "../lib/report.ts"`.
 
 - [ ] **Step 3: Write the report module**
 
 Create `scripts/lib/report.ts`:
 
 ```typescript
-import { discoverSessions } from "./discover.js";
-import { readTranscript, type SessionRecord } from "./parse.js";
-import { summarize, type Summary } from "./stats.js";
+import { discoverSessions } from "./discover.ts";
+import { readTranscript, type SessionRecord } from "./parse.ts";
+import { summarize, type Summary } from "./stats.ts";
 import {
   MIN_TURNS,
   sessionMetrics,
@@ -1527,7 +1528,7 @@ import {
   type ToolProfile,
   type DelegationComparison,
   type SignalScore,
-} from "./analysis.js";
+} from "./analysis.ts";
 
 export interface Report {
   corpus: {
@@ -1711,8 +1712,8 @@ Create `scripts/analyze-transcripts.ts`:
  * Output is anonymised: project directories are reported as proj-a, proj-b,
  * and so on, and no prompt text, file contents, or paths are ever emitted.
  */
-import { defaultProjectsDir } from "./lib/discover.js";
-import { buildReport, renderMarkdown } from "./lib/report.js";
+import { defaultProjectsDir } from "./lib/discover.ts";
+import { buildReport, renderMarkdown } from "./lib/report.ts";
 
 function main(argv: string[]): void {
   const asJson = argv.includes("--json");
