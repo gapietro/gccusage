@@ -1233,13 +1233,29 @@ export interface ToolProfile {
 }
 
 const UNATTRIBUTED = "(unattributed)";
+const MCP_PREFIX = "mcp__";
+
+/**
+ * Bucket key for a tool result. MCP tools are reported at server
+ * granularity — `mcp__foundry__servicenow_query` becomes `mcp:foundry` —
+ * because the per-operation names identify specific client engagements and
+ * this analysis is published in a public repository. Which server returns
+ * huge results is the finding; which of its operations did is not.
+ */
+export function normaliseToolName(toolName: string | null): string {
+  if (toolName === null) return UNATTRIBUTED;
+  if (!toolName.startsWith(MCP_PREFIX)) return toolName;
+  const rest = toolName.slice(MCP_PREFIX.length);
+  const separator = rest.indexOf("__");
+  return `mcp:${separator === -1 ? rest : rest.slice(0, separator)}`;
+}
 
 /** Result-size distribution per tool, ordered by total bytes descending. */
 export function toolProfiles(records: SessionRecord[]): ToolProfile[] {
   const byTool = new Map<string, number[]>();
   for (const record of records) {
     for (const result of record.toolResults) {
-      const key = result.toolName ?? UNATTRIBUTED;
+      const key = normaliseToolName(result.toolName);
       const bucket = byTool.get(key);
       if (bucket) bucket.push(result.bytes);
       else byTool.set(key, [result.bytes]);
