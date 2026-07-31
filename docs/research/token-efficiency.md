@@ -61,9 +61,9 @@ observed decile edges, not round numbers.
 
 | State | Range | What it means | What the user does mid-session |
 | --- | --- | --- | --- |
-| Low | ≤ 59,416 tokens/turn (bottom decile) | A short or freshly-started session: the window is still small, so each turn re-reads little. In the corpus these are sessions of 24 turns or fewer at the tenth percentile. | **Nothing.** The rate rises on its own as the session runs; there is no action that keeps it low except not working. |
+| Low | ≤ 59,416 tokens/turn (bottom decile) | A short or freshly-started session: the window is still small, so each turn re-reads little. The eight sessions in this decile run 5 to 33 assistant turns, median 13†. | **Nothing.** The rate rises on its own as the session runs; there is no action that keeps it low except not working. |
 | Normal | 59,416 – 272,692 | What a working session looks like. Eight of ten sessions live here. | **Nothing.** This is the null state and it covers 80% of sessions. |
-| High | ≥ 272,692 (top decile) | The context is large and every turn re-reads all of it. | Shrink the context or start a fresh session — **which is exactly the advice `compact-countdown` already gives**, in tokens remaining before auto-compact rather than as a rate with no threshold attached. |
+| High | ≥ 272,692 (top decile) | The context is large and every turn re-reads all of it. These sessions run a median of 381 assistant turns† — the state is "this session is long", arriving late. | Shrink the context or start a fresh session — **which is exactly the advice `compact-countdown` already gives**, in tokens remaining before auto-compact rather than as a rate with no threshold attached. |
 
 Two of the three states imply no action. The third duplicates a widget that is already in the
 default layout and states the same thing more precisely. That is the case against the meter, in
@@ -398,6 +398,7 @@ console.log(by);
 ```
 
 The delegation medians (135 vs 63 turns, 23 vs 5 user prompts) come from the same rows, split
-on `subagentCount > 0`; the per-session hit-rate and cache-write-share pairs in §8 come from
-sorting those rows on `cacheHitRate`; the tool totals (11,495 calls, 31,135,862 bytes,
-top-five share 88.0%) come from summing the `tools` array.
+on `subagentCount > 0`; the §2 decile turn counts come from sorting those rows on
+`cacheReadPerTurn` and taking the first and last eight; the per-session hit-rate and
+cache-write-share pairs in §8 come from sorting on `cacheHitRate`; the tool totals (11,495
+calls, 31,135,862 bytes, top-five share 88.0%) come from summing the `tools` array.
