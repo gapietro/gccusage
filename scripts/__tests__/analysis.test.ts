@@ -15,11 +15,9 @@ function turn(
   outputTokens: number,
   cacheReadTokens: number,
   cacheCreationTokens: number,
-  toolNames: string[] = [],
 ) {
   return {
     usage: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens },
-    toolNames,
   };
 }
 

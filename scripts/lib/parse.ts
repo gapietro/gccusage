@@ -9,7 +9,6 @@ export interface TurnUsage {
 
 export interface Turn {
   usage: TurnUsage;
-  toolNames: string[];
 }
 
 export interface ToolResultRecord {
@@ -40,6 +39,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * Parse one transcript's lines into aggregate counters.
  *
+ * One API response is written as SEVERAL assistant lines — one per content
+ * block (`thinking`, `text`, each `tool_use`) — and every one of them carries
+ * a byte-identical copy of the same `message.usage` object. Counting a turn
+ * per line inflates both the turn count and every token sum, and inflates
+ * them non-uniformly: a response with more blocks is weighted more heavily.
+ * On the local corpus that is a 2.12x overcount (21,936 lines carrying usage
+ * against 10,371 distinct `message.id` groups, none of whose usage objects
+ * disagreed). So a turn is recorded once per `message.id`; a record with no
+ * id is always its own turn, since ids are what makes lines groupable.
+ *
  * A tool result record does not carry the tool's name — only the
  * tool_use_id — so names are resolved from the tool_use blocks seen
  * earlier in the same file. A result whose tool_use is missing is kept
@@ -52,6 +61,7 @@ export function parseTranscript(
   const turns: Turn[] = [];
   const toolResults: ToolResultRecord[] = [];
   const toolNameById = new Map<string, string>();
+  const seenMessageIds = new Set<string>();
   let userPrompts = 0;
   let compactBoundaries = 0;
 
@@ -72,19 +82,28 @@ export function parseTranscript(
     const content = message ? message["content"] : undefined;
 
     if (entry["type"] === "assistant") {
-      const usage = message ? asRecord(message["usage"]) : null;
-      if (!usage) continue;
-
-      const toolNames: string[] = [];
+      // Scanned on EVERY assistant line, including lines whose usage is
+      // discarded as a duplicate below: the tool_use block usually sits on a
+      // later line of the response than the one whose usage is kept, so
+      // scanning only first-seen lines loses the tool name and its result
+      // becomes unattributable.
       if (Array.isArray(content)) {
         for (const block of content) {
           const b = asRecord(block);
           if (!b || b["type"] !== "tool_use") continue;
           const name = typeof b["name"] === "string" ? b["name"] : null;
           const id = typeof b["id"] === "string" ? b["id"] : null;
-          if (name) toolNames.push(name);
           if (name && id) toolNameById.set(id, name);
         }
+      }
+
+      const usage = message ? asRecord(message["usage"]) : null;
+      if (!usage) continue;
+
+      const messageId = message && typeof message["id"] === "string" ? message["id"] : null;
+      if (messageId !== null) {
+        if (seenMessageIds.has(messageId)) continue;
+        seenMessageIds.add(messageId);
       }
 
       turns.push({
@@ -94,7 +113,6 @@ export function parseTranscript(
           cacheReadTokens: num(usage["cache_read_input_tokens"]),
           cacheCreationTokens: num(usage["cache_creation_input_tokens"]),
         },
-        toolNames,
       });
       continue;
     }

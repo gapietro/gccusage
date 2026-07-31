@@ -54,22 +54,106 @@ describe("parseTranscript", () => {
     expect(record.turns).toHaveLength(0);
   });
 
-  it("records tool names used in a turn", () => {
+  it("counts one turn per message.id, not one per content-block line", () => {
+    const usage = {
+      input_tokens: 2,
+      output_tokens: 296,
+      cache_read_input_tokens: 20_233,
+      cache_creation_input_tokens: 17_991,
+    };
     const record = parseTranscript(
-      lines({
-        type: "assistant",
-        message: {
-          usage: { input_tokens: 1 },
-          content: [
-            { type: "text", text: "ignored" },
-            { type: "tool_use", id: "toolu_1", name: "Bash" },
-            { type: "tool_use", id: "toolu_2", name: "Edit" },
-          ],
+      lines(
+        {
+          type: "assistant",
+          message: { id: "msg_1", usage, content: [{ type: "thinking", thinking: "…" }] },
         },
-      }),
+        {
+          type: "assistant",
+          message: { id: "msg_1", usage, content: [{ type: "text", text: "…" }] },
+        },
+      ),
       "sess-1",
     );
-    expect(record.turns[0]!.toolNames).toEqual(["Bash", "Edit"]);
+
+    expect(record.turns).toHaveLength(1);
+    expect(record.turns[0]!.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 296,
+      cacheReadTokens: 20_233,
+      cacheCreationTokens: 17_991,
+    });
+  });
+
+  it("counts records with no message.id as separate turns", () => {
+    const record = parseTranscript(
+      lines(
+        { type: "assistant", message: { usage: { output_tokens: 5 } } },
+        { type: "assistant", message: { usage: { output_tokens: 7 } } },
+      ),
+      "sess-1",
+    );
+    expect(record.turns).toHaveLength(2);
+    expect(record.turns.map((t) => t.usage.outputTokens)).toEqual([5, 7]);
+  });
+
+  it("attributes a tool_use carried on a later line of the same response", () => {
+    const usage = { input_tokens: 1, output_tokens: 2 };
+    const record = parseTranscript(
+      lines(
+        {
+          type: "assistant",
+          message: { id: "msg_1", usage, content: [{ type: "text", text: "…" }] },
+        },
+        {
+          type: "assistant",
+          message: {
+            id: "msg_1",
+            usage,
+            content: [{ type: "tool_use", id: "toolu_1", name: "Bash" }],
+          },
+        },
+        {
+          type: "user",
+          toolUseResult: { stdout: "hello" },
+          message: { content: [{ type: "tool_result", tool_use_id: "toolu_1" }] },
+        },
+      ),
+      "sess-1",
+    );
+
+    expect(record.turns).toHaveLength(1);
+    expect(record.toolResults).toHaveLength(1);
+    expect(record.toolResults[0]!.toolName).toBe("Bash");
+  });
+
+  it("attributes every tool_use block on a line, not just the first", () => {
+    const record = parseTranscript(
+      lines(
+        {
+          type: "assistant",
+          message: {
+            usage: { input_tokens: 1 },
+            content: [
+              { type: "text", text: "ignored" },
+              { type: "tool_use", id: "toolu_1", name: "Bash" },
+              { type: "tool_use", id: "toolu_2", name: "Edit" },
+            ],
+          },
+        },
+        {
+          type: "user",
+          toolUseResult: "a",
+          message: { content: [{ type: "tool_result", tool_use_id: "toolu_1" }] },
+        },
+        {
+          type: "user",
+          toolUseResult: "b",
+          message: { content: [{ type: "tool_result", tool_use_id: "toolu_2" }] },
+        },
+      ),
+      "sess-1",
+    );
+    expect(record.toolResults.map((r) => r.toolName)).toEqual(["Bash", "Edit"]);
   });
 
   it("attributes a tool result to the tool that produced it", () => {
@@ -141,6 +225,20 @@ describe("parseTranscript", () => {
       "sess-1",
     );
     expect(record.userPrompts).toBe(1);
+  });
+
+  it("treats a meta record carrying a tool result as a tool result, not a prompt", () => {
+    const record = parseTranscript(
+      lines({
+        type: "user",
+        isMeta: true,
+        toolUseResult: "x",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_1" }] },
+      }),
+      "sess-1",
+    );
+    expect(record.userPrompts).toBe(0);
+    expect(record.toolResults).toHaveLength(1);
   });
 
   it("counts compact boundaries", () => {
