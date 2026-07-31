@@ -16,10 +16,10 @@ import * as path$2 from "node:path";
 import * as path$1 from "node:path";
 import * as path from "node:path";
 import { dirname, resolve } from "node:path";
-import { execSync } from "node:child_process";
 import process$1 from "node:process";
 import os, { homedir } from "node:os";
 import tty from "node:tty";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 //#region node_modules/valibot/dist/index.mjs
@@ -163,6 +163,17 @@ function _joinExpects(values$1, separator) {
 	if (list.length > 1) return `(${list.join(` ${separator} `)})`;
 	return list[0] ?? "never";
 }
+/* @__NO_SIDE_EFFECTS__ */
+function getDotPath(issue) {
+	if (issue.path) {
+		let key = "";
+		for (const item of issue.path) if (typeof item.key === "string" || typeof item.key === "number") if (key) key += `.${item.key}`;
+		else key += item.key;
+		else return null;
+		return key;
+	}
+	return null;
+}
 /**
 * A Valibot error with useful information.
 */
@@ -178,6 +189,22 @@ var ValiError = class extends Error {
 		this.issues = issues;
 	}
 };
+/* @__NO_SIDE_EFFECTS__ */
+function check(requirement, message$1) {
+	return {
+		kind: "validation",
+		type: "check",
+		reference: check,
+		async: false,
+		expects: null,
+		requirement,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "input", dataset, config$1);
+			return dataset;
+		}
+	};
+}
 /**
 * Returns the fallback value of the schema.
 *
@@ -513,6 +540,45 @@ function parse(schema, input, config$1) {
 	if (dataset.issues) throw new ValiError(dataset.issues);
 	return dataset.value;
 }
+/* @__NO_SIDE_EFFECTS__ */
+function pipe(...pipe$1) {
+	return {
+		...pipe$1[0],
+		pipe: pipe$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			for (const item of pipe$1) if (item.kind !== "metadata") {
+				if (dataset.issues && (item.kind === "schema" || item.kind === "transformation")) {
+					dataset.typed = false;
+					break;
+				}
+				if (!dataset.issues || !config$1.abortEarly && !config$1.abortPipeEarly) dataset = item["~run"](dataset, config$1);
+			}
+			return dataset;
+		}
+	};
+}
+/**
+* Parses an unknown input based on a schema.
+*
+* @param schema The schema to be used.
+* @param input The input to be parsed.
+* @param config The parse configuration.
+*
+* @returns The parse result.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function safeParse(schema, input, config$1) {
+	const dataset = schema["~run"]({ value: input }, /* @__PURE__ */ getGlobalConfig(config$1));
+	return {
+		typed: dataset.typed,
+		success: !dataset.issues,
+		output: dataset.value,
+		issues: dataset.issues
+	};
+}
 
 //#endregion
 //#region src/types/status-json.ts
@@ -590,8 +656,480 @@ function parseStatusJson(raw) {
 }
 
 //#endregion
+//#region node_modules/chalk/source/vendor/ansi-styles/index.js
+const ANSI_BACKGROUND_OFFSET = 10;
+const wrapAnsi16 = (offset = 0) => (code) => `\u001B[${code + offset}m`;
+const wrapAnsi256 = (offset = 0) => (code) => `\u001B[${38 + offset};5;${code}m`;
+const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u001B[${38 + offset};2;${red};${green};${blue}m`;
+const styles$1 = {
+	modifier: {
+		reset: [0, 0],
+		bold: [1, 22],
+		dim: [2, 22],
+		italic: [3, 23],
+		underline: [4, 24],
+		overline: [53, 55],
+		inverse: [7, 27],
+		hidden: [8, 28],
+		strikethrough: [9, 29]
+	},
+	color: {
+		black: [30, 39],
+		red: [31, 39],
+		green: [32, 39],
+		yellow: [33, 39],
+		blue: [34, 39],
+		magenta: [35, 39],
+		cyan: [36, 39],
+		white: [37, 39],
+		blackBright: [90, 39],
+		gray: [90, 39],
+		grey: [90, 39],
+		redBright: [91, 39],
+		greenBright: [92, 39],
+		yellowBright: [93, 39],
+		blueBright: [94, 39],
+		magentaBright: [95, 39],
+		cyanBright: [96, 39],
+		whiteBright: [97, 39]
+	},
+	bgColor: {
+		bgBlack: [40, 49],
+		bgRed: [41, 49],
+		bgGreen: [42, 49],
+		bgYellow: [43, 49],
+		bgBlue: [44, 49],
+		bgMagenta: [45, 49],
+		bgCyan: [46, 49],
+		bgWhite: [47, 49],
+		bgBlackBright: [100, 49],
+		bgGray: [100, 49],
+		bgGrey: [100, 49],
+		bgRedBright: [101, 49],
+		bgGreenBright: [102, 49],
+		bgYellowBright: [103, 49],
+		bgBlueBright: [104, 49],
+		bgMagentaBright: [105, 49],
+		bgCyanBright: [106, 49],
+		bgWhiteBright: [107, 49]
+	}
+};
+const modifierNames = Object.keys(styles$1.modifier);
+const foregroundColorNames = Object.keys(styles$1.color);
+const backgroundColorNames = Object.keys(styles$1.bgColor);
+const colorNames = [...foregroundColorNames, ...backgroundColorNames];
+function assembleStyles() {
+	const codes = new Map();
+	for (const [groupName, group] of Object.entries(styles$1)) {
+		for (const [styleName, style] of Object.entries(group)) {
+			styles$1[styleName] = {
+				open: `\u001B[${style[0]}m`,
+				close: `\u001B[${style[1]}m`
+			};
+			group[styleName] = styles$1[styleName];
+			codes.set(style[0], style[1]);
+		}
+		Object.defineProperty(styles$1, groupName, {
+			value: group,
+			enumerable: false
+		});
+	}
+	Object.defineProperty(styles$1, "codes", {
+		value: codes,
+		enumerable: false
+	});
+	styles$1.color.close = "\x1B[39m";
+	styles$1.bgColor.close = "\x1B[49m";
+	styles$1.color.ansi = wrapAnsi16();
+	styles$1.color.ansi256 = wrapAnsi256();
+	styles$1.color.ansi16m = wrapAnsi16m();
+	styles$1.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
+	styles$1.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
+	styles$1.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+	Object.defineProperties(styles$1, {
+		rgbToAnsi256: {
+			value(red, green, blue) {
+				if (red === green && green === blue) {
+					if (red < 8) return 16;
+					if (red > 248) return 231;
+					return Math.round((red - 8) / 247 * 24) + 232;
+				}
+				return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
+			},
+			enumerable: false
+		},
+		hexToRgb: {
+			value(hex) {
+				const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+				if (!matches) return [
+					0,
+					0,
+					0
+				];
+				let [colorString] = matches;
+				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
+				const integer = Number.parseInt(colorString, 16);
+				return [
+					integer >> 16 & 255,
+					integer >> 8 & 255,
+					integer & 255
+				];
+			},
+			enumerable: false
+		},
+		hexToAnsi256: {
+			value: (hex) => styles$1.rgbToAnsi256(...styles$1.hexToRgb(hex)),
+			enumerable: false
+		},
+		ansi256ToAnsi: {
+			value(code) {
+				if (code < 8) return 30 + code;
+				if (code < 16) return 90 + (code - 8);
+				let red;
+				let green;
+				let blue;
+				if (code >= 232) {
+					red = ((code - 232) * 10 + 8) / 255;
+					green = red;
+					blue = red;
+				} else {
+					code -= 16;
+					const remainder = code % 36;
+					red = Math.floor(code / 36) / 5;
+					green = Math.floor(remainder / 6) / 5;
+					blue = remainder % 6 / 5;
+				}
+				const value = Math.max(red, green, blue) * 2;
+				if (value === 0) return 30;
+				let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
+				if (value === 2) result += 60;
+				return result;
+			},
+			enumerable: false
+		},
+		rgbToAnsi: {
+			value: (red, green, blue) => styles$1.ansi256ToAnsi(styles$1.rgbToAnsi256(red, green, blue)),
+			enumerable: false
+		},
+		hexToAnsi: {
+			value: (hex) => styles$1.ansi256ToAnsi(styles$1.hexToAnsi256(hex)),
+			enumerable: false
+		}
+	});
+	return styles$1;
+}
+const ansiStyles = assembleStyles();
+var ansi_styles_default = ansiStyles;
+
+//#endregion
+//#region node_modules/chalk/source/vendor/supports-color/index.js
+function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process$1.argv) {
+	const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf("--");
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+}
+const { env } = process$1;
+let flagForceColor;
+if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) flagForceColor = 0;
+else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) flagForceColor = 1;
+function envForceColor() {
+	if ("FORCE_COLOR" in env) {
+		if (env.FORCE_COLOR === "true") return 1;
+		if (env.FORCE_COLOR === "false") return 0;
+		return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+function translateLevel(level) {
+	if (level === 0) return false;
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3
+	};
+}
+function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
+	const noFlagForceColor = envForceColor();
+	if (noFlagForceColor !== void 0) flagForceColor = noFlagForceColor;
+	const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
+	if (forceColor === 0) return 0;
+	if (sniffFlags) {
+		if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) return 3;
+		if (hasFlag("color=256")) return 2;
+	}
+	if ("TF_BUILD" in env && "AGENT_NAME" in env) return 1;
+	if (haveStream && !streamIsTTY && forceColor === void 0) return 0;
+	const min = forceColor || 0;
+	if (env.TERM === "dumb") return min;
+	if (process$1.platform === "win32") {
+		const osRelease = os.release().split(".");
+		if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) return Number(osRelease[2]) >= 14931 ? 3 : 2;
+		return 1;
+	}
+	if ("CI" in env) {
+		if ([
+			"GITHUB_ACTIONS",
+			"GITEA_ACTIONS",
+			"CIRCLECI"
+		].some((key) => key in env)) return 3;
+		if ([
+			"TRAVIS",
+			"APPVEYOR",
+			"GITLAB_CI",
+			"BUILDKITE",
+			"DRONE"
+		].some((sign) => sign in env) || env.CI_NAME === "codeship") return 1;
+		return min;
+	}
+	if ("TEAMCITY_VERSION" in env) return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	if (env.COLORTERM === "truecolor") return 3;
+	if (env.TERM === "xterm-kitty") return 3;
+	if (env.TERM === "xterm-ghostty") return 3;
+	if (env.TERM === "wezterm") return 3;
+	if ("TERM_PROGRAM" in env) {
+		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+		switch (env.TERM_PROGRAM) {
+			case "iTerm.app": return version >= 3 ? 3 : 2;
+			case "Apple_Terminal": return 2;
+		}
+	}
+	if (/-256(color)?$/i.test(env.TERM)) return 2;
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) return 1;
+	if ("COLORTERM" in env) return 1;
+	return min;
+}
+function createSupportsColor(stream, options = {}) {
+	const level = _supportsColor(stream, {
+		streamIsTTY: stream && stream.isTTY,
+		...options
+	});
+	return translateLevel(level);
+}
+const supportsColor = {
+	stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
+	stderr: createSupportsColor({ isTTY: tty.isatty(2) })
+};
+var supports_color_default = supportsColor;
+
+//#endregion
+//#region node_modules/chalk/source/utilities.js
+function stringReplaceAll(string$1, substring, replacer) {
+	let index = string$1.indexOf(substring);
+	if (index === -1) return string$1;
+	const substringLength = substring.length;
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		returnValue += string$1.slice(endIndex, index) + substring + replacer;
+		endIndex = index + substringLength;
+		index = string$1.indexOf(substring, endIndex);
+	} while (index !== -1);
+	returnValue += string$1.slice(endIndex);
+	return returnValue;
+}
+function stringEncaseCRLFWithFirstIndex(string$1, prefix, postfix, index) {
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		const gotCR = string$1[index - 1] === "\r";
+		returnValue += string$1.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? "\r\n" : "\n") + postfix;
+		endIndex = index + 1;
+		index = string$1.indexOf("\n", endIndex);
+	} while (index !== -1);
+	returnValue += string$1.slice(endIndex);
+	return returnValue;
+}
+
+//#endregion
+//#region node_modules/chalk/source/index.js
+const { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
+const GENERATOR = Symbol("GENERATOR");
+const STYLER = Symbol("STYLER");
+const IS_EMPTY = Symbol("IS_EMPTY");
+const levelMapping = [
+	"ansi",
+	"ansi",
+	"ansi256",
+	"ansi16m"
+];
+const styles = Object.create(null);
+const applyOptions = (object$1, options = {}) => {
+	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) throw new Error("The `level` option should be an integer from 0 to 3");
+	const colorLevel = stdoutColor ? stdoutColor.level : 0;
+	object$1.level = options.level === void 0 ? colorLevel : options.level;
+};
+const chalkFactory = (options) => {
+	const chalk$1 = (...strings) => strings.join(" ");
+	applyOptions(chalk$1, options);
+	Object.setPrototypeOf(chalk$1, createChalk.prototype);
+	return chalk$1;
+};
+function createChalk(options) {
+	return chalkFactory(options);
+}
+Object.setPrototypeOf(createChalk.prototype, Function.prototype);
+for (const [styleName, style] of Object.entries(ansi_styles_default)) styles[styleName] = { get() {
+	const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
+	Object.defineProperty(this, styleName, { value: builder });
+	return builder;
+} };
+styles.visible = { get() {
+	const builder = createBuilder(this, this[STYLER], true);
+	Object.defineProperty(this, "visible", { value: builder });
+	return builder;
+} };
+const getModelAnsi = (model, level, type, ...arguments_) => {
+	if (model === "rgb") {
+		if (level === "ansi16m") return ansi_styles_default[type].ansi16m(...arguments_);
+		if (level === "ansi256") return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
+		return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
+	}
+	if (model === "hex") return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
+	return ansi_styles_default[type][model](...arguments_);
+};
+const usedModels = [
+	"rgb",
+	"hex",
+	"ansi256"
+];
+for (const model of usedModels) {
+	styles[model] = { get() {
+		const { level } = this;
+		return function(...arguments_) {
+			const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
+			return createBuilder(this, styler, this[IS_EMPTY]);
+		};
+	} };
+	const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
+	styles[bgModel] = { get() {
+		const { level } = this;
+		return function(...arguments_) {
+			const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
+			return createBuilder(this, styler, this[IS_EMPTY]);
+		};
+	} };
+}
+const proto = Object.defineProperties(() => {}, {
+	...styles,
+	level: {
+		enumerable: true,
+		get() {
+			return this[GENERATOR].level;
+		},
+		set(level) {
+			this[GENERATOR].level = level;
+		}
+	}
+});
+const createStyler = (open, close, parent) => {
+	let openAll;
+	let closeAll;
+	if (parent === void 0) {
+		openAll = open;
+		closeAll = close;
+	} else {
+		openAll = parent.openAll + open;
+		closeAll = close + parent.closeAll;
+	}
+	return {
+		open,
+		close,
+		openAll,
+		closeAll,
+		parent
+	};
+};
+const createBuilder = (self, _styler, _isEmpty) => {
+	const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
+	Object.setPrototypeOf(builder, proto);
+	builder[GENERATOR] = self;
+	builder[STYLER] = _styler;
+	builder[IS_EMPTY] = _isEmpty;
+	return builder;
+};
+const applyStyle = (self, string$1) => {
+	if (self.level <= 0 || !string$1) return self[IS_EMPTY] ? "" : string$1;
+	let styler = self[STYLER];
+	if (styler === void 0) return string$1;
+	const { openAll, closeAll } = styler;
+	if (string$1.includes("\x1B")) while (styler !== void 0) {
+		string$1 = stringReplaceAll(string$1, styler.close, styler.open);
+		styler = styler.parent;
+	}
+	const lfIndex = string$1.indexOf("\n");
+	if (lfIndex !== -1) string$1 = stringEncaseCRLFWithFirstIndex(string$1, closeAll, openAll, lfIndex);
+	return openAll + string$1 + closeAll;
+};
+Object.defineProperties(createChalk.prototype, styles);
+const chalk = createChalk();
+const chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
+var source_default = chalk;
+
+//#endregion
+//#region src/render/colors.ts
+const NAMED_COLORS = {
+	red: "#ff0000",
+	green: "#00ff00",
+	blue: "#0000ff",
+	yellow: "#ffff00",
+	cyan: "#00ffff",
+	magenta: "#ff00ff",
+	white: "#ffffff",
+	black: "#000000",
+	gray: "#808080",
+	grey: "#808080",
+	orange: "#ff8800",
+	pink: "#ff69b4"
+};
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+/**
+* Whether a config value is a color this project can actually paint: a
+* `NAMED_COLORS` key or an anchored 3- or 6-digit hex.
+*
+* Normalization must stay identical to `resolveColor` — same `trim()`, same
+* `toLowerCase()`, same `Object.hasOwn` — or a value could pass validation
+* here and resolve to something else at render time.
+*/
+function isValidColor(color) {
+	const trimmed = color.trim();
+	return HEX_COLOR.test(trimmed) || Object.hasOwn(NAMED_COLORS, trimmed.toLowerCase());
+}
+/**
+* Substitute a known color name with its hex value; pass anything else through
+* untouched (trimmed) so the caller's own parsing (chalk's, or `colorize`'s
+* `startsWith("#")` guard) still applies.
+*
+* Uses `Object.hasOwn` rather than `NAMED_COLORS[key] ?? color` because
+* `NAMED_COLORS` is a plain object literal: inherited `Object.prototype`
+* members (`constructor`, `__proto__`, `toString`, `valueOf`, ...) are truthy
+* lookups there too, so `??` never falls through for those keys and the
+* caller receives a function or `[object Object]` instead of a string. On the
+* powerline path that value flows into `colorDistance` -> `normalizeColor` ->
+* this function again, where `.toLowerCase()` on a non-string throws and
+* blanks the entire statusline (see the fix report).
+*/
+function resolveColor(color) {
+	const trimmed = color.trim();
+	const key = trimmed.toLowerCase();
+	return Object.hasOwn(NAMED_COLORS, key) ? NAMED_COLORS[key] : trimmed;
+}
+function colorize(text, fg, bg) {
+	let result = source_default;
+	if (fg) {
+		const resolved = resolveColor(fg);
+		result = result.hex(resolved.startsWith("#") ? resolved : "#808080");
+	}
+	if (bg) {
+		const resolved = resolveColor(bg);
+		result = result.bgHex(resolved.startsWith("#") ? resolved : "#000000");
+	}
+	return result(text);
+}
+
+//#endregion
 //#region src/config/schema.ts
-const ColorSchema = union([string()]);
+const ColorSchema = pipe(string(), check(isValidColor, "must be a color name or #rgb/#rrggbb hex"));
 const WidgetConfigSchema = object({
 	type: string(),
 	label: optional(string()),
@@ -769,17 +1307,64 @@ function mergeSettings(defaults, raw, validated) {
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
 }
+/** Cap on each unbounded fragment of an error line, in characters. */
+const MAX_FRAGMENT_LENGTH = 120;
+/**
+* Cap one fragment of the error line. Applied per fragment rather than to the
+* finished line so the structure around it — the dot path, the `(+N more)`
+* count — always survives, whatever the config file contains.
+*/
+function truncate(text) {
+	if (text.length <= MAX_FRAGMENT_LENGTH) return text;
+	return `${text.slice(0, MAX_FRAGMENT_LENGTH)}…`;
+}
+/** One line describing why the config file was rejected. */
+function describeIssues(issues) {
+	const [first, ...rest] = issues;
+	const dotPath = getDotPath(first);
+	const where = dotPath ? `${dotPath}: ` : "";
+	const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
+	const suffix = first.kind === "validation" ? ` (got ${truncate(first.received)})` : "";
+	return `${where}${truncate(first.message)}${suffix}${more}`;
+}
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$7.existsSync(configPath)) return DEFAULT_SETTINGS;
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	let parsed;
 	try {
-		const raw = fs$7.readFileSync(configPath, "utf-8");
-		const parsed = JSON.parse(raw);
-		const validated = parse(SettingsSchema, parsed);
-		return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
-	} catch {
-		return DEFAULT_SETTINGS;
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		return {
+			settings: DEFAULT_SETTINGS,
+			error: err instanceof SyntaxError ? `invalid JSON: ${detail}` : `cannot read config: ${detail}`
+		};
 	}
+	const result = safeParse(SettingsSchema, parsed);
+	if (!result.success) return {
+		settings: DEFAULT_SETTINGS,
+		error: describeIssues(result.issues)
+	};
+	return { settings: mergeSettings(DEFAULT_SETTINGS, parsed, result.output) };
+}
+
+//#endregion
+//#region src/config/error-line.ts
+const BOLD_RED = "\x1B[1;31m";
+const RESET = "\x1B[0m";
+/** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
+function shortenPath(filePath) {
+	const home = process.env["HOME"];
+	if (!home || home === "/" || !filePath.startsWith(home)) return filePath;
+	return `~${filePath.slice(home.length)}`;
+}
+/**
+* One line, no trailing newline — matching what `runStatusline` returns, since
+* this replaces it. U+26A0 is not a Nerd Font glyph, so it renders in the same
+* terminals the default `▶` separator targets.
+*/
+function formatConfigError(error, configPath) {
+	return `${BOLD_RED}⚠ gccusage config${RESET}  ${shortenPath(configPath)} — ${error}`;
 }
 
 //#endregion
@@ -1941,465 +2526,6 @@ function getWidget(type) {
 }
 
 //#endregion
-//#region node_modules/chalk/source/vendor/ansi-styles/index.js
-const ANSI_BACKGROUND_OFFSET = 10;
-const wrapAnsi16 = (offset = 0) => (code) => `\u001B[${code + offset}m`;
-const wrapAnsi256 = (offset = 0) => (code) => `\u001B[${38 + offset};5;${code}m`;
-const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u001B[${38 + offset};2;${red};${green};${blue}m`;
-const styles$1 = {
-	modifier: {
-		reset: [0, 0],
-		bold: [1, 22],
-		dim: [2, 22],
-		italic: [3, 23],
-		underline: [4, 24],
-		overline: [53, 55],
-		inverse: [7, 27],
-		hidden: [8, 28],
-		strikethrough: [9, 29]
-	},
-	color: {
-		black: [30, 39],
-		red: [31, 39],
-		green: [32, 39],
-		yellow: [33, 39],
-		blue: [34, 39],
-		magenta: [35, 39],
-		cyan: [36, 39],
-		white: [37, 39],
-		blackBright: [90, 39],
-		gray: [90, 39],
-		grey: [90, 39],
-		redBright: [91, 39],
-		greenBright: [92, 39],
-		yellowBright: [93, 39],
-		blueBright: [94, 39],
-		magentaBright: [95, 39],
-		cyanBright: [96, 39],
-		whiteBright: [97, 39]
-	},
-	bgColor: {
-		bgBlack: [40, 49],
-		bgRed: [41, 49],
-		bgGreen: [42, 49],
-		bgYellow: [43, 49],
-		bgBlue: [44, 49],
-		bgMagenta: [45, 49],
-		bgCyan: [46, 49],
-		bgWhite: [47, 49],
-		bgBlackBright: [100, 49],
-		bgGray: [100, 49],
-		bgGrey: [100, 49],
-		bgRedBright: [101, 49],
-		bgGreenBright: [102, 49],
-		bgYellowBright: [103, 49],
-		bgBlueBright: [104, 49],
-		bgMagentaBright: [105, 49],
-		bgCyanBright: [106, 49],
-		bgWhiteBright: [107, 49]
-	}
-};
-const modifierNames = Object.keys(styles$1.modifier);
-const foregroundColorNames = Object.keys(styles$1.color);
-const backgroundColorNames = Object.keys(styles$1.bgColor);
-const colorNames = [...foregroundColorNames, ...backgroundColorNames];
-function assembleStyles() {
-	const codes = new Map();
-	for (const [groupName, group] of Object.entries(styles$1)) {
-		for (const [styleName, style] of Object.entries(group)) {
-			styles$1[styleName] = {
-				open: `\u001B[${style[0]}m`,
-				close: `\u001B[${style[1]}m`
-			};
-			group[styleName] = styles$1[styleName];
-			codes.set(style[0], style[1]);
-		}
-		Object.defineProperty(styles$1, groupName, {
-			value: group,
-			enumerable: false
-		});
-	}
-	Object.defineProperty(styles$1, "codes", {
-		value: codes,
-		enumerable: false
-	});
-	styles$1.color.close = "\x1B[39m";
-	styles$1.bgColor.close = "\x1B[49m";
-	styles$1.color.ansi = wrapAnsi16();
-	styles$1.color.ansi256 = wrapAnsi256();
-	styles$1.color.ansi16m = wrapAnsi16m();
-	styles$1.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
-	styles$1.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
-	styles$1.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
-	Object.defineProperties(styles$1, {
-		rgbToAnsi256: {
-			value(red, green, blue) {
-				if (red === green && green === blue) {
-					if (red < 8) return 16;
-					if (red > 248) return 231;
-					return Math.round((red - 8) / 247 * 24) + 232;
-				}
-				return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
-			},
-			enumerable: false
-		},
-		hexToRgb: {
-			value(hex) {
-				const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
-				if (!matches) return [
-					0,
-					0,
-					0
-				];
-				let [colorString] = matches;
-				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
-				const integer = Number.parseInt(colorString, 16);
-				return [
-					integer >> 16 & 255,
-					integer >> 8 & 255,
-					integer & 255
-				];
-			},
-			enumerable: false
-		},
-		hexToAnsi256: {
-			value: (hex) => styles$1.rgbToAnsi256(...styles$1.hexToRgb(hex)),
-			enumerable: false
-		},
-		ansi256ToAnsi: {
-			value(code) {
-				if (code < 8) return 30 + code;
-				if (code < 16) return 90 + (code - 8);
-				let red;
-				let green;
-				let blue;
-				if (code >= 232) {
-					red = ((code - 232) * 10 + 8) / 255;
-					green = red;
-					blue = red;
-				} else {
-					code -= 16;
-					const remainder = code % 36;
-					red = Math.floor(code / 36) / 5;
-					green = Math.floor(remainder / 6) / 5;
-					blue = remainder % 6 / 5;
-				}
-				const value = Math.max(red, green, blue) * 2;
-				if (value === 0) return 30;
-				let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
-				if (value === 2) result += 60;
-				return result;
-			},
-			enumerable: false
-		},
-		rgbToAnsi: {
-			value: (red, green, blue) => styles$1.ansi256ToAnsi(styles$1.rgbToAnsi256(red, green, blue)),
-			enumerable: false
-		},
-		hexToAnsi: {
-			value: (hex) => styles$1.ansi256ToAnsi(styles$1.hexToAnsi256(hex)),
-			enumerable: false
-		}
-	});
-	return styles$1;
-}
-const ansiStyles = assembleStyles();
-var ansi_styles_default = ansiStyles;
-
-//#endregion
-//#region node_modules/chalk/source/vendor/supports-color/index.js
-function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process$1.argv) {
-	const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-	const position = argv.indexOf(prefix + flag);
-	const terminatorPosition = argv.indexOf("--");
-	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-}
-const { env } = process$1;
-let flagForceColor;
-if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) flagForceColor = 0;
-else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) flagForceColor = 1;
-function envForceColor() {
-	if ("FORCE_COLOR" in env) {
-		if (env.FORCE_COLOR === "true") return 1;
-		if (env.FORCE_COLOR === "false") return 0;
-		return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
-	}
-}
-function translateLevel(level) {
-	if (level === 0) return false;
-	return {
-		level,
-		hasBasic: true,
-		has256: level >= 2,
-		has16m: level >= 3
-	};
-}
-function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
-	const noFlagForceColor = envForceColor();
-	if (noFlagForceColor !== void 0) flagForceColor = noFlagForceColor;
-	const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
-	if (forceColor === 0) return 0;
-	if (sniffFlags) {
-		if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) return 3;
-		if (hasFlag("color=256")) return 2;
-	}
-	if ("TF_BUILD" in env && "AGENT_NAME" in env) return 1;
-	if (haveStream && !streamIsTTY && forceColor === void 0) return 0;
-	const min = forceColor || 0;
-	if (env.TERM === "dumb") return min;
-	if (process$1.platform === "win32") {
-		const osRelease = os.release().split(".");
-		if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) return Number(osRelease[2]) >= 14931 ? 3 : 2;
-		return 1;
-	}
-	if ("CI" in env) {
-		if ([
-			"GITHUB_ACTIONS",
-			"GITEA_ACTIONS",
-			"CIRCLECI"
-		].some((key) => key in env)) return 3;
-		if ([
-			"TRAVIS",
-			"APPVEYOR",
-			"GITLAB_CI",
-			"BUILDKITE",
-			"DRONE"
-		].some((sign) => sign in env) || env.CI_NAME === "codeship") return 1;
-		return min;
-	}
-	if ("TEAMCITY_VERSION" in env) return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
-	if (env.COLORTERM === "truecolor") return 3;
-	if (env.TERM === "xterm-kitty") return 3;
-	if (env.TERM === "xterm-ghostty") return 3;
-	if (env.TERM === "wezterm") return 3;
-	if ("TERM_PROGRAM" in env) {
-		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-		switch (env.TERM_PROGRAM) {
-			case "iTerm.app": return version >= 3 ? 3 : 2;
-			case "Apple_Terminal": return 2;
-		}
-	}
-	if (/-256(color)?$/i.test(env.TERM)) return 2;
-	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) return 1;
-	if ("COLORTERM" in env) return 1;
-	return min;
-}
-function createSupportsColor(stream, options = {}) {
-	const level = _supportsColor(stream, {
-		streamIsTTY: stream && stream.isTTY,
-		...options
-	});
-	return translateLevel(level);
-}
-const supportsColor = {
-	stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
-	stderr: createSupportsColor({ isTTY: tty.isatty(2) })
-};
-var supports_color_default = supportsColor;
-
-//#endregion
-//#region node_modules/chalk/source/utilities.js
-function stringReplaceAll(string$1, substring, replacer) {
-	let index = string$1.indexOf(substring);
-	if (index === -1) return string$1;
-	const substringLength = substring.length;
-	let endIndex = 0;
-	let returnValue = "";
-	do {
-		returnValue += string$1.slice(endIndex, index) + substring + replacer;
-		endIndex = index + substringLength;
-		index = string$1.indexOf(substring, endIndex);
-	} while (index !== -1);
-	returnValue += string$1.slice(endIndex);
-	return returnValue;
-}
-function stringEncaseCRLFWithFirstIndex(string$1, prefix, postfix, index) {
-	let endIndex = 0;
-	let returnValue = "";
-	do {
-		const gotCR = string$1[index - 1] === "\r";
-		returnValue += string$1.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? "\r\n" : "\n") + postfix;
-		endIndex = index + 1;
-		index = string$1.indexOf("\n", endIndex);
-	} while (index !== -1);
-	returnValue += string$1.slice(endIndex);
-	return returnValue;
-}
-
-//#endregion
-//#region node_modules/chalk/source/index.js
-const { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
-const GENERATOR = Symbol("GENERATOR");
-const STYLER = Symbol("STYLER");
-const IS_EMPTY = Symbol("IS_EMPTY");
-const levelMapping = [
-	"ansi",
-	"ansi",
-	"ansi256",
-	"ansi16m"
-];
-const styles = Object.create(null);
-const applyOptions = (object$1, options = {}) => {
-	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) throw new Error("The `level` option should be an integer from 0 to 3");
-	const colorLevel = stdoutColor ? stdoutColor.level : 0;
-	object$1.level = options.level === void 0 ? colorLevel : options.level;
-};
-const chalkFactory = (options) => {
-	const chalk$1 = (...strings) => strings.join(" ");
-	applyOptions(chalk$1, options);
-	Object.setPrototypeOf(chalk$1, createChalk.prototype);
-	return chalk$1;
-};
-function createChalk(options) {
-	return chalkFactory(options);
-}
-Object.setPrototypeOf(createChalk.prototype, Function.prototype);
-for (const [styleName, style] of Object.entries(ansi_styles_default)) styles[styleName] = { get() {
-	const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
-	Object.defineProperty(this, styleName, { value: builder });
-	return builder;
-} };
-styles.visible = { get() {
-	const builder = createBuilder(this, this[STYLER], true);
-	Object.defineProperty(this, "visible", { value: builder });
-	return builder;
-} };
-const getModelAnsi = (model, level, type, ...arguments_) => {
-	if (model === "rgb") {
-		if (level === "ansi16m") return ansi_styles_default[type].ansi16m(...arguments_);
-		if (level === "ansi256") return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
-		return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
-	}
-	if (model === "hex") return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
-	return ansi_styles_default[type][model](...arguments_);
-};
-const usedModels = [
-	"rgb",
-	"hex",
-	"ansi256"
-];
-for (const model of usedModels) {
-	styles[model] = { get() {
-		const { level } = this;
-		return function(...arguments_) {
-			const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
-			return createBuilder(this, styler, this[IS_EMPTY]);
-		};
-	} };
-	const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
-	styles[bgModel] = { get() {
-		const { level } = this;
-		return function(...arguments_) {
-			const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
-			return createBuilder(this, styler, this[IS_EMPTY]);
-		};
-	} };
-}
-const proto = Object.defineProperties(() => {}, {
-	...styles,
-	level: {
-		enumerable: true,
-		get() {
-			return this[GENERATOR].level;
-		},
-		set(level) {
-			this[GENERATOR].level = level;
-		}
-	}
-});
-const createStyler = (open, close, parent) => {
-	let openAll;
-	let closeAll;
-	if (parent === void 0) {
-		openAll = open;
-		closeAll = close;
-	} else {
-		openAll = parent.openAll + open;
-		closeAll = close + parent.closeAll;
-	}
-	return {
-		open,
-		close,
-		openAll,
-		closeAll,
-		parent
-	};
-};
-const createBuilder = (self, _styler, _isEmpty) => {
-	const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
-	Object.setPrototypeOf(builder, proto);
-	builder[GENERATOR] = self;
-	builder[STYLER] = _styler;
-	builder[IS_EMPTY] = _isEmpty;
-	return builder;
-};
-const applyStyle = (self, string$1) => {
-	if (self.level <= 0 || !string$1) return self[IS_EMPTY] ? "" : string$1;
-	let styler = self[STYLER];
-	if (styler === void 0) return string$1;
-	const { openAll, closeAll } = styler;
-	if (string$1.includes("\x1B")) while (styler !== void 0) {
-		string$1 = stringReplaceAll(string$1, styler.close, styler.open);
-		styler = styler.parent;
-	}
-	const lfIndex = string$1.indexOf("\n");
-	if (lfIndex !== -1) string$1 = stringEncaseCRLFWithFirstIndex(string$1, closeAll, openAll, lfIndex);
-	return openAll + string$1 + closeAll;
-};
-Object.defineProperties(createChalk.prototype, styles);
-const chalk = createChalk();
-const chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
-var source_default = chalk;
-
-//#endregion
-//#region src/render/colors.ts
-const NAMED_COLORS = {
-	red: "#ff0000",
-	green: "#00ff00",
-	blue: "#0000ff",
-	yellow: "#ffff00",
-	cyan: "#00ffff",
-	magenta: "#ff00ff",
-	white: "#ffffff",
-	black: "#000000",
-	gray: "#808080",
-	grey: "#808080",
-	orange: "#ff8800",
-	pink: "#ff69b4"
-};
-/**
-* Substitute a known color name with its hex value; pass anything else through
-* untouched (trimmed) so the caller's own parsing (chalk's, or `colorize`'s
-* `startsWith("#")` guard) still applies.
-*
-* Uses `Object.hasOwn` rather than `NAMED_COLORS[key] ?? color` because
-* `NAMED_COLORS` is a plain object literal: inherited `Object.prototype`
-* members (`constructor`, `__proto__`, `toString`, `valueOf`, ...) are truthy
-* lookups there too, so `??` never falls through for those keys and the
-* caller receives a function or `[object Object]` instead of a string. On the
-* powerline path that value flows into `colorDistance` -> `normalizeColor` ->
-* this function again, where `.toLowerCase()` on a non-string throws and
-* blanks the entire statusline (see the fix report).
-*/
-function resolveColor(color) {
-	const trimmed = color.trim();
-	const key = trimmed.toLowerCase();
-	return Object.hasOwn(NAMED_COLORS, key) ? NAMED_COLORS[key] : trimmed;
-}
-function colorize(text, fg, bg) {
-	let result = source_default;
-	if (fg) {
-		const resolved = resolveColor(fg);
-		result = result.hex(resolved.startsWith("#") ? resolved : "#808080");
-	}
-	if (bg) {
-		const resolved = resolveColor(bg);
-		result = result.bgHex(resolved.startsWith("#") ? resolved : "#000000");
-	}
-	return result(text);
-}
-
-//#endregion
 //#region src/render/themes.ts
 const THEMES = {
 	default: {
@@ -3006,7 +3132,11 @@ async function main() {
 		await runCli(args);
 		return;
 	}
-	const settings = loadSettings();
+	const { settings, error } = loadSettings();
+	if (error) {
+		process.stdout.write(formatConfigError(error, getConfigPath()));
+		return;
+	}
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
 	if (!isTTY) raw = await readStdin();

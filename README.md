@@ -207,11 +207,24 @@ Every widget supports:
 | `label` | string | Custom label prefix |
 | `priority` | number | Compact mode priority (lower = kept first) |
 
-`fg`/`bg` accept a hex color (`"#ff0000"`) or one of these named colors:
-`red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `white`, `black`, `gray`
-(and `grey`), `orange`, `pink`. There is no validation on these fields, so an
-unrecognized name (a typo, or a name not in this list) silently renders as
-black rather than erroring.
+`fg`/`bg` accept a hex color (`"#ff0000"` or the 3-digit `"#f00"`) or one of
+these named colors: `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`,
+`white`, `black`, `gray` (and `grey`), `orange`, `pink`.
+
+Anything else is rejected when the config loads, and gccusage renders a single
+error line naming the offending field instead of the statusline. This is
+stricter than it looks: `"#12345"` (a typo) and `"196"` (an ansi256 code) are
+errors, not colors. ansi256 codes are not supported — see
+[issue #42](https://github.com/gapietro/gccusage/issues/42).
+
+This applies to any config load failure, not just colors — malformed JSON, a
+wrong type (`"enabled": "yes"`), or an unknown field value anywhere in the
+file all replace the statusline with the same kind of error line, rather than
+silently falling back to defaults. It looks like this:
+
+```
+⚠ gccusage config  ~/.config/gccusage/settings.json — lines.0.widgets.0.bg: must be a color name or #rgb/#rrggbb hex (got "196")
+```
 
 ### Custom command widget
 

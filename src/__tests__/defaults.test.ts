@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
+import * as v from "valibot";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getWidget } from "../widgets/registry.js";
 import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
 import { colorDistance } from "../render/color-compare.js";
+import { SettingsSchema } from "../config/schema.js";
+import { isValidColor } from "../render/colors.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -211,5 +214,25 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         .sort((a, b) => a.priority - b.priority);
       assertEveryPieceVisible(rendered, point, "compact");
     }
+  });
+});
+
+describe("shipped default colors", () => {
+  it("uses only colors a user could write in their own config", () => {
+    for (const [lineIndex, line] of DEFAULT_SETTINGS.lines.entries()) {
+      for (const [widgetIndex, widget] of line.widgets.entries()) {
+        const where = `lines.${lineIndex}.widgets.${widgetIndex} (${widget.type})`;
+        if (widget.fg !== undefined) {
+          expect(isValidColor(widget.fg), `${where}.fg = ${widget.fg}`).toBe(true);
+        }
+        if (widget.bg !== undefined) {
+          expect(isValidColor(widget.bg), `${where}.bg = ${widget.bg}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("round-trips through its own schema", () => {
+    expect(v.safeParse(SettingsSchema, DEFAULT_SETTINGS).success).toBe(true);
   });
 });

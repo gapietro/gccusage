@@ -15,6 +15,25 @@ export const NAMED_COLORS: Record<string, string> = {
   pink: "#ff69b4",
 };
 
+// Anchored, unlike chalk's own hex regex. chalk's `hexToRgb` scans for a hex
+// run *anywhere* inside the string, so "196" (an ansi256 code) reads as the
+// 3-digit hex #119966 and "#12345" reads as #112233. Those silent wrong
+// colors are what issue #42 is about; this grammar rejects them.
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/**
+ * Whether a config value is a color this project can actually paint: a
+ * `NAMED_COLORS` key or an anchored 3- or 6-digit hex.
+ *
+ * Normalization must stay identical to `resolveColor` — same `trim()`, same
+ * `toLowerCase()`, same `Object.hasOwn` — or a value could pass validation
+ * here and resolve to something else at render time.
+ */
+export function isValidColor(color: string): boolean {
+  const trimmed = color.trim();
+  return HEX_COLOR.test(trimmed) || Object.hasOwn(NAMED_COLORS, trimmed.toLowerCase());
+}
+
 /**
  * Substitute a known color name with its hex value; pass anything else through
  * untouched (trimmed) so the caller's own parsing (chalk's, or `colorize`'s

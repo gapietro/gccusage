@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { THEMES } from "../render/themes.js";
 import { colorDistance } from "../render/color-compare.js";
 import { MIN_SEPARATOR_DELTA } from "../render/powerline.js";
+import { isValidColor } from "../render/colors.js";
 
 // The MIN_SEPARATOR_DELTA floor (src/render/powerline.ts) applies to ANY pair
 // of adjacent resolved backgrounds, not just the widget-supplied `bg`s in
@@ -76,4 +77,15 @@ describe("theme background ramps vs MIN_SEPARATOR_DELTA", () => {
       ).toBe(EXPECTED_BELOW_THRESHOLD[name]);
     });
   }
+});
+
+describe("theme colors", () => {
+  it("uses only colors a user could write in their own config", () => {
+    for (const [name, theme] of Object.entries(THEMES)) {
+      for (const [index, segment] of theme.segments.entries()) {
+        expect(isValidColor(segment.fg), `${name}.segments.${index}.fg = ${segment.fg}`).toBe(true);
+        expect(isValidColor(segment.bg), `${name}.segments.${index}.bg = ${segment.bg}`).toBe(true);
+      }
+    }
+  });
 });

@@ -15,7 +15,7 @@ describe("loadSettings", () => {
   });
 
   it("returns defaults when no config file exists", () => {
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.lines).toEqual(DEFAULT_SETTINGS.lines);
     expect(settings.powerline?.theme).toBe("default");
   });
@@ -26,7 +26,7 @@ describe("loadSettings", () => {
       JSON.stringify({ powerline: { theme: "ocean" } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     // Theme overridden
     expect(settings.powerline?.theme).toBe("ocean");
     // Other powerline settings preserved from defaults
@@ -42,7 +42,7 @@ describe("loadSettings", () => {
       JSON.stringify({ cache: { statuslineTtlMs: 10000 } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.cache?.statuslineTtlMs).toBe(10000);
     expect(settings.cache?.pricingTtlMs).toBe(86400000);
   });
@@ -56,16 +56,17 @@ describe("loadSettings", () => {
       JSON.stringify({ lines: customLines }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.lines).toEqual(customLines);
   });
 
-  it("returns defaults on invalid JSON", () => {
+  it("returns defaults and reports an error on invalid JSON", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue("not json{{{");
 
-    const settings = loadSettings();
+    const { settings, error } = loadSettings();
     expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("invalid JSON");
   });
 
   it("allows theme-only config file", () => {
@@ -74,8 +75,173 @@ describe("loadSettings", () => {
       JSON.stringify({ powerline: { theme: "sunset" } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.powerline?.theme).toBe("sunset");
     expect(settings.lines.length).toBe(2);
+  });
+
+  it("reports no error when the config file is absent", () => {
+    const { error } = loadSettings();
+    expect(error).toBeUndefined();
+  });
+
+  it("reports no error for a valid config", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ powerline: { theme: "ocean" } }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toBeUndefined();
+  });
+
+  it("reports a schema mismatch with its dot path and the received value", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ lines: "nope" }));
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("lines");
+    // `received` already carries its own quotes — one pair, not two.
+    expect(error).toContain('"nope"');
+    expect(error).not.toContain('""nope""');
+  });
+
+  it("counts additional issues rather than listing them all", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: "nope", costSource: "bogus" }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("reports an unreadable config file", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("cannot read config");
+    expect(error).toContain("EACCES");
+  });
+
+  // Issue #42: "196" is an ansi256 code that chalk's unanchored hex regex
+  // paints as #119966. It must be rejected, not silently misparsed.
+  it("rejects an ansi256 code in a widget color", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", bg: "196" }] }],
+      }),
+    );
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("lines.0.widgets.0.bg");
+    expect(error).toContain("must be a color name or #rgb/#rrggbb hex");
+    expect(error).toContain('"196"');
+  });
+
+  it("rejects a near-miss hex typo", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", fg: "#12345" }] }],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("lines.0.widgets.0.fg");
+    expect(error).toContain('"#12345"');
+  });
+
+  it("counts the second bad color rather than listing it", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [
+          { widgets: [{ type: "model", bg: "196" }, { type: "cwd", bg: "grey1" }] },
+        ],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("lines.0.widgets.0.bg");
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("reports a root-level type mismatch without a dot-path prefix", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("3");
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("Invalid type: Expected Object but received 3");
+    expect(error).not.toContain("null:");
+  });
+
+  it("accepts a named color and hex side by side", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [{ widgets: [{ type: "model", fg: "red", bg: "#1a5fb4" }] }],
+      }),
+    );
+
+    const { settings, error } = loadSettings();
+    expect(error).toBeUndefined();
+    expect(settings.lines[0]?.widgets[0]?.fg).toBe("red");
+  });
+
+  // The error line replaces the whole statusline, so it must stay readable no
+  // matter what the config file contains. valibot's own type-mismatch messages
+  // embed the received value ("Expected Array but received \"xxx…\""), which is
+  // unbounded — capping `received` alone does not cover them.
+  it("caps a huge value embedded in a valibot type-mismatch message", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: "x".repeat(10000) }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toBeDefined();
+    expect(error!.length).toBeLessThan(400);
+    expect(error).toContain("lines:");
+    expect(error).toContain("…");
+  });
+
+  it("caps a huge value in a color error while keeping the issue count", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        lines: [
+          {
+            widgets: [
+              { type: "model", bg: "y".repeat(10000) },
+              { type: "cwd", bg: "196" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const { error } = loadSettings();
+    expect(error!.length).toBeLessThan(400);
+    // Truncation must not swallow the structure around it.
+    expect(error).toContain("lines.0.widgets.0.bg:");
+    expect(error).toContain("must be a color name or #rgb/#rrggbb hex");
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("leaves a short message untouched", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ lines: "nope" }));
+
+    const { error } = loadSettings();
+    expect(error).toBe('lines: Invalid type: Expected Array but received "nope"');
   });
 });
