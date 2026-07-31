@@ -512,6 +512,7 @@ export interface Turn {
 export interface ToolResultRecord {
   /** null when the originating tool_use block is not in this file. */
   toolName: string | null;
+  /** UTF-8 byte length of the serialised result — not string length. */
   bytes: number;
 }
 
@@ -608,7 +609,7 @@ export function parseTranscript(
         }
         toolResults.push({
           toolName,
-          bytes: JSON.stringify(entry["toolUseResult"]).length,
+          bytes: Buffer.byteLength(JSON.stringify(entry["toolUseResult"]), "utf8"),
         });
         continue;
       }
