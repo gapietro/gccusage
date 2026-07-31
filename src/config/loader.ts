@@ -62,19 +62,50 @@ function mergeSettings(
   };
 }
 
-export function loadSettings(): Settings {
+export interface ConfigLoad {
+  settings: Settings;
+  /**
+   * Present when a config file existed but could not be used. An absent file
+   * is not an error — having no config is the normal case.
+   */
+  error?: string;
+}
+
+/** One line describing why the config file was rejected. */
+function describeIssues(issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]]): string {
+  const [first, ...rest] = issues;
+  const dotPath = v.getDotPath(first);
+  const where = dotPath ? `${dotPath}: ` : "";
+  const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
+  // `first.received` is already quoted by valibot ("196" comes back as the
+  // 5-character string `"196"`), so it is interpolated bare.
+  return `${where}${first.message} (got ${first.received})${more}`;
+}
+
+export function loadSettings(): ConfigLoad {
   const configPath = getConfigPath();
 
   if (!fs.existsSync(configPath)) {
-    return DEFAULT_SETTINGS;
+    return { settings: DEFAULT_SETTINGS };
   }
 
+  let parsed: unknown;
   try {
-    const raw = fs.readFileSync(configPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    const validated = v.parse(SettingsSchema, parsed);
-    return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
-  } catch {
-    return DEFAULT_SETTINGS;
+    parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      settings: DEFAULT_SETTINGS,
+      error: err instanceof SyntaxError ? `invalid JSON: ${detail}` : `cannot read config: ${detail}`,
+    };
   }
+
+  const result = v.safeParse(SettingsSchema, parsed);
+  if (!result.success) {
+    return { settings: DEFAULT_SETTINGS, error: describeIssues(result.issues) };
+  }
+
+  return {
+    settings: mergeSettings(DEFAULT_SETTINGS, parsed as Record<string, unknown>, result.output),
+  };
 }

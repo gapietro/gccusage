@@ -163,6 +163,17 @@ function _joinExpects(values$1, separator) {
 	if (list.length > 1) return `(${list.join(` ${separator} `)})`;
 	return list[0] ?? "never";
 }
+/* @__NO_SIDE_EFFECTS__ */
+function getDotPath(issue) {
+	if (issue.path) {
+		let key = "";
+		for (const item of issue.path) if (typeof item.key === "string" || typeof item.key === "number") if (key) key += `.${item.key}`;
+		else key += item.key;
+		else return null;
+		return key;
+	}
+	return null;
+}
 /**
 * A Valibot error with useful information.
 */
@@ -513,6 +524,25 @@ function parse(schema, input, config$1) {
 	if (dataset.issues) throw new ValiError(dataset.issues);
 	return dataset.value;
 }
+/**
+* Parses an unknown input based on a schema.
+*
+* @param schema The schema to be used.
+* @param input The input to be parsed.
+* @param config The parse configuration.
+*
+* @returns The parse result.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function safeParse(schema, input, config$1) {
+	const dataset = schema["~run"]({ value: input }, /* @__PURE__ */ getGlobalConfig(config$1));
+	return {
+		typed: dataset.typed,
+		success: !dataset.issues,
+		output: dataset.value,
+		issues: dataset.issues
+	};
+}
 
 //#endregion
 //#region src/types/status-json.ts
@@ -769,17 +799,52 @@ function mergeSettings(defaults, raw, validated) {
 		costSource: "costSource" in raw ? validated.costSource ?? defaults.costSource : defaults.costSource
 	};
 }
+/** One line describing why the config file was rejected. */
+function describeIssues(issues) {
+	const [first, ...rest] = issues;
+	const dotPath = getDotPath(first);
+	const where = dotPath ? `${dotPath}: ` : "";
+	const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
+	return `${where}${first.message} (got ${first.received})${more}`;
+}
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$7.existsSync(configPath)) return DEFAULT_SETTINGS;
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	let parsed;
 	try {
-		const raw = fs$7.readFileSync(configPath, "utf-8");
-		const parsed = JSON.parse(raw);
-		const validated = parse(SettingsSchema, parsed);
-		return mergeSettings(DEFAULT_SETTINGS, parsed, validated);
-	} catch {
-		return DEFAULT_SETTINGS;
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		return {
+			settings: DEFAULT_SETTINGS,
+			error: err instanceof SyntaxError ? `invalid JSON: ${detail}` : `cannot read config: ${detail}`
+		};
 	}
+	const result = safeParse(SettingsSchema, parsed);
+	if (!result.success) return {
+		settings: DEFAULT_SETTINGS,
+		error: describeIssues(result.issues)
+	};
+	return { settings: mergeSettings(DEFAULT_SETTINGS, parsed, result.output) };
+}
+
+//#endregion
+//#region src/config/error-line.ts
+const BOLD_RED = "\x1B[1;31m";
+const RESET = "\x1B[0m";
+/** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
+function shortenPath(filePath) {
+	const home = process.env["HOME"];
+	if (!home || home === "/" || !filePath.startsWith(home)) return filePath;
+	return `~${filePath.slice(home.length)}`;
+}
+/**
+* One line, no trailing newline — matching what `runStatusline` returns, since
+* this replaces it. U+26A0 is not a Nerd Font glyph, so it renders in the same
+* terminals the default `▶` separator targets.
+*/
+function formatConfigError(error, configPath) {
+	return `${BOLD_RED}⚠ gccusage config${RESET}  ${shortenPath(configPath)} — ${error}`;
 }
 
 //#endregion
@@ -3006,7 +3071,11 @@ async function main() {
 		await runCli(args);
 		return;
 	}
-	const settings = loadSettings();
+	const { settings, error } = loadSettings();
+	if (error) {
+		process.stdout.write(formatConfigError(error, getConfigPath()));
+		return;
+	}
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
 	if (!isTTY) raw = await readStdin();

@@ -15,7 +15,7 @@ describe("loadSettings", () => {
   });
 
   it("returns defaults when no config file exists", () => {
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.lines).toEqual(DEFAULT_SETTINGS.lines);
     expect(settings.powerline?.theme).toBe("default");
   });
@@ -26,7 +26,7 @@ describe("loadSettings", () => {
       JSON.stringify({ powerline: { theme: "ocean" } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     // Theme overridden
     expect(settings.powerline?.theme).toBe("ocean");
     // Other powerline settings preserved from defaults
@@ -42,7 +42,7 @@ describe("loadSettings", () => {
       JSON.stringify({ cache: { statuslineTtlMs: 10000 } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.cache?.statuslineTtlMs).toBe(10000);
     expect(settings.cache?.pricingTtlMs).toBe(86400000);
   });
@@ -56,16 +56,17 @@ describe("loadSettings", () => {
       JSON.stringify({ lines: customLines }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.lines).toEqual(customLines);
   });
 
-  it("returns defaults on invalid JSON", () => {
+  it("returns defaults and reports an error on invalid JSON", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue("not json{{{");
 
-    const settings = loadSettings();
+    const { settings, error } = loadSettings();
     expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("invalid JSON");
   });
 
   it("allows theme-only config file", () => {
@@ -74,8 +75,57 @@ describe("loadSettings", () => {
       JSON.stringify({ powerline: { theme: "sunset" } }),
     );
 
-    const settings = loadSettings();
+    const { settings } = loadSettings();
     expect(settings.powerline?.theme).toBe("sunset");
     expect(settings.lines.length).toBe(2);
+  });
+
+  it("reports no error when the config file is absent", () => {
+    const { error } = loadSettings();
+    expect(error).toBeUndefined();
+  });
+
+  it("reports no error for a valid config", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ powerline: { theme: "ocean" } }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toBeUndefined();
+  });
+
+  it("reports a schema mismatch with its dot path and the received value", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ lines: "nope" }));
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("lines");
+    // `received` already carries its own quotes — one pair, not two.
+    expect(error).toContain('"nope"');
+    expect(error).not.toContain('""nope""');
+  });
+
+  it("counts additional issues rather than listing them all", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: "nope", costSource: "bogus" }),
+    );
+
+    const { error } = loadSettings();
+    expect(error).toContain("(+1 more)");
+  });
+
+  it("reports an unreadable config file", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+
+    const { settings, error } = loadSettings();
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toContain("cannot read config");
+    expect(error).toContain("EACCES");
   });
 });
