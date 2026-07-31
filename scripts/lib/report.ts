@@ -161,7 +161,7 @@ export function renderMarkdown(report: Report): string {
   out.push("");
 
   out.push("## Candidate signals", "");
-  out.push("| Signal | Available from | p10 | p50 | p90 | Dynamic range (p90-p10) | Cost correlation |");
+  out.push("| Signal | Live availability | p10 | p50 | p90 | Dynamic range (p90-p10) | Cost correlation |");
   out.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const s of signals) {
     const isShare = s.signal.includes("share") || s.signal === "cache-hit-rate";

@@ -164,10 +164,33 @@ export function compareDelegation(metrics: SessionMetrics[]): DelegationComparis
   };
 }
 
+/**
+ * What a live statusline payload can do with a signal the study measured
+ * over whole transcripts.
+ *
+ * - `live-exact` — stdin carries the inputs for this exact statistic.
+ * - `live-proxy` — stdin carries a related quantity that stands in for it,
+ *   in the same units but over a different span.
+ * - `transcript-only` — no live substitute exists at all.
+ *
+ * Every candidate below is `live-proxy`, and that uniformity is a finding
+ * rather than an oversight. Claude Code 2.1.220 builds the statusline
+ * payload's `context_window` from the LAST assistant message's usage alone
+ * (`total_input_tokens` is that message's `input + cache_creation +
+ * cache_read`, and `current_usage` is that message's usage object verbatim).
+ * There are no session-cumulative token totals in stdin, so no
+ * session-aggregate signal is exactly computable live — and equally, every
+ * one of them has a single-turn live analogue, so none is uncomputable
+ * either. Availability therefore rules nothing in or out on its own; §7 of
+ * docs/research/token-efficiency.md rests its rulings on dynamic range,
+ * cost correlation and redundancy with widgets already on the bar.
+ */
+export type LiveAvailability = "live-exact" | "live-proxy" | "transcript-only";
+
 export interface SignalScore {
   signal: string;
-  /** Whether a live statusline payload can compute this, or only a transcript read can. */
-  availability: "stdin" | "transcript";
+  /** What a live statusline payload can compute of this signal. */
+  availability: LiveAvailability;
   summary: Summary;
   /** p90 - p10: how far the signal actually moves across real sessions. */
   dynamicRange: number;
@@ -177,15 +200,15 @@ export interface SignalScore {
 
 const CANDIDATES: Array<{
   signal: string;
-  availability: "stdin" | "transcript";
+  availability: LiveAvailability;
   pick: (m: SessionMetrics) => number;
 }> = [
-  { signal: "cache-hit-rate", availability: "stdin", pick: (m) => m.cacheHitRate },
-  { signal: "cache-read-per-turn", availability: "transcript", pick: (m) => m.cacheReadPerTurn },
-  { signal: "cache-creation-per-turn", availability: "transcript", pick: (m) => m.cacheCreationPerTurn },
-  { signal: "output-per-turn", availability: "transcript", pick: (m) => m.outputPerTurn },
-  { signal: "cache-read-share-of-cost", availability: "stdin", pick: (m) => m.cacheReadShare },
-  { signal: "output-share-of-cost", availability: "stdin", pick: (m) => m.outputShare },
+  { signal: "cache-hit-rate", availability: "live-proxy", pick: (m) => m.cacheHitRate },
+  { signal: "cache-read-per-turn", availability: "live-proxy", pick: (m) => m.cacheReadPerTurn },
+  { signal: "cache-creation-per-turn", availability: "live-proxy", pick: (m) => m.cacheCreationPerTurn },
+  { signal: "output-per-turn", availability: "live-proxy", pick: (m) => m.outputPerTurn },
+  { signal: "cache-read-share-of-cost", availability: "live-proxy", pick: (m) => m.cacheReadShare },
+  { signal: "output-share-of-cost", availability: "live-proxy", pick: (m) => m.outputShare },
 ];
 
 export function scoreSignals(metrics: SessionMetrics[]): SignalScore[] {

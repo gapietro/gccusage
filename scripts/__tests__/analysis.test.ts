@@ -165,12 +165,16 @@ describe("scoreSignals", () => {
     expect(scores.every((s) => Number.isFinite(s.dynamicRange))).toBe(true);
   });
 
-  it("marks which signals the live stdin payload can support", () => {
+  it("tags every signal as a live proxy — none is exact live, none is impossible", () => {
+    // Claude Code's statusline payload carries only the last assistant
+    // message's usage, never session-cumulative totals. So no session
+    // aggregate is exactly computable live, and none is uncomputable
+    // either: each has a single-turn live analogue. Availability therefore
+    // disqualifies nothing on its own.
     const scores = scoreSignals(spread().filter((m) => m !== null));
-    expect(scores.find((s) => s.signal === "cache-hit-rate")!.availability).toBe("stdin");
-    expect(scores.find((s) => s.signal === "cache-read-per-turn")!.availability).toBe(
-      "transcript",
-    );
+    expect(scores.map((s) => s.availability)).toEqual(scores.map(() => "live-proxy"));
+    expect(scores.some((s) => s.availability === "live-exact")).toBe(false);
+    expect(scores.some((s) => s.availability === "transcript-only")).toBe(false);
   });
 });
 
