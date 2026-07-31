@@ -2042,7 +2042,8 @@ function sumTokens(counts) {
 	return (counts.input_tokens ?? 0) + (counts.output_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0) + (counts.cache_read_input_tokens ?? 0);
 }
 function withTokens(ratio, windowSize, exact) {
-	const usedTokens = exact ?? (windowSize !== null ? Math.round(ratio * windowSize) : null);
+	const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
+	const usedTokens = exact !== void 0 && exact > 0 ? Math.max(exact, derived ?? exact) : derived;
 	return {
 		ratio,
 		windowSize,

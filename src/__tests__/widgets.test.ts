@@ -172,6 +172,29 @@ describe("contextPercentWidget", () => {
     );
     expect(danger!.bg).toBe("#c01c28");
   });
+
+  it("turns red from a current_usage breakdown, not just used_percentage", () => {
+    // Production payloads carry current_usage, not a synthetic percentage.
+    // 162k of 200k used leaves exactly 5k before the 167k threshold.
+    const ctx = makeContext({
+      stdin: {
+        context_window: {
+          context_window_size: 200_000,
+          current_usage: {
+            input_tokens: 100_000,
+            output_tokens: 2_000,
+            cache_creation_input_tokens: 30_000,
+            cache_read_input_tokens: 30_000,
+          },
+        },
+      },
+    });
+    const result = contextPercentWidget.render(ctx, {
+      type: "context-percent",
+      bg: "#0d7377",
+    });
+    expect(result!.bg).toBe("#c01c28");
+  });
 });
 
 describe("separatorWidget", () => {
@@ -407,5 +430,29 @@ describe("compactCountdownWidget", () => {
       { type: "compact-countdown", bg: "#1a5fb4" },
     );
     expect(imminent!.text).toBe("Compact imminent!");
+  });
+
+  it("turns red from a current_usage breakdown, not just used_percentage", () => {
+    // Production payloads carry current_usage, not a synthetic percentage.
+    // 162k of 200k used leaves exactly 5k before the 167k threshold.
+    const ctx = makeContext({
+      stdin: {
+        context_window: {
+          context_window_size: 200_000,
+          current_usage: {
+            input_tokens: 100_000,
+            output_tokens: 2_000,
+            cache_creation_input_tokens: 30_000,
+            cache_read_input_tokens: 30_000,
+          },
+        },
+      },
+    });
+    const result = compactCountdownWidget.render(ctx, {
+      type: "compact-countdown",
+      bg: "#1a5fb4",
+    });
+    expect(result!.text).toBe("~5.0k left");
+    expect(result!.bg).toBe("#a01822");
   });
 });

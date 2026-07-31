@@ -6,12 +6,22 @@ export interface ContextUsage {
   /** Window size in tokens, or null when stdin did not report one. */
   windowSize: number | null;
   /**
-   * Tokens occupying the window: exact when stdin reported the breakdown,
-   * otherwise derived from `ratio`, otherwise null.
+   * Tokens occupying the window, preferring the exact `current_usage`
+   * breakdown over the ratio-derived figure — but only when that breakdown
+   * looks trustworthy.
    *
-   * Prefer this over `ratio` for token maths. `used_percentage` is a whole
-   * number, which at a 1M window quantises to 10k-token steps — against a
-   * 33k-token compaction budget that is up to +/-5k of error.
+   * `current_usage`'s four counts are `valibot`-defaulted to 0 when absent
+   * from the payload, so an empty or partially-populated object sums to a
+   * near-zero "exact" value that would otherwise silently override a
+   * perfectly good `used_percentage`. Guard against that: a trustworthy
+   * `exact` should sit at or above `ratio * windowSize`, since
+   * `used_percentage` is a whole number (quantising to 10k-token steps at a
+   * 1M window — against a 33k-token compaction budget that is up to +/-5k of
+   * error) AND omits output tokens. When `exact` sits far below the
+   * ratio-derived figure, the payload is partial and the percentage is the
+   * better source; take `Math.max` of the two. Falls back to the
+   * ratio-derived figure alone when there is no usable `exact`, and to null
+   * when there is no window size either.
    */
   usedTokens: number | null;
 }
@@ -37,8 +47,9 @@ function withTokens(
   windowSize: number | null,
   exact: number | undefined,
 ): ContextUsage {
+  const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
   const usedTokens =
-    exact ?? (windowSize !== null ? Math.round(ratio * windowSize) : null);
+    exact !== undefined && exact > 0 ? Math.max(exact, derived ?? exact) : derived;
   return { ratio, windowSize, usedTokens };
 }
 

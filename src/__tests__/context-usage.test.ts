@@ -166,4 +166,41 @@ describe("deriveContextUsage", () => {
     const usage = deriveContextUsage({ context_window: { used_percentage: 25 } });
     expect(usage!.usedTokens).toBeNull();
   });
+
+  it("ignores an empty current_usage breakdown in favour of used_percentage", () => {
+    // All four counts on CurrentUsageSchema are valibot-defaulted to 0, so an
+    // empty object (as valibot would produce it) sums to a near-zero "exact"
+    // that must not override a perfectly good percentage.
+    const usage = deriveContextUsage({
+      context_window: {
+        used_percentage: 80,
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+    expect(usage!.usedTokens).toBe(160_000);
+  });
+
+  it("ignores a partial current_usage breakdown in favour of used_percentage", () => {
+    // Only two of the four counts are populated; the sum sits far below the
+    // ratio-derived figure, so the payload is treated as partial.
+    const usage = deriveContextUsage({
+      context_window: {
+        used_percentage: 80,
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 1200,
+          output_tokens: 800,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+    expect(usage!.usedTokens).toBe(160_000);
+  });
 });
