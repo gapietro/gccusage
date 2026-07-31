@@ -15,7 +15,9 @@
     "dev": "bun run src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
+    "analyze": "node scripts/analyze-transcripts.ts"
   },
   "keywords": [
     "claude",
@@ -56,5 +58,12 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=23.6.0",
+      "onFail": "warn"
+    }
   }
 }
