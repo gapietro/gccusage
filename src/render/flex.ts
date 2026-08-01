@@ -4,10 +4,13 @@ export type FlexMode = "left" | "right" | "center" | "space-between";
 
 export function applyFlex(
   segments: string[],
-  totalWidth: number,
+  totalWidth: number | undefined,
   mode: FlexMode,
 ): string {
   const content = segments.join("");
+  // Unknown width: there is nothing to justify against, so emit the content
+  // left-aligned regardless of the configured mode.
+  if (totalWidth === undefined) return content;
   const contentWidth = visibleLength(content);
 
   if (contentWidth >= totalWidth) return content;

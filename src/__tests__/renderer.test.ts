@@ -3,7 +3,7 @@ import { renderStatusline } from "../render/renderer.js";
 import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
-import { stripAnsi } from "../utils/terminal.js";
+import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
@@ -494,5 +494,226 @@ describe("default bar adjacency across the alert bands", () => {
   it("uses the wide separator when neither segment is alerting", () => {
     const line = renderDefaultBar(25, 200_000);
     expect(separatorBetweenAlertSegments(line)).toBe("▶");
+  });
+});
+
+describe("compact fitting measures the real line", () => {
+  const widgets = [
+    { type: "custom-text", text: "alpha", priority: 1 },
+    { type: "custom-text", text: "bravo", priority: 2 },
+    { type: "custom-text", text: "charlie", priority: 3 },
+    { type: "custom-text", text: "delta", priority: 4 },
+  ];
+
+  // The natural (untruncated) width of a single widget's segment, rendered
+  // alone under the same settings. Used as a packing tolerance below: if the
+  // greedy loop stopped early, the unused budget would exceed the cost of
+  // whatever candidate it declined to add next.
+  function naturalSegmentWidth(text: string, powerlineOn: boolean): number {
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "custom-text", text, priority: 1 }], flex: "left" }],
+      powerline: {
+        enabled: powerlineOn,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+    const line = renderStatusline(makeContext({ terminalWidth: 1000 }), settings);
+    return visibleLength(line);
+  }
+
+  // Ground truth for which prefix of `widgets` should survive at a given
+  // budget — computed WITHOUT going through `measureLine`/`applyFlex` at
+  // all, so this cannot be fooled the same way the width-only assertions
+  // below can be. `layoutPowerline` paints powerline segments directly
+  // (no width parameter, no dependency on flex.ts); plain mode's segments
+  // are joined with no separator, so the natural content is exactly the
+  // widgets' own text concatenated. `cumulative[i]` is the natural width of
+  // the first `i + 1` widgets, in list order (their priority order here).
+  //
+  // Final review reproduced a defect this ground truth exists to catch:
+  // mutating `applyFlex` (src/render/flex.ts:13) to pad at unknown width
+  // makes the real `measureLine` massively overstate every candidate's
+  // cost, so the greedy compact loop keeps only `alpha` at every budget in
+  // the sweep. Every width-only assertion below stayed green regardless,
+  // because plain mode's final render pads the survivors out to exactly
+  // `width` — satisfying "fits the budget" and "packs the budget" whether
+  // one widget survived or four. Comparing WHICH TEXT is actually present
+  // against this independently-computed cumulative table is what turns
+  // that silent misfit into a failing assertion.
+  function naturalCumulativeWidths(powerlineOn: boolean): number[] {
+    const options = { theme: "default", separator: "▶", separatorThin: "│" };
+    return widgets.map((_, i) => {
+      const prefix = widgets
+        .slice(0, i + 1)
+        .map((w) => ({ text: w.text, fg: undefined, bg: undefined }));
+      if (powerlineOn) {
+        return visibleLength(
+          layoutPowerline(prefix, options)
+            .map((p) => p.text)
+            .join(""),
+        );
+      }
+      return prefix.map((o) => o.text).join("").length;
+    });
+  }
+
+  // Mirrors the real greedy loop in `renderCompact`: the first widget is
+  // always kept regardless of budget, and each subsequent one is kept only
+  // while the cumulative natural width it would add still fits — the first
+  // one that doesn't fit stops the whole loop (`break`, not `continue`).
+  function expectedSurvivorCount(cumulative: number[], budget: number): number {
+    let count = 1;
+    for (let i = 1; i < cumulative.length; i++) {
+      if (cumulative[i]! <= budget) count = i + 1;
+      else break;
+    }
+    return count;
+  }
+
+  it.each([true, false])("fills the budget without overflowing it (powerline=%s)", (powerlineOn) => {
+    const settings = makeSettings({
+      lines: [{ widgets, flex: "left" }],
+      powerline: {
+        enabled: powerlineOn,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+
+    const longestSegmentCost = Math.max(
+      ...widgets.map((w) => naturalSegmentWidth(w.text, powerlineOn)),
+    );
+    // The width the whole set occupies once nothing is left to drop — the
+    // ceiling the packing bound below must respect once every widget fits.
+    const fullWidth = visibleLength(
+      renderStatusline(makeContext({ terminalWidth: 1000 }), settings),
+    );
+    const cumulative = naturalCumulativeWidths(powerlineOn);
+
+    // Sweep every budget from "one segment barely fits" to "everything fits".
+    for (let width = 10; width <= 60; width++) {
+      const line = renderStatusline(makeContext({ terminalWidth: width }), settings);
+      const plain = stripAnsi(line);
+
+      // A correctly fitted line never needs end-truncation. If fitting
+      // stopped happening (e.g. the loop always added everything), the
+      // over-long line would fall through to truncateAnsi and pick up "…".
+      expect(plain).not.toContain("…");
+
+      // No overflow: the measured line must fit inside the budget.
+      expect(visibleLength(line)).toBeLessThanOrEqual(width);
+
+      // Packs the budget rather than stopping early: any unused space must
+      // be no larger than the largest segment that could have been the next
+      // candidate, or the loop should have kept going. Once every widget
+      // already fits there is no next candidate to compare against, so the
+      // bound is capped at the set's full natural width.
+      expect(visibleLength(line)).toBeGreaterThanOrEqual(
+        Math.min(width, fullWidth) - longestSegmentCost,
+      );
+
+      // CONTENT, not just width: assert which segments actually survived,
+      // against the independently-computed ground truth above. A width-only
+      // assertion is satisfiable by padding alone (plain mode's final render
+      // pads survivors out to exactly `width` regardless of how many there
+      // are) — this is the check that isn't.
+      const expectedCount = expectedSurvivorCount(cumulative, width);
+      for (let i = 0; i < expectedCount; i++) {
+        expect(plain).toContain(widgets[i]!.text);
+      }
+      if (expectedCount < widgets.length) {
+        expect(plain).not.toContain(widgets[expectedCount]!.text);
+      }
+    }
+  });
+
+  it("keeps a segment the old arithmetic would have dropped", () => {
+    const settings = makeSettings({
+      lines: [{ widgets, flex: "left" }],
+      powerline: {
+        enabled: true,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+
+    // Four segments of 5/5/7/5 characters cost 5+3 + 5+3 + 7+3 + 5+3 = 34
+    // columns in powerline mode. The old estimate charged 2 more per segment,
+    // i.e. 42, and so dropped the last segment at any budget below 42.
+    const line = renderStatusline(makeContext({ terminalWidth: 40 }), settings);
+    expect(stripAnsi(line)).toContain("delta");
+  });
+});
+
+// `measureLine` (src/render/renderer.ts) is only correct because it measures
+// a line by rendering it with `terminalWidth: undefined` and trusting that
+// unknown width means "no padding, no truncation" — it doesn't compute a
+// width itself, it reads one off a real render. The compact-fitting tests
+// above exercise that trust indirectly, through whatever the fitting
+// algorithm happens to produce. This describe block tests the invariant
+// directly: render at `terminalWidth: undefined` and require the output to
+// equal its own natural content exactly, with nothing added or removed.
+//
+// Only the truncation half of this was ever guarded before final review
+// (incidentally, by a Task 5 real-payload test asserting no "…" at a
+// specific width). The padding half had no test at all: final review
+// mutated `applyFlex` (src/render/flex.ts:13) to pad instead of no-op at
+// unknown width, and all 437 existing tests kept passing.
+describe("renderLine at unknown terminal width neither pads nor truncates", () => {
+  const widgets = [
+    { type: "custom-text", text: "alpha", priority: 1 },
+    { type: "custom-text", text: "bravo", priority: 2 },
+  ];
+
+  // Every configured flex mode is exercised, not just the default "left" —
+  // `applyFlex`'s unknown-width guard sits BEFORE the mode switch, so it is
+  // shared by all of them, and a mutation that removed or narrowed that
+  // guard could plausibly still special-case "left".
+  const flexModes = ["left", "right", "center", "space-between"] as const;
+
+  it.each(flexModes)("plain mode: equals natural content exactly (flex=%s)", (flex) => {
+    const settings = makeSettings({
+      lines: [{ widgets, flex }],
+      powerline: { enabled: false, theme: "default", separator: "▶", separatorThin: "│" },
+    });
+    const output = renderStatusline(makeContext({ terminalWidth: undefined }), settings);
+    const plain = stripAnsi(output);
+
+    // Ground truth independent of applyFlex: plain mode joins segments with
+    // no separator, so the natural content is exactly the widgets' own text,
+    // concatenated in order.
+    const expected = widgets.map((w) => w.text).join("");
+    expect(plain).toBe(expected);
+    expect(plain).not.toContain("…");
+    expect(plain.startsWith(" ")).toBe(false);
+    expect(plain.endsWith(" ")).toBe(false);
+  });
+
+  it("powerline mode: equals natural content exactly", () => {
+    const options = { theme: "default", separator: "▶", separatorThin: "│" };
+    const settings = makeSettings({
+      lines: [{ widgets, flex: "left" }],
+      powerline: { enabled: true, ...options },
+    });
+    const output = renderStatusline(makeContext({ terminalWidth: undefined }), settings);
+    const plain = stripAnsi(output);
+
+    // Ground truth from `layoutPowerline` directly — the exact pieces
+    // `renderLine`'s powerline branch paints, with no width parameter at
+    // all, so this is unaffected by anything `applyFlex`/`truncateAnsi` do.
+    const outputs = widgets.map((w) => ({ text: w.text, fg: undefined, bg: undefined }));
+    const expected = layoutPowerline(outputs, options)
+      .map((p) => p.text)
+      .join("");
+    expect(plain).toBe(expected);
+    expect(plain).not.toContain("…");
+    expect(plain.endsWith(" ")).toBe(false);
   });
 });

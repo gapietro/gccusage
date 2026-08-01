@@ -1,6 +1,10 @@
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
 
-export function truncateAnsi(str: string, maxWidth: number): string {
+export function truncateAnsi(str: string, maxWidth: number | undefined): string {
+  // Unknown width: return the line untouched. Claude Code truncates on its own
+  // end, so an over-long line degrades to its behaviour, whereas truncating to
+  // a guessed width destroys output that would have fit.
+  if (maxWidth === undefined) return str;
   if (visibleLength(str) <= maxWidth) return str;
 
   const plain = stripAnsi(str);
