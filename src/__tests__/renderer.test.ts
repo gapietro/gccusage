@@ -505,6 +505,25 @@ describe("compact fitting measures the real line", () => {
     { type: "custom-text", text: "delta", priority: 4 },
   ];
 
+  // The natural (untruncated) width of a single widget's segment, rendered
+  // alone under the same settings. Used as a packing tolerance below: if the
+  // greedy loop stopped early, the unused budget would exceed the cost of
+  // whatever candidate it declined to add next.
+  function naturalSegmentWidth(text: string, powerlineOn: boolean): number {
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "custom-text", text, priority: 1 }], flex: "left" }],
+      powerline: {
+        enabled: powerlineOn,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+    const line = renderStatusline(makeContext({ terminalWidth: 1000 }), settings);
+    return visibleLength(line);
+  }
+
   it.each([true, false])("fills the budget without overflowing it (powerline=%s)", (powerlineOn) => {
     const settings = makeSettings({
       lines: [{ widgets, flex: "left" }],
@@ -517,10 +536,36 @@ describe("compact fitting measures the real line", () => {
       compact: { mode: "always", threshold: 80 },
     });
 
+    const longestSegmentCost = Math.max(
+      ...widgets.map((w) => naturalSegmentWidth(w.text, powerlineOn)),
+    );
+    // The width the whole set occupies once nothing is left to drop — the
+    // ceiling the packing bound below must respect once every widget fits.
+    const fullWidth = visibleLength(
+      renderStatusline(makeContext({ terminalWidth: 1000 }), settings),
+    );
+
     // Sweep every budget from "one segment barely fits" to "everything fits".
     for (let width = 10; width <= 60; width++) {
       const line = renderStatusline(makeContext({ terminalWidth: width }), settings);
+      const plain = stripAnsi(line);
+
+      // A correctly fitted line never needs end-truncation. If fitting
+      // stopped happening (e.g. the loop always added everything), the
+      // over-long line would fall through to truncateAnsi and pick up "…".
+      expect(plain).not.toContain("…");
+
+      // No overflow: the measured line must fit inside the budget.
       expect(visibleLength(line)).toBeLessThanOrEqual(width);
+
+      // Packs the budget rather than stopping early: any unused space must
+      // be no larger than the largest segment that could have been the next
+      // candidate, or the loop should have kept going. Once every widget
+      // already fits there is no next candidate to compare against, so the
+      // bound is capped at the set's full natural width.
+      expect(visibleLength(line)).toBeGreaterThanOrEqual(
+        Math.min(width, fullWidth) - longestSegmentCost,
+      );
     }
   });
 

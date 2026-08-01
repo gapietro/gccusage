@@ -108,6 +108,10 @@ function renderCompact(context: RenderContext, settings: Settings): string {
 
   for (const { output } of allWidgets) {
     const candidate = [...fitted, output];
+    // Unknown budget: there is nothing to fit against, so never cut the list
+    // short on a guess — same "leave it alone" rule as truncateAnsi/applyFlex.
+    // `compact.mode: "always"` reaches this loop even when the width is
+    // unknown, so this guard is load-bearing, not defensive filler.
     if (budget !== undefined && measureLine(candidate, settings, context) > budget && fitted.length > 0) {
       break;
     }
