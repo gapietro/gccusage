@@ -3,11 +3,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
-import * as v from "valibot";
 import { getWidgetTypes, getWidget } from "../widgets/registry.js";
 import { WIDGET_EXPECTATIONS } from "./fixtures/widget-expectations.js";
-import { StatusJsonSchema } from "../types/status-json.js";
-import type { RenderContext } from "../types/render-context.js";
+import { contextFromFixture } from "./fixtures/context-from-fixture.js";
 import type { RealPayloadFixture } from "./fixtures/real-payloads/fixture-types.js";
 import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type: "json" };
 import fableFixture from "./fixtures/real-payloads/fable5-1m-low.json" with { type: "json" };
@@ -42,30 +40,6 @@ function initScratchRepo(repoDir: string): void {
   // one ADDED file -> git-changes renders "+1"
   fs.writeFileSync(path.join(repoDir, "added.txt"), "added\n");
   git("add", "added.txt");
-}
-
-/** Rebuild a RenderContext from a fixture's recorded derived values. */
-function contextFromFixture(fx: RealPayloadFixture, homeDir: string): RenderContext {
-  const stdinRaw = JSON.parse(
-    JSON.stringify(fx.stdin).split(fx.homePlaceholder).join(homeDir),
-  );
-  return {
-    stdin: v.parse(StatusJsonSchema, stdinRaw),
-    metrics: {
-      ...fx.derived.metrics,
-      byModel: new Map(fx.derived.metrics.byModel as unknown as [string, unknown][]),
-    } as RenderContext["metrics"],
-    block: fx.derived.block,
-    burnRate: fx.derived.burnRate,
-    pricing: {},
-    sessionCostUsd: fx.derived.sessionCostUsd,
-    todayCostUsd: fx.derived.todayCostUsd,
-    costByModel: new Map(fx.derived.costByModel),
-    sessionStartTime: fx.derived.sessionStartTime,
-    terminalWidth: 200,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: fx.controlled.turnCount,
-  };
 }
 
 beforeAll(() => {

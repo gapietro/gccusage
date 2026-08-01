@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as v from "valibot";
 import { StatusJsonSchema } from "../types/status-json.js";
+import { contextFromFixture } from "./fixtures/context-from-fixture.js";
 import type { RealPayloadFixture } from "./fixtures/real-payloads/fixture-types.js";
 import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type: "json" };
 
@@ -40,12 +41,11 @@ describe("real payload through the real pipeline", () => {
     const stdin = v.parse(StatusJsonSchema, fx.stdin);
     const ctx = await buildRenderContext(stdin, DEFAULT_SETTINGS);
 
-    // Every key the matrix reconstructs must exist on the real context.
-    for (const key of [
-      "stdin", "metrics", "block", "burnRate", "pricing", "sessionCostUsd",
-      "todayCostUsd", "costByModel", "sessionStartTime", "terminalWidth",
-      "alerts", "turnCount",
-    ]) {
+    // Every key the matrix's contextFromFixture reconstructs must exist on the
+    // real context — derived from the helper itself, not a hand-copied list,
+    // so this test cannot drift from what the matrix actually builds.
+    const reconstructed = contextFromFixture(fx, tmpHome);
+    for (const key of Object.keys(reconstructed)) {
       expect(ctx, `pipeline context is missing ${key}`).toHaveProperty(key);
     }
     expect(ctx.metrics.session).toHaveProperty("inputTokens");
