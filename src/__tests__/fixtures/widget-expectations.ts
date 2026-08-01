@@ -71,7 +71,10 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "lines-changed": { text: "+649 -66", why: "cost.total_lines_added / removed" },
   "vim-mode": { text: null, why: "declines when vim mode is off — correct" },
   "api-latency": { text: "API: 35m 5s", why: "cumulative total_api_duration_ms", knownWrong: 62 },
-  "token-breakdown": { text: "In:268.8k Out:536", why: "context_window totals — a last-message snapshot", knownWrong: 58 },
+  "token-breakdown": {
+    text: "In:396 Out:137.8k",
+    why: "metrics.session totals (#58) — the same source tokens-input and tokens-output read, so all three now agree about one session. Was In:268.8k Out:536 from context_window.total_input/output_tokens, a last-assistant-message snapshot",
+  },
   "session-timer": { text: "1hr 46m", why: "cost.total_duration_ms", knownWrong: 61 },
   "compact-countdown": { text: "~697.0k left", why: "windowSize - used - 33k reserve" },
   "turn-counter": {
