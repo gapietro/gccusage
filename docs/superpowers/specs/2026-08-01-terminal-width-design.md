@@ -143,18 +143,27 @@ The estimate is therefore wrong in both modes, by different amounts. This is not
 a tuning error; it is a second, independent implementation of the layout that
 drifted from the real one.
 
-New module:
+The fix is to delete the estimator rather than correct its constants. Once
+unknown width means "no padding, no truncation" (below), `renderLine` called
+with an unknown width returns the line at its **natural** width — so measuring
+is just rendering and taking `visibleLength`:
 
 ```
-src/render/measure.ts
-  measureLine(outputs, settings): number
+measureLine(outputs, settings, context) =
+  visibleLength(renderLine(outputs, settings, {...context, terminalWidth: undefined}, "left"))
 ```
 
-It runs the same `layoutPowerline` the painter runs and sums `visibleLength`
-over the returned pieces; in plain mode it sums the segment texts. `renderCompact`
-fits greedily against `measureLine` rather than arithmetic. One layout
-implementation means the estimator and the renderer cannot drift apart again,
-which is the actual defect.
+`renderCompact` fits greedily against that instead of arithmetic. There is then
+exactly one layout implementation, and the measurement cannot disagree with the
+painter because it *is* the painter. The cost is negligible: the greedy loop
+renders at most `n` candidate lines of at most `n` segments, and `n` is bounded
+by the number of configured widgets.
+
+This is a refinement of an earlier draft that proposed a separate
+`src/render/measure.ts` summing `layoutPowerline` pieces. That would have been a
+second implementation of the same layout — the very thing this section exists to
+eliminate — and it would also have had to re-derive `renderLine`'s
+separator-widget filter to stay in agreement.
 
 ### Unknown-width behaviour
 
@@ -197,10 +206,10 @@ that specifically.
    rendered bar reflects that width. This is the only test in the suite that
    would have failed before the fix; a unit test with a mocked `process.stdout`
    would not have.
-3. **Measurement agreement property** — across a range of widget sets, in both
-   powerline and plain mode,
-   `measureLine(outputs) === visibleLength(stripAnsi(renderLine(outputs)))`.
-   Kills the drift class permanently.
+3. **Natural-width property** — across a range of widget sets, in both powerline
+   and plain mode, `renderLine` with an unknown width must add no padding and
+   perform no truncation, so that `measureLine` reports the true natural width.
+   This is the invariant the whole measure-by-rendering approach rests on.
 4. **Real-payload width regression** — the default layout rendered against the
    captured real payloads with `vim.mode` active must fit within a stated width
    without truncating. This pins the #66 regression that made the issue binding.
