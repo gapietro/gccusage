@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import * as path from "node:path";
 import type { RenderContext } from "../types/render-context.js";
+import { cwdWidget } from "../widgets/cwd.js";
 import { modelWidget } from "../widgets/model.js";
 import { sessionCostWidget } from "../widgets/session-cost.js";
 import { contextPercentWidget } from "../widgets/context-percent.js";
@@ -8,6 +10,7 @@ import { todaySpendWidget } from "../widgets/today-spend.js";
 import { blockTimerWidget } from "../widgets/block-timer.js";
 import { compactCountdownWidget } from "../widgets/compact-countdown.js";
 import { projectWidget } from "../widgets/project.js";
+import { getHomeDir } from "../utils/paths.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -459,8 +462,9 @@ describe("compactCountdownWidget", () => {
 });
 
 describe("projectWidget", () => {
-  // HOME is read directly by the widget (as cwd.ts does), so pin it and put
-  // it back — src/__tests__/error-line.test.ts uses the same save/restore.
+  // The widget resolves home through getHomeDir(), which reads HOME first, so
+  // pin it and put it back — src/__tests__/error-line.test.ts uses the same
+  // save/restore.
   const originalHome = process.env["HOME"];
   afterEach(() => {
     if (originalHome === undefined) delete process.env["HOME"];
@@ -504,7 +508,17 @@ describe("projectWidget", () => {
     expect(out?.text).toBe("/");
   });
 
-  it("falls back to the basename when HOME is unset", () => {
+  it("still collapses the resolved home to ~ when HOME is unset (#69)", () => {
+    // getHomeDir() falls back to the passwd entry, so an unset HOME no longer
+    // means "no home to compare against". Asserting against getHomeDir() is
+    // what distinguishes the two implementations: reading process.env.HOME
+    // directly renders the basename here instead.
+    delete process.env["HOME"];
+    const out = projectWidget.render(ctx({ project_dir: getHomeDir() }), { type: "project" });
+    expect(out?.text).toBe("~");
+  });
+
+  it("renders the basename for a project dir outside home when HOME is unset", () => {
     delete process.env["HOME"];
     const out = projectWidget.render(ctx({ project_dir: "/Users/x/projects/gccusage" }), {
       type: "project",
@@ -533,5 +547,41 @@ describe("projectWidget", () => {
       label: "proj",
     });
     expect(out?.text).toBe("proj gccusage");
+  });
+});
+
+describe("cwdWidget", () => {
+  const originalHome = process.env["HOME"];
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+  });
+
+  function ctx(cwd?: string): RenderContext {
+    return makeContext({ stdin: { cwd } as never });
+  }
+
+  it("abbreviates the home prefix to ~", () => {
+    process.env["HOME"] = "/Users/x";
+    expect(cwdWidget.render(ctx("/Users/x/projects/gccusage"), { type: "cwd" })?.text).toBe(
+      "~/projects/gccusage",
+    );
+  });
+
+  it("leaves a path outside home alone", () => {
+    process.env["HOME"] = "/Users/x";
+    expect(cwdWidget.render(ctx("/opt/src"), { type: "cwd" })?.text).toBe("/opt/src");
+  });
+
+  it("still abbreviates the resolved home when HOME is unset (#69)", () => {
+    // Same distinguishing assertion as projectWidget's: reading
+    // process.env.HOME directly leaves the path unabbreviated here.
+    delete process.env["HOME"];
+    const out = cwdWidget.render(ctx(path.join(getHomeDir(), "projects")), { type: "cwd" });
+    expect(out?.text).toBe("~/projects");
+  });
+
+  it("declines without a cwd", () => {
+    expect(cwdWidget.render(ctx(undefined), { type: "cwd" })).toBeNull();
   });
 });

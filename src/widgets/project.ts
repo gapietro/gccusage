@@ -2,6 +2,7 @@ import * as path from "node:path";
 import type { Widget, WidgetOutput } from "./base.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetConfig } from "../config/schema.js";
+import { getHomeDir } from "../utils/paths.js";
 
 /**
  * The current project's name, from `workspace.project_dir` — the repo root.
@@ -24,7 +25,10 @@ export const projectWidget: Widget = {
     // including for the HOME comparison below; keep a lone "/" intact.
     const dir = projectDir.replace(/\/+$/, "") || "/";
 
-    const home = process.env["HOME"];
+    // Via getHomeDir() rather than process.env.HOME (#69) so an unset or
+    // empty HOME still collapses to ~, the same resolution the rest of the
+    // codebase uses; it always returns an absolute path.
+    const home = getHomeDir();
     // path.basename("/") is "", the only case that can be empty here.
     const name = dir === home ? "~" : path.basename(dir) || "/";
 

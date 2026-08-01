@@ -2078,19 +2078,30 @@ const COMPACT_COUNTDOWN_AMBER = "#b8860b";
 const COMPACT_COUNTDOWN_RED = "#a01822";
 const VIM_NORMAL = "#2ec27e";
 const VIM_INSERT = "#e5a50a";
-
-//#endregion
-//#region src/widgets/session-cost.ts
-function alertBg$1(cost, warn, danger, configBg) {
+/**
+* The shared warn/danger escalation for the dollar-valued widgets
+* (session-cost, today-spend): red at or above `danger`, amber at or above
+* `warn`, otherwise whatever the config asked for.
+*
+* The two widgets are meant to behave identically at their thresholds and
+* differ only in which cost and which threshold pair they feed in. Held as
+* one function so that stays true by construction (#68) — as two copies, an
+* added tier or a flipped comparison in one would desynchronise the other
+* with each widget's own tests still green.
+*/
+function alertBg(cost, warn, danger, configBg) {
 	if (cost >= danger) return ALERT_RED;
 	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
+
+//#endregion
+//#region src/widgets/session-cost.ts
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
 	const text = label ? `${label} ${formatDollars(cost)}` : formatDollars(cost);
-	const bg = alertBg$1(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
+	const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
 		text,
 		fg: config.fg,
@@ -2100,11 +2111,6 @@ const sessionCostWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/today-spend.ts
-function alertBg(cost, warn, danger, configBg) {
-	if (cost >= danger) return ALERT_RED;
-	if (cost >= warn) return ALERT_AMBER;
-	return configBg;
-}
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
@@ -2428,8 +2434,8 @@ const sessionClockWidget = { render(context, config) {
 const cwdWidget = { render(context, config) {
 	let cwd = context.stdin.cwd;
 	if (!cwd) return null;
-	const home = process.env["HOME"];
-	if (home && cwd.startsWith(home)) cwd = "~" + cwd.slice(home.length);
+	const home = getHomeDir();
+	if (cwd.startsWith(home)) cwd = "~" + cwd.slice(home.length);
 	const label = config.label ?? "";
 	const text = label ? `${label} ${cwd}` : cwd;
 	return {
@@ -2457,7 +2463,7 @@ const projectWidget = { render(context, config) {
 	const projectDir = context.stdin.workspace?.project_dir;
 	if (!projectDir) return null;
 	const dir = projectDir.replace(/\/+$/, "") || "/";
-	const home = process.env["HOME"];
+	const home = getHomeDir();
 	const name = dir === home ? "~" : path$1.basename(dir) || "/";
 	const label = config.label ?? "";
 	const text = label ? `${label} ${name}` : name;

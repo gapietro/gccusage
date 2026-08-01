@@ -47,3 +47,25 @@ export const RUNTIME_ALERT_BACKGROUNDS = [
   VIM_NORMAL,
   VIM_INSERT,
 ] as const;
+
+/**
+ * The shared warn/danger escalation for the dollar-valued widgets
+ * (session-cost, today-spend): red at or above `danger`, amber at or above
+ * `warn`, otherwise whatever the config asked for.
+ *
+ * The two widgets are meant to behave identically at their thresholds and
+ * differ only in which cost and which threshold pair they feed in. Held as
+ * one function so that stays true by construction (#68) — as two copies, an
+ * added tier or a flipped comparison in one would desynchronise the other
+ * with each widget's own tests still green.
+ */
+export function alertBg(
+  cost: number,
+  warn: number,
+  danger: number,
+  configBg?: string,
+): string | undefined {
+  if (cost >= danger) return ALERT_RED;
+  if (cost >= warn) return ALERT_AMBER;
+  return configBg;
+}
