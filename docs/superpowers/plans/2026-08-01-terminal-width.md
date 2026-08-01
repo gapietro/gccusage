@@ -748,7 +748,7 @@ Expected: empty output. If `dist/index.js` shows as modified, an earlier task co
 | Measure-by-rendering replaces the segment estimate | 4 |
 | `getTerminalWidth` unit tests controlling `COLUMNS` | 2 |
 | End-to-end spawn test with a piped stdout | 2 |
-| Natural-width property (no padding, no truncation at unknown width) | 4 (swept in the fitting test) |
+| Natural-width property (no padding, no truncation at unknown width) | 4 covered only the truncation half, incidentally, via a Task 5 real-payload test. The padding half was unguarded: final review mutated `applyFlex` (flex.ts:13) to pad at unknown width and all 437 tests still passed, because plain mode's final compact render pads survivors out to the real budget width regardless of which ones actually fit. Closed by a final-review fix: a dedicated `renderLine`/`layoutPowerline`-ground-truth invariant test (both render modes, all flex modes) plus a content assertion in the Task 4 fitting sweep that checks which widgets survived, not just the resulting width |
 | Real-payload width regression | 5 |
 | README correction | 6 |
 | Build + stage `dist/index.js` on every src commit | Global constraint, every task |

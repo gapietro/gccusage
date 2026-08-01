@@ -90,12 +90,57 @@ const fixtures: RealPayloadFixture[] = [
  * itself as a second, redundant layer directly against the two failures
  * that were actually reproduced — belt-and-suspenders, not load-bearing,
  * since the env-level isolation above already prevents both.
+ *
+ * `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` only cover the CONFIG LEVELS.
+ * `core.excludesFile` is a PATH FALLBACK, not a config level: unset, git
+ * still reads `$XDG_CONFIG_HOME/git/ignore` (or `~/.config/git/ignore`) even
+ * with both config levels pointed at /dev/null. Final review reproduced
+ * this: with `*.txt` in that ignore file, the two untracked fixtures below
+ * (`a.txt`/`b.txt`) become invisible to `git status`, `git-changes` emits
+ * nothing, and two of this file's tests fail. `makeDeterministicGitRepo`
+ * closes this two ways: `XDG_CONFIG_HOME` is pointed at the throwaway repo's
+ * own directory (which never contains a `git/` subdirectory, so the
+ * fallback path resolves to nothing on disk — and is removed by the same
+ * `rmSync` that cleans up the repo, unlike a separately mkdtemp'd
+ * directory), and `core.excludesFile=/dev/null` is set in the repo's LOCAL
+ * config as a second, explicit block of the same hole.
+ *
+ * `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` inject
+ * config directly via environment variables and take precedence over EVERY
+ * file-based config level, local included — a known open hole from an
+ * earlier review round. That precedence is exactly why deleting it only from
+ * a locally-scoped copy of `process.env` (as a naive fix would) is not
+ * enough: `getGitBranch`/`getGitChanges` (`src/utils/git.ts`) call
+ * `execSync` with no `env` override, so at RENDER time — when
+ * `renderStatusline` invokes those widgets against the repo below — they
+ * inherit the REAL `process.env` of this test process, not any sanitized
+ * copy scoped to `makeDeterministicGitRepo`. A hostile `GIT_CONFIG_COUNT` in
+ * the ambient environment would still poison that read even after the
+ * repo's own local `core.excludesFile` is set. So `GIT_CONFIG_COUNT` is
+ * deleted from `process.env` itself, once, before `GIT_ENV` is derived from
+ * it — the only way to make both the construction calls AND the later
+ * render-time widget calls agree it doesn't exist. (`GIT_CONFIG_KEY_n`/
+ * `GIT_CONFIG_VALUE_n` need no equivalent treatment: without a `COUNT`, git
+ * doesn't look for them at all, at any count.)
  */
+delete process.env.GIT_CONFIG_COUNT;
+
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
+
+/**
+ * Build the exact env each `git` call in `makeDeterministicGitRepo` runs
+ * with: the base `GIT_ENV` above, plus `XDG_CONFIG_HOME` pointed at this
+ * call's own throwaway repo directory — see the `core.excludesFile`
+ * paragraph on `GIT_ENV`. Per-repo (not a shared module-level constant)
+ * so it is removed by the same `rmSync` that cleans up `dir`.
+ */
+function gitEnvFor(dir: string): NodeJS.ProcessEnv {
+  return { ...GIT_ENV, XDG_CONFIG_HOME: dir };
+}
 
 /**
  * Build a real, throwaway git repository so `git-branch`/`git-changes`
@@ -126,12 +171,17 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 function makeDeterministicGitRepo(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "gccusage-width-fixture-"));
   try {
+    const env = gitEnvFor(dir);
     const git = (args: string[]) =>
-      execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "ignore"], env: GIT_ENV });
+      execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "ignore"], env });
 
     git(["init", "-q"]);
     git(["config", "user.email", "test@example.com"]);
     git(["config", "user.name", "Test"]);
+    // Belt-and-suspenders against the excludesFile path-fallback documented
+    // on GIT_ENV above: block it in this repo's own LOCAL config too, not
+    // just via the XDG_CONFIG_HOME redirect.
+    git(["config", "core.excludesFile", "/dev/null"]);
     git(["checkout", "-q", "-b", "worktree-terminal-width-67"]);
     // A commit is required: with zero commits HEAD is unborn and
     // `git rev-parse --abbrev-ref HEAD` (what getGitBranch runs) fails,
