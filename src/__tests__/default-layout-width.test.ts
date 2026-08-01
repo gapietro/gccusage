@@ -63,6 +63,41 @@ const fixtures: RealPayloadFixture[] = [
 ];
 
 /**
+ * Every `git` invocation in `makeDeterministicGitRepo` uses this environment
+ * instead of inheriting `process.env` unmodified.
+ *
+ * Fix-round-1 review reproduced two failures this test shipped with: a
+ * developer with `commit.gpgsign=true` in their GLOBAL git config gets
+ * `git commit` prompting/failing for a signing key that doesn't exist here;
+ * a developer with a global `core.hooksPath` pointing at a failing hook gets
+ * the same commit failure. Both are real, common developer-machine settings
+ * that have nothing to do with this repo.
+ *
+ * Rather than patch each setting as it's discovered (`-c commit.gpgsign=false`
+ * for the first, `-c core.hooksPath=`/`--no-verify` for the second, and then
+ * whatever the NEXT one turns out to be — `credential.helper`,
+ * `commit.template`, `url.*.insteadOf`, `init.defaultBranch`,
+ * `safe.directory`, aliases, ...), this disables the entire global and
+ * system config levels for every git call this test makes.
+ * `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_SYSTEM=/dev/null` are git's
+ * own documented mechanism (git-config(1), ENVIRONMENT VARIABLES) for
+ * skipping the corresponding config level entirely — cleaner than an
+ * open-ended list of per-flag overrides, and it closes the whole class of
+ * "some developer's global config" defect at once, not just the two
+ * instances a reviewer happened to reproduce.
+ *
+ * `-c commit.gpgsign=false --no-verify` are still passed on the commit
+ * itself as a second, redundant layer directly against the two failures
+ * that were actually reproduced — belt-and-suspenders, not load-bearing,
+ * since the env-level isolation above already prevents both.
+ */
+const GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+
+/**
  * Build a real, throwaway git repository so `git-branch`/`git-changes`
  * genuinely execute their real code path (they shell out to `git` against
  * `stdin.cwd` — see the SUPPORTED_WIDTH comment above) instead of silently
@@ -78,26 +113,40 @@ const fixtures: RealPayloadFixture[] = [
  * `worktree-terminal-width-67` (26 characters) and exactly two untracked
  * files are the fixed values the SUPPORTED_WIDTH comment's "88 columns, 26
  * character branch name" figure was measured against.
+ *
+ * The whole body runs inside a try/finally around the temp dir itself: if
+ * any git call here throws (as it did during fix-round-1 review, under a
+ * hostile global git config), the mkdtemp'd directory is still removed
+ * before the error propagates. Callers' own try/finally only guards cleanup
+ * for a repo that was successfully returned — it can't reach a failure that
+ * happens during construction, which is exactly how three
+ * `gccusage-width-fixture-*` directories were left behind in $TMPDIR during
+ * that review.
  */
 function makeDeterministicGitRepo(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "gccusage-width-fixture-"));
-  const git = (args: string[]) =>
-    execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "ignore"] });
+  try {
+    const git = (args: string[]) =>
+      execFileSync("git", args, { cwd: dir, stdio: ["ignore", "ignore", "ignore"], env: GIT_ENV });
 
-  git(["init", "-q"]);
-  git(["config", "user.email", "test@example.com"]);
-  git(["config", "user.name", "Test"]);
-  git(["checkout", "-q", "-b", "worktree-terminal-width-67"]);
-  // A commit is required: with zero commits HEAD is unborn and
-  // `git rev-parse --abbrev-ref HEAD` (what getGitBranch runs) fails,
-  // which getGitBranch treats identically to "not a git repo" (null).
-  writeFileSync(path.join(dir, "README.md"), "fixture\n");
-  git(["add", "README.md"]);
-  git(["commit", "-q", "-m", "init"]);
-  // Two untracked files: deterministic "+2" from git-changes.
-  writeFileSync(path.join(dir, "a.txt"), "a\n");
-  writeFileSync(path.join(dir, "b.txt"), "b\n");
-  return dir;
+    git(["init", "-q"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+    git(["checkout", "-q", "-b", "worktree-terminal-width-67"]);
+    // A commit is required: with zero commits HEAD is unborn and
+    // `git rev-parse --abbrev-ref HEAD` (what getGitBranch runs) fails,
+    // which getGitBranch treats identically to "not a git repo" (null).
+    writeFileSync(path.join(dir, "README.md"), "fixture\n");
+    git(["add", "README.md"]);
+    git(["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init", "--no-verify"]);
+    // Two untracked files: deterministic "+2" from git-changes.
+    writeFileSync(path.join(dir, "a.txt"), "a\n");
+    writeFileSync(path.join(dir, "b.txt"), "b\n");
+    return dir;
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
 }
 
 describe("default layout width against real payloads", () => {
@@ -123,6 +172,16 @@ describe("default layout width against real payloads", () => {
     // `project` widget only ever reads its basename as a string (#59), so it
     // does not need to be a real path, which keeps the project name under
     // our control without needing the temp repo to live at that name.
+    //
+    // The basename below, "demo-project-repo", is deliberately NOT a
+    // substring of the branch name "worktree-terminal-width-67" (nor vice
+    // versa) — fix-round-1 review found the original name
+    // ("terminal-width-67") WAS a substring of the branch, so the presence
+    // assertion for `project` kept passing even after the reviewer deleted
+    // `workspace.project_dir` entirely and the project segment vanished from
+    // line 2: `toContain("terminal-width-67")` was silently being satisfied
+    // by the git-branch text instead. It is the same length (17 characters)
+    // as the original so the documented 88/79-column pins are unaffected.
     function buildBusiestContext(vimEnabled: boolean, repoDir: string) {
       const fx = midFixture as unknown as RealPayloadFixture;
       const base = contextFromFixture(fx, "/home/testuser");
@@ -133,7 +192,7 @@ describe("default layout width against real payloads", () => {
           cwd: repoDir,
           workspace: {
             ...base.stdin.workspace,
-            project_dir: "/home/testuser/projects/terminal-width-67",
+            project_dir: "/home/testuser/projects/demo-project-repo",
             current_dir: repoDir,
           },
           ...(vimEnabled ? { vim: { mode: "NORMAL" } } : {}),
@@ -155,7 +214,7 @@ describe("default layout width against real payloads", () => {
         // silently drops out again (as git-branch/git-changes did against a
         // nonexistent fixture cwd), this fails loudly instead of quietly
         // measuring a shorter bar.
-        expect(line2).toContain("terminal-width-67"); // project
+        expect(line2).toContain("demo-project-repo"); // project
         expect(line2).toContain("worktree-terminal-width-67"); // git-branch
         expect(line2).toContain("+2"); // git-changes
         expect(line2).toContain("+649 -66"); // lines-changed
