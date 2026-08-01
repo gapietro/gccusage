@@ -14,10 +14,17 @@ export const MIN_SHRUNK_TEXT = 8;
 const ELLIPSIS = "…";
 
 /**
- * `text` reduced to exactly `width` visible columns, ending in an ellipsis.
+ * `text` reduced to at most `width` visible columns, ending in an ellipsis.
  *
  * Slices by code point: `String.prototype.slice` would cut a surrogate pair in
  * half, so a branch name containing an emoji would render as a broken glyph.
+ *
+ * When text contains multi-column characters (astral characters like emoji),
+ * removing one code point removes multiple columns. If removing one more would
+ * cross below MIN_SHRUNK_TEXT, we stop and return a result slightly wider than
+ * requested rather than violating the floor — the caller's truncation is the
+ * backstop. This can cause slight overshoot of the requested overflow (removing
+ * 5 when 4 were asked), which is acceptable.
  */
 function trimTo(text: string, width: number): string {
   if (visibleLength(text) <= width) return text;
@@ -25,9 +32,10 @@ function trimTo(text: string, width: number): string {
   // caller uses. Comparing code-point count against a visibleLength budget
   // would return `text` unchanged for astral characters (which are one code
   // point but two code units), and the caller's loop would then spin forever
-  // making no progress.
+  // making no progress. Never trim below MIN_SHRUNK_TEXT.
   let chars = Array.from(text);
-  while (chars.length > 0 && visibleLength(chars.join("") + ELLIPSIS) > width) {
+  const minimumWidth = Math.max(width, MIN_SHRUNK_TEXT);
+  while (chars.length > 0 && visibleLength(chars.join("") + ELLIPSIS) > minimumWidth) {
     chars = chars.slice(0, -1);
   }
   return chars.join("") + ELLIPSIS;
