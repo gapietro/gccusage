@@ -3,7 +3,7 @@ import { renderStatusline } from "../render/renderer.js";
 import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
-import { stripAnsi } from "../utils/terminal.js";
+import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
@@ -494,5 +494,52 @@ describe("default bar adjacency across the alert bands", () => {
   it("uses the wide separator when neither segment is alerting", () => {
     const line = renderDefaultBar(25, 200_000);
     expect(separatorBetweenAlertSegments(line)).toBe("▶");
+  });
+});
+
+describe("compact fitting measures the real line", () => {
+  const widgets = [
+    { type: "custom-text", text: "alpha", priority: 1 },
+    { type: "custom-text", text: "bravo", priority: 2 },
+    { type: "custom-text", text: "charlie", priority: 3 },
+    { type: "custom-text", text: "delta", priority: 4 },
+  ];
+
+  it.each([true, false])("fills the budget without overflowing it (powerline=%s)", (powerlineOn) => {
+    const settings = makeSettings({
+      lines: [{ widgets, flex: "left" }],
+      powerline: {
+        enabled: powerlineOn,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+
+    // Sweep every budget from "one segment barely fits" to "everything fits".
+    for (let width = 10; width <= 60; width++) {
+      const line = renderStatusline(makeContext({ terminalWidth: width }), settings);
+      expect(visibleLength(line)).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it("keeps a segment the old arithmetic would have dropped", () => {
+    const settings = makeSettings({
+      lines: [{ widgets, flex: "left" }],
+      powerline: {
+        enabled: true,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "always", threshold: 80 },
+    });
+
+    // Four segments of 5/5/7/5 characters cost 5+3 + 5+3 + 7+3 + 5+3 = 34
+    // columns in powerline mode. The old estimate charged 2 more per segment,
+    // i.e. 42, and so dropped the last segment at any budget below 42.
+    const line = renderStatusline(makeContext({ terminalWidth: 40 }), settings);
+    expect(stripAnsi(line)).toContain("delta");
   });
 });

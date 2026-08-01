@@ -74,6 +74,26 @@ export function renderStatusline(context: RenderContext, settings: Settings): st
   return renderFull(context, settings);
 }
 
+/**
+ * The width this line would occupy if nothing constrained it.
+ *
+ * Measured by rendering, not by arithmetic. `renderLine` with an unknown width
+ * adds no padding and performs no truncation, so its visible length is the
+ * natural width — which means this cannot disagree with the painter, because
+ * it *is* the painter. The previous hand-rolled estimate charged a fixed
+ * `+2 +3` per segment: wrong by 2 in powerline mode and by 5 in plain mode,
+ * with nothing tying it to the layout it was predicting. See issue #67.
+ */
+function measureLine(
+  outputs: WidgetOutput[],
+  settings: Settings,
+  context: RenderContext,
+): number {
+  return visibleLength(
+    renderLine(outputs, settings, { ...context, terminalWidth: undefined }, "left"),
+  );
+}
+
 function renderCompact(context: RenderContext, settings: Settings): string {
   // Collect all widgets from all lines, sort by priority
   const allWidgets: WidgetResult[] = [];
@@ -82,24 +102,16 @@ function renderCompact(context: RenderContext, settings: Settings): string {
   }
   allWidgets.sort((a, b) => a.priority - b.priority);
 
-  // Greedily add widgets until we'd exceed terminal width
+  // Greedily add widgets until the line would exceed the terminal width
   const fitted: WidgetOutput[] = [];
-  let usedWidth = 0;
-  const sepWidth = 3; // " ▶ " separator overhead per segment
+  const budget = context.terminalWidth;
 
   for (const { output } of allWidgets) {
-    const segWidth = visibleLength(output.text) + 2 + sepWidth; // +2 for padding
-    // Unknown width: there is nothing to fit against, so never cut the list
-    // short on a guess — same "leave it alone" rule as truncateAnsi/applyFlex.
-    if (
-      context.terminalWidth !== undefined &&
-      usedWidth + segWidth > context.terminalWidth &&
-      fitted.length > 0
-    ) {
+    const candidate = [...fitted, output];
+    if (budget !== undefined && measureLine(candidate, settings, context) > budget && fitted.length > 0) {
       break;
     }
     fitted.push(output);
-    usedWidth += segWidth;
   }
 
   if (fitted.length === 0) return "";

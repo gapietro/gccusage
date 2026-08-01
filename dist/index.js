@@ -3138,18 +3138,32 @@ function renderStatusline(context, settings) {
 	if (shouldCompact(settings, context.terminalWidth)) return renderCompact(context, settings);
 	return renderFull(context, settings);
 }
+/**
+* The width this line would occupy if nothing constrained it.
+*
+* Measured by rendering, not by arithmetic. `renderLine` with an unknown width
+* adds no padding and performs no truncation, so its visible length is the
+* natural width — which means this cannot disagree with the painter, because
+* it *is* the painter. The previous hand-rolled estimate charged a fixed
+* `+2 +3` per segment: wrong by 2 in powerline mode and by 5 in plain mode,
+* with nothing tying it to the layout it was predicting. See issue #67.
+*/
+function measureLine(outputs, settings, context) {
+	return visibleLength(renderLine(outputs, settings, {
+		...context,
+		terminalWidth: void 0
+	}, "left"));
+}
 function renderCompact(context, settings) {
 	const allWidgets = [];
 	for (const lineConfig of settings.lines) allWidgets.push(...collectWidgets(lineConfig.widgets, context));
 	allWidgets.sort((a, b) => a.priority - b.priority);
 	const fitted = [];
-	let usedWidth = 0;
-	const sepWidth = 3;
+	const budget = context.terminalWidth;
 	for (const { output } of allWidgets) {
-		const segWidth = visibleLength(output.text) + 2 + sepWidth;
-		if (context.terminalWidth !== void 0 && usedWidth + segWidth > context.terminalWidth && fitted.length > 0) break;
+		const candidate = [...fitted, output];
+		if (budget !== void 0 && measureLine(candidate, settings, context) > budget && fitted.length > 0) break;
 		fitted.push(output);
-		usedWidth += segWidth;
 	}
 	if (fitted.length === 0) return "";
 	return renderLine(fitted, settings, context, "left");
