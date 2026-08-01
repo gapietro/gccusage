@@ -1,0 +1,116 @@
+{
+  "name": "opus5-1m-early",
+  "claudeCodeVersion": "2.1.220",
+  "capturedAt": 1785549250969,
+  "homePlaceholder": "/home/testuser",
+  "stdin": {
+    "session_id": "00000000-0000-4000-8000-000000000000",
+    "transcript_path": "/home/testuser/.claude/projects/demo-project/00000000-0000-4000-8000-000000000000.jsonl",
+    "cwd": "/home/testuser/projects/demo-project/src/widgets",
+    "prompt_id": "00000000-0000-4000-8000-000000000001",
+    "effort": {
+      "level": "high"
+    },
+    "session_name": "Example session",
+    "model": {
+      "id": "claude-opus-5[1m]",
+      "display_name": "Opus 5 (1M context)"
+    },
+    "workspace": {
+      "current_dir": "/home/testuser/projects/demo-project/src/widgets",
+      "project_dir": "/home/testuser/projects/demo-project",
+      "added_dirs": [],
+      "repo": {
+        "host": "github.com",
+        "owner": "example",
+        "name": "demo"
+      }
+    },
+    "version": "2.1.220",
+    "output_style": {
+      "name": "default"
+    },
+    "cost": {
+      "total_cost_usd": 4.225160499999999,
+      "total_duration_ms": 1634973,
+      "total_api_duration_ms": 499493,
+      "total_lines_added": 112,
+      "total_lines_removed": 7
+    },
+    "context_window": {
+      "total_input_tokens": 113295,
+      "total_output_tokens": 2322,
+      "context_window_size": 1000000,
+      "current_usage": {
+        "input_tokens": 2,
+        "output_tokens": 2322,
+        "cache_creation_input_tokens": 804,
+        "cache_read_input_tokens": 112489
+      },
+      "used_percentage": 11,
+      "remaining_percentage": 89
+    },
+    "exceeds_200k_tokens": false,
+    "fast_mode": false,
+    "thinking": {
+      "enabled": true
+    },
+    "rate_limits": {
+      "five_hour": {
+        "used_percentage": 16,
+        "resets_at": 1785556200
+      },
+      "seven_day": {
+        "used_percentage": 63,
+        "resets_at": 1785668400
+      }
+    }
+  },
+  "derived": {
+    "metrics": {
+      "byModel": [
+        [
+          "claude-opus-5",
+          {
+            "inputTokens": 183,
+            "outputTokens": 79062,
+            "cacheCreationTokens": 157557,
+            "cacheReadTokens": 9827351
+          }
+        ]
+      ],
+      "session": {
+        "inputTokens": 183,
+        "outputTokens": 79062,
+        "cacheCreationTokens": 157557,
+        "cacheReadTokens": 9827351
+      },
+      "today": {
+        "inputTokens": 4062,
+        "outputTokens": 1756881,
+        "cacheCreationTokens": 7552186,
+        "cacheReadTokens": 526345937
+      }
+    },
+    "sessionCostUsd": 4.225160499999999,
+    "todayCostUsd": 591.2766591000001,
+    "costByModel": [
+      [
+        "claude-opus-5",
+        7.87587175
+      ]
+    ],
+    "sessionStartTime": 1785545975575,
+    "turnCount": 1,
+    "block": {
+      "blockStartTime": 1785541709669,
+      "elapsedMs": 7541299,
+      "remainingMs": 10458701,
+      "blockDurationMs": 18000000
+    },
+    "burnRate": {
+      "costPerHour": 9.303259319878677,
+      "costPerMinute": 0.15505432199797795
+    }
+  }
+}
