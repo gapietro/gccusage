@@ -84,12 +84,22 @@ Four parts.
 
 **3. Completeness guard** — the table's keys and `getWidgetTypes()` must match in *both*
 directions. A 26th widget cannot be registered without an entry, and a deleted widget
-cannot leave a stale one. This is the part that stops the dormancy from recurring; the
-rest only measures it once.
+cannot leave a stale one. This forces an expectation to exist for every registered
+widget and locks current behaviour against regression, which stops the *dormancy* from
+recurring. It does not by itself detect a widget that is wrong from the start: the table
+records current behaviour, so a widget that is wrong on day one gets its wrong output
+recorded as the expectation and the suite goes green. Catching that requires a human
+independently deriving the correct value — which is how #58-#63 were found — a process
+step, not a test.
 
 **4. Pipeline case** — one fixture driven through the real `runStatusline` with hermetic
-`HOME` and `XDG_CACHE_HOME`, a seeded JSONL transcript and mocked pricing, proving the
-context the widgets receive in production is the one the matrix assumed.
+`HOME` and `XDG_CACHE_HOME`, a seeded JSONL transcript and mocked pricing. This proves
+`buildRenderContext` completes on a real payload hermetically, and that the key set the
+matrix reconstructs matches the key set the real pipeline produces (that binding is
+real — the key list is derived from `contextFromFixture`, not hardcoded). It does not
+prove the *values* the matrix assumed match production: under a hermetic `HOME` there
+are no transcripts, so every derived value is zero and the test reduces to key-presence
+and type checks.
 
 ### `knownWrong`
 

@@ -30,7 +30,15 @@ let originalHome: string | undefined;
 function initScratchRepo(repoDir: string): void {
   fs.mkdirSync(repoDir, { recursive: true });
   const git = (...args: string[]) =>
-    execFileSync("git", args, { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", args, {
+      cwd: repoDir,
+      stdio: "pipe",
+      // Neutralize ambient system/XDG git config (commit.gpgsign, core.hooksPath,
+      // init.templateDir, etc.) so this scratch repo's behaviour is deterministic
+      // regardless of the host machine's global git setup. HOME is already
+      // overridden by the caller, which handles ~/.gitconfig, but not these.
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+    });
   git("init", "-q", "-b", "reality-fixture");
   git("config", "user.email", "test@example.com");
   git("config", "user.name", "Test");
@@ -49,6 +57,17 @@ beforeAll(() => {
   const fx = midFixture as unknown as RealPayloadFixture;
   const cwd = (fx.stdin as { cwd: string }).cwd.split(fx.homePlaceholder).join(tmpHome);
   initScratchRepo(cwd);
+  // Secondary fixtures substitute their own `cwd`, which may point at a
+  // subdirectory that was never created (e.g. opus5-1m-early's ".../src/widgets").
+  // git.ts swallows ENOENT and returns null, which would make git-branch/git-changes
+  // false-pass the "renders every widget without throwing" check for exactly the
+  // widgets most likely to throw. Ensure every secondary fixture's cwd exists,
+  // nested inside the same scratch repo so git commands still resolve.
+  for (const raw of [fableFixture, earlyFixture]) {
+    const sfx = raw as unknown as RealPayloadFixture;
+    const sCwd = (sfx.stdin as { cwd: string }).cwd.split(sfx.homePlaceholder).join(tmpHome);
+    fs.mkdirSync(sCwd, { recursive: true });
+  }
   vi.useFakeTimers();
   vi.setSystemTime(fx.derivedAt);
 });
@@ -77,13 +96,31 @@ describe("widget matrix against a real payload", () => {
   }
 });
 
-const STRUCTURAL_NULLS = ["custom-text", "custom-command", "vim-mode"];
+// Widgets expected to render `null` for structural reasons (no user-supplied
+// text/command, or a feature that is off). Derived from the expectation table
+// itself, rather than hardcoded, so a fourth legitimately-declining widget
+// can't silently go uncovered by this list.
+const STRUCTURAL_NULLS = Object.entries(WIDGET_EXPECTATIONS)
+  .filter(([, expectation]) => expectation.text === null && expectation.knownWrong === undefined)
+  .map(([type]) => type);
+
+const primaryDerivedAt = (midFixture as unknown as RealPayloadFixture).derivedAt;
 
 describe.each([
   ["fable5-1m-low", fableFixture],
   ["opus5-1m-early", earlyFixture],
 ])("secondary fixture %s", (name, raw) => {
   const fx = raw as unknown as RealPayloadFixture;
+
+  beforeAll(() => {
+    vi.setSystemTime(fx.derivedAt);
+  });
+
+  afterAll(() => {
+    // Restore the primary fixture's clock so later files/state relying on
+    // the primary matrix's fake-time assumptions are unaffected.
+    vi.setSystemTime(primaryDerivedAt);
+  });
 
   it("renders every widget without throwing", () => {
     const ctx = contextFromFixture(fx, tmpHome);

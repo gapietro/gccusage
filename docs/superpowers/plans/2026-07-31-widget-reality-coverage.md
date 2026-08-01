@@ -119,7 +119,7 @@ capture script in Step 2 and, if it is a Map, store it as entries exactly like
 - [ ] **Step 2: Write a throwaway capture script**
 
 The raw captures are at
-`/private/tmp/claude-501/-Users-gpietro-projects-gccusage/60d7554b-c1e3-4aa4-9186-7349cd42c5d0/scratchpad/captured-stdin.jsonl`
+`<scratchpad>/captured-stdin.jsonl`
 (23 lines). Select three by `context_window`:
 
 - `opus5-1m-mid` — `used_percentage` 26 or 28, `claude-opus-5[1m]`, 1M window
@@ -139,7 +139,7 @@ import { buildRenderContext } from "../data/pipeline.js";
 import { StatusJsonSchema } from "../types/status-json.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 
-const SRC = "/private/tmp/claude-501/-Users-gpietro-projects-gccusage/60d7554b-c1e3-4aa4-9186-7349cd42c5d0/scratchpad/captured-stdin.jsonl";
+const SRC = "<scratchpad>/captured-stdin.jsonl";
 const OUT = "src/__tests__/fixtures/real-payloads";
 const HOME_PLACEHOLDER = "/home/testuser";
 
@@ -211,7 +211,8 @@ Expected: PASS, three "wrote <name>" lines.
 Run:
 
 ```bash
-grep -rlE "gpietro|60d7554b|99199410|gccusage/\.claude" src/__tests__/fixtures/real-payloads/ || echo "CLEAN"
+USERNAME="$(whoami)"
+grep -rlE "${USERNAME}|<original-session-id>|gccusage/\.claude" src/__tests__/fixtures/real-payloads/ || echo "CLEAN"
 ```
 
 Expected: `CLEAN`. If any file matches, extend `sanitize()` and regenerate. Then confirm the
