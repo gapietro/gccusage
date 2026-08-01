@@ -64,19 +64,38 @@ describe("parseJsonlContent", () => {
     expect(entries[0]!.usage).toBeUndefined();
   });
 
-  it("counts one entry per message.id, not per content-block line", () => {
-    // Claude Code splits one API response across a line per content block,
-    // repeating an identical usage object on each. Counting lines double-counts
-    // tokens, and does it non-uniformly: responses with more blocks weigh more.
-    const usage = '"usage":{"input_tokens":2,"output_tokens":296,"cache_read_input_tokens":20233}';
+  it("counts one entry per message.id, keeping the last line's usage", () => {
+    // Claude Code splits one API response across a line per content block.
+    // Counting lines double-counts tokens, and does it non-uniformly:
+    // responses with more blocks weigh more. The lines do not necessarily
+    // repeat one usage object — subagent transcripts grow `output_tokens` as
+    // the response streams, and the final line carries the true total.
+    const usage = (output: number) =>
+      `"usage":{"input_tokens":2,"output_tokens":${output},"cache_read_input_tokens":20233}`;
     const content = [
-      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"thinking"}]}}`,
-      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"text"}]}}`,
-      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"tool_use"}]}}`,
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage(5)},"content":[{"type":"thinking"}]}}`,
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage(107)},"content":[{"type":"text"}]}}`,
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage(296)},"content":[{"type":"tool_use"}]}}`,
     ].join("\n");
 
     const entries = parseJsonlContent(content);
     expect(entries).toHaveLength(1);
+    expect(entries[0]!.usage?.output_tokens).toBe(296);
+  });
+
+  it("keeps the first line's non-usage fields when merging a group", () => {
+    // Only `usage` comes from the later line. Keeping the first line's
+    // timestamp is what makes filterTodayEntries bucket a response by when
+    // it started.
+    const content = [
+      '{"type":"assistant","timestamp":"2026-07-29T21:12:56.795Z","sessionId":"sess-a","costUsd":0.25,"message":{"id":"msg_01","model":"claude-opus-4-6","usage":{"output_tokens":5}}}',
+      '{"type":"assistant","timestamp":"2026-07-29T21:13:04.100Z","sessionId":"sess-a","costUsd":0.40,"message":{"id":"msg_01","model":"claude-opus-4-6","usage":{"output_tokens":296}}}',
+    ].join("\n");
+
+    const entries = parseJsonlContent(content);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.timestamp).toBe("2026-07-29T21:12:56.795Z");
+    expect(entries[0]!.costUsd).toBe(0.25);
     expect(entries[0]!.usage?.output_tokens).toBe(296);
   });
 

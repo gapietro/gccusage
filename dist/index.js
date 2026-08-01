@@ -1445,21 +1445,36 @@ function parseJsonlFile(filePath) {
 *
 * Claude Code writes one line per content block — a response with a
 * `thinking` block, a `text` block and two `tool_use` blocks is four
-* `type: "assistant"` lines — and repeats a byte-identical `message.usage`
-* on every one of them. Counting lines therefore over-counts tokens by
-* roughly 2.1x on a real corpus, and does so non-uniformly: responses with
-* more content blocks weigh more, so it is not a constant factor that
-* cancels out downstream.
+* `type: "assistant"` lines — all sharing a single `message.id`. Counting
+* lines therefore over-counts tokens by roughly 2.1x on a real corpus, and
+* does so non-uniformly: responses with more content blocks weigh more, so
+* it is not a constant factor that cancels out downstream.
 *
-* The gate is narrow on purpose. A line is dropped only when it has a
-* `message.id`, carries usage, and that id has been seen. Entries without a
-* `message.id` stay separate: the legacy flat format has no `message`
-* wrapper and was never split across lines. Entries without usage stay too,
-* so nothing reading `costUsd`, `timestamp` or `sessionId` is affected.
+* The `usage` object is *not* byte-identical across a group's lines. Two
+* transcript formats exist in the wild: main session transcripts repeat the
+* same usage on every line, while subagent transcripts grow `output_tokens`
+* line by line as the response streams. Across a 14,063-group corpus,
+* `output_tokens` is monotonically non-decreasing within a group (0
+* non-monotonic groups) and the **last** line carries the maximum in every
+* single group. The last line is therefore authoritative, and we keep its
+* usage rather than the first line's.
+*
+* Only `usage` is taken from the later line. The group's other fields —
+* `timestamp`, `costUsd`, `sessionId`, `model` — stay as the *first* line
+* set them, which keeps `filterTodayEntries` bucketing a response by when it
+* started. (Those fields are stable within a group anyway: `input_tokens`
+* and the cache fields differ in only 2 of 14,063 groups.)
+*
+* The gate is narrow on purpose. A line is merged into an earlier entry only
+* when it has a `message.id`, carries usage, and that id has been seen.
+* Entries without a `message.id` stay separate: the legacy flat format has no
+* `message` wrapper and was never split across lines. Entries without usage
+* stay too, so nothing reading `costUsd`, `timestamp` or `sessionId` is
+* affected.
 */
 function parseJsonlContent(content) {
 	const entries = [];
-	const seenMessageIds = new Set();
+	const entryIndexByMessageId = new Map();
 	for (const line of content.split("\n")) {
 		if (!line.trim()) continue;
 		try {
@@ -1469,8 +1484,12 @@ function parseJsonlContent(content) {
 				const message = typeof parsed["message"] === "object" && parsed["message"] !== null ? parsed["message"] : void 0;
 				const messageId = typeof message?.["id"] === "string" ? message["id"] : null;
 				if (messageId !== null) {
-					if (seenMessageIds.has(messageId)) continue;
-					seenMessageIds.add(messageId);
+					const existingIndex = entryIndexByMessageId.get(messageId);
+					if (existingIndex !== void 0) {
+						entries[existingIndex].usage = entry.usage;
+						continue;
+					}
+					entryIndexByMessageId.set(messageId, entries.length);
 				}
 			}
 			entries.push(entry);
