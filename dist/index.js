@@ -1759,14 +1759,11 @@ function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionMod
 	const elapsedMs = Date.now() - sessionStartTime;
 	if (elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
-	let costPerMinute = 0;
-	if (sessionModel) {
-		const modelPricing = findPricing(sessionModel, pricing);
-		if (modelPricing) {
-			const sessionCost = calculateCost(sessionMetrics, modelPricing);
-			costPerMinute = sessionCost / elapsedMinutes;
-		}
-	}
+	if (!sessionModel) return null;
+	const modelPricing = findPricing(sessionModel, pricing);
+	if (!modelPricing) return null;
+	const sessionCost = calculateCost(sessionMetrics, modelPricing);
+	const costPerMinute = sessionCost / elapsedMinutes;
 	return {
 		costPerHour: costPerMinute * 60,
 		costPerMinute
