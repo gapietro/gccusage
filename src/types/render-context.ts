@@ -21,7 +21,8 @@ export interface RenderContext {
   todayCostUsd: number;
   costByModel: Map<string, number>;
   sessionStartTime: number | null;
-  terminalWidth: number;
+  /** True terminal width, or undefined when it cannot be determined. */
+  terminalWidth: number | undefined;
   alerts: AlertsConfig;
   turnCount: number;
 }

@@ -1790,8 +1790,35 @@ function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionMod
 
 //#endregion
 //#region src/utils/terminal.ts
+/**
+* The terminal's width in columns, or `undefined` when it cannot be known.
+*
+* `process.stdout.columns` is undefined whenever stdout is not a TTY, and
+* Claude Code always pipes the statusline's stdout — the same reason
+* `powerline.ts` has to force `chalk.level = 3`. This returned `|| 80` for
+* every user in every terminal (issue #67).
+*
+* Claude Code compensates in its hook spawner: it reads `process.stdout.columns`
+* from its own process — which is a real TTY — and injects `COLUMNS` (and
+* `LINES`) into the child's environment on every spawn, so the value tracks
+* live terminal resizes. Verified against the 2.1.220 binary.
+*
+* The live TTY value is preferred when we have one: someone running `gccusage`
+* directly in a terminal has an accurate `stdout.columns`, while a
+* shell-exported `COLUMNS` can be stale.
+*
+* A malformed value degrades to `undefined` rather than to a coerced number,
+* because every consumer treats unknown as "leave the output alone" and a
+* wrong number silently mangles the bar.
+*/
 function getTerminalWidth() {
-	return process.stdout.columns || 80;
+	const fromTty = process.stdout.columns;
+	if (typeof fromTty === "number" && Number.isInteger(fromTty) && fromTty > 0) return fromTty;
+	const fromEnv = process.env["COLUMNS"];
+	if (fromEnv === void 0 || fromEnv.trim() === "") return void 0;
+	const parsed = Number(fromEnv);
+	if (!Number.isInteger(parsed) || parsed <= 0) return void 0;
+	return parsed;
 }
 function stripAnsi(str) {
 	return str.replace(/\x1b\[[0-9;]*m/g, "");
@@ -3009,6 +3036,7 @@ function renderPowerlineSegments(outputs, options) {
 //#region src/render/flex.ts
 function applyFlex(segments, totalWidth, mode) {
 	const content = segments.join("");
+	if (totalWidth === void 0) return content;
 	const contentWidth = visibleLength(content);
 	if (contentWidth >= totalWidth) return content;
 	const padding = totalWidth - contentWidth;
@@ -3038,6 +3066,7 @@ function applyFlex(segments, totalWidth, mode) {
 //#endregion
 //#region src/render/truncation.ts
 function truncateAnsi(str, maxWidth) {
+	if (maxWidth === void 0) return str;
 	if (visibleLength(str) <= maxWidth) return str;
 	const plain = stripAnsi(str);
 	if (plain.length <= maxWidth) return str;
@@ -3070,6 +3099,7 @@ function shouldCompact(settings, terminalWidth) {
 	const mode = compact.mode ?? "auto";
 	if (mode === "always") return true;
 	if (mode === "never") return false;
+	if (terminalWidth === void 0) return false;
 	return terminalWidth < (compact.threshold ?? 80);
 }
 function collectWidgets(configs, context) {
@@ -3117,7 +3147,7 @@ function renderCompact(context, settings) {
 	const sepWidth = 3;
 	for (const { output } of allWidgets) {
 		const segWidth = visibleLength(output.text) + 2 + sepWidth;
-		if (usedWidth + segWidth > context.terminalWidth && fitted.length > 0) break;
+		if (context.terminalWidth !== void 0 && usedWidth + segWidth > context.terminalWidth && fitted.length > 0) break;
 		fitted.push(output);
 		usedWidth += segWidth;
 	}

@@ -13,12 +13,14 @@ interface WidgetResult {
   priority: number;
 }
 
-function shouldCompact(settings: Settings, terminalWidth: number): boolean {
+function shouldCompact(settings: Settings, terminalWidth: number | undefined): boolean {
   const compact = settings.compact;
   if (!compact) return false;
   const mode = compact.mode ?? "auto";
   if (mode === "always") return true;
   if (mode === "never") return false;
+  // "auto" with no measurable width: never collapse the bar on a guess.
+  if (terminalWidth === undefined) return false;
   return terminalWidth < (compact.threshold ?? 80);
 }
 
@@ -87,7 +89,15 @@ function renderCompact(context: RenderContext, settings: Settings): string {
 
   for (const { output } of allWidgets) {
     const segWidth = visibleLength(output.text) + 2 + sepWidth; // +2 for padding
-    if (usedWidth + segWidth > context.terminalWidth && fitted.length > 0) break;
+    // Unknown width: there is nothing to fit against, so never cut the list
+    // short on a guess — same "leave it alone" rule as truncateAnsi/applyFlex.
+    if (
+      context.terminalWidth !== undefined &&
+      usedWidth + segWidth > context.terminalWidth &&
+      fitted.length > 0
+    ) {
+      break;
+    }
     fitted.push(output);
     usedWidth += segWidth;
   }
