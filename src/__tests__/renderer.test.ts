@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
 import { layoutPowerline } from "../render/powerline.js";
@@ -5,6 +6,7 @@ import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -715,5 +717,208 @@ describe("renderLine at unknown terminal width neither pads nor truncates", () =
     expect(plain).toBe(expected);
     expect(plain).not.toContain("…");
     expect(plain.endsWith(" ")).toBe(false);
+  });
+
+  it("does not shrink either — measureLine depends on this", () => {
+    const context = makeContext({
+      terminalWidth: undefined,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "project" }], flex: "left" }],
+      powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+      compact: { mode: "never", threshold: 80 },
+    });
+
+    const line = stripAnsi(renderStatusline(context, settings));
+    expect(line).toContain("an-extremely-long-project-directory-name");
+    expect(line).not.toContain("…");
+  });
+});
+
+describe("long segments shrink to fit instead of truncating the line", () => {
+  // custom-text is not shrinkable, so drive the shrink path through the real
+  // widgets instead: a context whose project_dir and cwd produce long names.
+  function longNameContext(width: number | undefined): RenderContext {
+    return makeContext({
+      terminalWidth: width,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+  }
+
+  const projectSettings = makeSettings({
+    lines: [
+      {
+        widgets: [
+          { type: "project" },
+          { type: "custom-text", text: "Today: $2.10" },
+        ],
+        flex: "left",
+      },
+    ],
+    powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    compact: { mode: "never", threshold: 80 },
+  });
+
+  it("shrinks the project segment rather than cutting the line", () => {
+    const natural = visibleLength(
+      renderStatusline(longNameContext(undefined), projectSettings),
+    );
+    const budget = natural - 6;
+
+    const line = stripAnsi(renderStatusline(longNameContext(budget), projectSettings));
+
+    // The line fits...
+    expect(visibleLength(line)).toBeLessThanOrEqual(budget);
+    // ...the unshrinkable segment survived intact...
+    expect(line).toContain("Today: $2.10");
+    // ...and the shrunk segment carries the ellipsis, not the line's tail.
+    expect(line).toContain("…");
+    expect(line.trimEnd().endsWith("…")).toBe(false);
+  });
+
+  it("leaves everything alone when the line already fits", () => {
+    const natural = visibleLength(
+      renderStatusline(longNameContext(undefined), projectSettings),
+    );
+    const roomy = stripAnsi(renderStatusline(longNameContext(natural + 20), projectSettings));
+
+    expect(roomy).toContain("an-extremely-long-project-directory-name");
+    expect(roomy).not.toContain("…");
+  });
+
+  it("falls back to truncation when shrinking to the floor is not enough", () => {
+    const line = stripAnsi(renderStatusline(longNameContext(14), projectSettings));
+    expect(visibleLength(line)).toBeLessThanOrEqual(14);
+
+    // A budget this tight is not just "narrower than natural" — it's narrower
+    // than the shrinkable segment's floor plus the unshrinkable segment
+    // combined, so shrinking alone cannot make it fit and truncateAnsi has to
+    // cut on top of the shrink. Assert the SIGNATURE of both mechanisms
+    // firing together, not just the width bound truncateAnsi guarantees on
+    // its own (which a reverted feature satisfies trivially): two ellipses —
+    // one from the shrunk project segment, one from truncateAnsi biting into
+    // the second segment — and the powerline separator, which only survives
+    // into the output if shrinking ran first and got far enough for layout to
+    // reach the second segment at all. With shrinking disabled, the raw
+    // (~46-character) project text alone consumes the entire 14-column
+    // budget, so truncateAnsi cuts before the separator or second segment are
+    // ever reached: one ellipsis, no separator.
+    expect(line.split("…").length - 1).toBe(2);
+    expect(line).toContain("▶");
+  });
+
+  // git-branch is the other widget marked shrinkable, and unlike project it
+  // shells out to real `git` against `stdin.cwd` (src/utils/git.ts) rather
+  // than reading anything off the payload — a fixture whose `cwd` doesn't
+  // exist on disk makes it silently emit nothing, which would make this test
+  // pass vacuously no matter what `shrinkable` is set to. Build a real,
+  // throwaway git repo with a fixed, deterministic branch name so the widget
+  // genuinely executes, reusing the exact repo-construction helper
+  // `default-layout-width.test.ts` built for this same problem rather than
+  // inventing a second one.
+  const gitBranchSettings = makeSettings({
+    lines: [
+      {
+        widgets: [
+          { type: "git-branch" },
+          { type: "custom-text", text: "Today: $2.10" },
+        ],
+        flex: "left",
+      },
+    ],
+    powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    compact: { mode: "never", threshold: 80 },
+  });
+
+  function gitBranchContext(width: number | undefined, cwd: string): RenderContext {
+    return makeContext({
+      terminalWidth: width,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        cwd,
+      },
+    });
+  }
+
+  it("shrinks the git-branch segment rather than cutting the line", () => {
+    const repoDir = makeDeterministicGitRepo();
+    try {
+      const natural = visibleLength(
+        renderStatusline(gitBranchContext(undefined, repoDir), gitBranchSettings),
+      );
+      const budget = natural - 6;
+
+      const line = stripAnsi(
+        renderStatusline(gitBranchContext(budget, repoDir), gitBranchSettings),
+      );
+
+      // The line fits...
+      expect(visibleLength(line)).toBeLessThanOrEqual(budget);
+      // ...the unshrinkable segment survived intact...
+      expect(line).toContain("Today: $2.10");
+      // ...and the shrunk segment carries the ellipsis, not the line's tail.
+      expect(line).toContain("…");
+      expect(line.trimEnd().endsWith("…")).toBe(false);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The design doc's "compact mode" section says renderCompact's own logic
+// (drop-by-priority, fit measured against UNSHRUNK widths) is unchanged --
+// true. It does NOT mean shrinking is absent from compact's rendered output:
+// renderCompact's last line is `renderLine(fitted, settings, context, "left")`
+// with the real terminal width, and that is the exact same renderLine the
+// full layout uses, shrink block included. The greedy loop always keeps the
+// first widget regardless of its own width ("fitted.length > 0" gates the
+// budget check), so a long shrinkable segment can survive compaction wider
+// than the terminal and still needs shrinking on the final render. Reproduced
+// by the reviewer at width 20 with a long `project` segment.
+describe("compact mode also shrinks (renderCompact renders through the shared renderLine)", () => {
+  it("shrinks the surviving project segment instead of tail-cutting the compact line", () => {
+    const context = makeContext({
+      terminalWidth: 20,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "project", priority: 1 }], flex: "left" }],
+      compact: { mode: "always", threshold: 80 },
+      powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    });
+
+    const output = renderStatusline(context, settings);
+    expect(output.split("\n")).toHaveLength(1);
+    const plain = stripAnsi(output);
+
+    // Exact reproduction: the project text shrinks to "an-extremely-lon…"
+    // (16 chars + ellipsis) padded and followed by the powerline arrow.
+    expect(plain).toBe(" an-extremely-lon… ▶");
+
+    // CONTENT, not width: a bare tail-cut (truncateAnsi with no shrink) would
+    // end the whole line on "…" with nothing after it. Here the ellipsis
+    // sits inside the segment -- padding and the arrow follow it -- which is
+    // only possible if the segment itself was shortened before layout, not
+    // the finished line cut from the end.
+    expect(plain.trimEnd().endsWith("…")).toBe(false);
+    expect(plain).toContain("…");
+
+    // The full, unshrunk directory name must be gone -- proves real
+    // shrinking happened rather than everything coincidentally fitting.
+    expect(plain).not.toContain("an-extremely-long-project-directory-name");
   });
 });

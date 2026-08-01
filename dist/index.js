@@ -2330,7 +2330,8 @@ const gitBranchWidget = { render(context, config) {
 	return {
 		text,
 		fg: config.fg,
-		bg: config.bg
+		bg: config.bg,
+		shrinkable: true
 	};
 } };
 
@@ -2463,7 +2464,8 @@ const projectWidget = { render(context, config) {
 	return {
 		text,
 		fg: config.fg,
-		bg: config.bg
+		bg: config.bg,
+		shrinkable: true
 	};
 } };
 
@@ -3092,6 +3094,90 @@ function truncateAnsi(str, maxWidth) {
 }
 
 //#endregion
+//#region src/render/shrink.ts
+/**
+* Fewest visible columns a shrunk segment may keep, ellipsis included.
+*
+* Below roughly this width a branch name stops distinguishing one branch from
+* another, so the columns buy nothing. Deliberately not configurable: a knob
+* would need documenting, validating and testing, and nothing yet suggests
+* anyone wants to tune it.
+*/
+const MIN_SHRUNK_TEXT = 8;
+const ELLIPSIS = "…";
+/**
+* `text` reduced to at most `width` visible columns, ending in an ellipsis.
+*
+* Slices by code point: `String.prototype.slice` would cut a surrogate pair in
+* half, so a branch name containing an emoji would render as a broken glyph.
+*
+* When text contains multi-column characters (astral characters like emoji),
+* removing one code point removes multiple columns. If removing one more would
+* cross below MIN_SHRUNK_TEXT, we stop and return a result slightly wider than
+* requested rather than violating the floor — the caller's truncation is the
+* backstop. This can cause slight overshoot of the requested overflow (removing
+* 5 when 4 were asked), which is acceptable.
+*/
+function trimTo(text, width) {
+	if (visibleLength(text) <= width) return text;
+	let chars = Array.from(text);
+	while (chars.length > 0) {
+		const current = visibleLength(chars.join("") + ELLIPSIS);
+		if (current <= width) break;
+		const nextChars = chars.slice(0, -1);
+		const next = visibleLength(nextChars.join("") + ELLIPSIS);
+		if (next < MIN_SHRUNK_TEXT) break;
+		chars = nextChars;
+	}
+	return chars.join("") + ELLIPSIS;
+}
+/**
+* The same outputs with `overflow` visible columns removed from segments that
+* allow it, or as many as the floor permits.
+*
+* Trims the widest shrinkable segment first, which levels segments rather than
+* destroying one while another stays long. Callers pass the amount a line
+* exceeds the terminal by; this module knows nothing about terminals or
+* rendering. Never mutates its argument.
+*/
+function shrinkOutputs(outputs, overflow) {
+	if (overflow <= 0) return outputs;
+	const result = outputs.map((output) => ({ ...output }));
+	let remaining = overflow;
+	const stuck = new Set();
+	while (remaining > 0) {
+		let widest = -1;
+		let widestWidth = 0;
+		for (let i = 0; i < result.length; i++) {
+			if (stuck.has(i)) continue;
+			const output = result[i];
+			if (!output.shrinkable) continue;
+			const width = visibleLength(output.text);
+			if (width > MIN_SHRUNK_TEXT && width > widestWidth) {
+				widest = i;
+				widestWidth = width;
+			}
+		}
+		if (widest === -1) break;
+		const runnerUp = Math.max(MIN_SHRUNK_TEXT, ...result.filter((o, i) => o.shrinkable && i !== widest && !stuck.has(i)).map((o) => visibleLength(o.text)));
+		const target = Math.max(MIN_SHRUNK_TEXT, runnerUp, widestWidth - remaining);
+		const capped = Math.min(target, widestWidth - 1);
+		const trimmed = trimTo(result[widest].text, capped);
+		const trimmedWidth = visibleLength(trimmed);
+		if (trimmedWidth >= widestWidth) {
+			stuck.add(widest);
+			continue;
+		}
+		remaining -= widestWidth - trimmedWidth;
+		result[widest] = {
+			...result[widest],
+			text: trimmed
+		};
+	}
+	return result;
+}
+
+//#endregion
 //#region src/render/renderer.ts
 function shouldCompact(settings, terminalWidth) {
 	const compact = settings.compact;
@@ -3120,16 +3206,21 @@ function collectWidgets(configs, context) {
 function renderLine(outputs, settings, context, flex) {
 	const powerline = settings.powerline;
 	const isPowerline = powerline?.enabled ?? false;
+	let laidOut = outputs;
+	if (context.terminalWidth !== void 0) {
+		const natural = measureLine(outputs, settings, context);
+		if (natural > context.terminalWidth) laidOut = shrinkOutputs(outputs, natural - context.terminalWidth);
+	}
 	let line;
 	if (isPowerline && powerline) {
-		const nonSeparator = outputs.filter((o) => o.text !== " | " && o.text.trim() !== "|");
+		const nonSeparator = laidOut.filter((o) => o.text !== " | " && o.text.trim() !== "|");
 		line = renderPowerlineSegments(nonSeparator, {
 			theme: powerline.theme ?? "default",
 			separator: powerline.separator ?? "",
 			separatorThin: powerline.separatorThin ?? "│"
 		});
 	} else {
-		const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));
+		const segments = laidOut.map((o) => colorize(o.text, o.fg, o.bg));
 		line = applyFlex(segments, context.terminalWidth, flex);
 	}
 	return truncateAnsi(line, context.terminalWidth);
