@@ -6,6 +6,7 @@ import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
 import { colorDistance } from "../render/color-compare.js";
 import { SettingsSchema } from "../config/schema.js";
 import { isValidColor } from "../render/colors.js";
+import { RUNTIME_ALERT_BACKGROUNDS } from "../widgets/alert-colors.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -254,7 +255,7 @@ describe("project segment palette", () => {
   // Backgrounds set at render time from thresholds, which never appear in
   // DEFAULT_SETTINGS: context-percent/session-cost/today-spend alerts,
   // compact-countdown's own palette, and vim-mode's per-mode colors.
-  const RUNTIME_BACKGROUNDS = ["#a67c00", "#c01c28", "#b8860b", "#a01822", "#2ec27e", "#e5a50a"];
+  const RUNTIME_BACKGROUNDS = RUNTIME_ALERT_BACKGROUNDS;
 
   const configured = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
   const project = configured.find((w) => w.type === "project");

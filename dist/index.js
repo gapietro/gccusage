@@ -2032,10 +2032,31 @@ const modelWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/alert-colors.ts
+/**
+* The set of backgrounds widgets can paint at render time from thresholds,
+* rather than from configured colors — so they never appear in
+* DEFAULT_SETTINGS and a static scan of the config misses them entirely.
+*
+* These six colours are not six independent choices: each is required to
+* stay CIEDE2000-distinct from every other one a segment could end up
+* adjacent to (issues #36, #40, #45). Keeping them in one module, rather
+* than scattered across the widgets that use them, is what lets that
+* mutual-distinctness constraint be checked in one place instead of via
+* cross-referencing comments that can drift out of sync.
+*/
+const ALERT_AMBER = "#a67c00";
+const ALERT_RED = "#c01c28";
+const COMPACT_COUNTDOWN_AMBER = "#b8860b";
+const COMPACT_COUNTDOWN_RED = "#a01822";
+const VIM_NORMAL = "#2ec27e";
+const VIM_INSERT = "#e5a50a";
+
+//#endregion
 //#region src/widgets/session-cost.ts
 function alertBg$1(cost, warn, danger, configBg) {
-	if (cost >= danger) return "#c01c28";
-	if (cost >= warn) return "#a67c00";
+	if (cost >= danger) return ALERT_RED;
+	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
 const sessionCostWidget = { render(context, config) {
@@ -2053,8 +2074,8 @@ const sessionCostWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/today-spend.ts
 function alertBg(cost, warn, danger, configBg) {
-	if (cost >= danger) return "#c01c28";
-	if (cost >= warn) return "#a67c00";
+	if (cost >= danger) return ALERT_RED;
+	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
 const todaySpendWidget = { render(context, config) {
@@ -2208,12 +2229,12 @@ function buildBar(ratio) {
 function thresholdBg(usage, configBg) {
 	const remaining = usage.usedTokens !== null && usage.windowSize !== null ? tokensUntilCompact(usage.usedTokens, usage.windowSize) : null;
 	if (remaining !== null) {
-		if (remaining <= RED_TOKENS) return "#c01c28";
-		if (remaining <= AMBER_TOKENS) return "#a67c00";
+		if (remaining <= RED_TOKENS) return ALERT_RED;
+		if (remaining <= AMBER_TOKENS) return ALERT_AMBER;
 		return configBg;
 	}
-	if (usage.ratio >= THRESHOLD_DANGER) return "#c01c28";
-	if (usage.ratio >= THRESHOLD_WARN) return "#a67c00";
+	if (usage.ratio >= THRESHOLD_DANGER) return ALERT_RED;
+	if (usage.ratio >= THRESHOLD_WARN) return ALERT_AMBER;
 	return configBg;
 }
 const contextPercentWidget = { render(context, config) {
@@ -2544,8 +2565,8 @@ const linesChangedWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/vim-mode.ts
 const MODE_COLORS = {
-	NORMAL: "#2ec27e",
-	INSERT: "#e5a50a"
+	NORMAL: VIM_NORMAL,
+	INSERT: VIM_INSERT
 };
 const vimModeWidget = { render(context, config) {
 	const mode = context.stdin.vim?.mode;
@@ -2614,11 +2635,11 @@ const compactCountdownWidget = { render(context, config) {
 	if (remaining <= 0) return {
 		text: "Compact imminent!",
 		fg: "#ffffff",
-		bg: "#a01822"
+		bg: COMPACT_COUNTDOWN_RED
 	};
 	let bg = config.bg;
-	if (remaining <= RED_TOKENS) bg = "#a01822";
-	else if (remaining <= AMBER_TOKENS) bg = "#b8860b";
+	if (remaining <= RED_TOKENS) bg = COMPACT_COUNTDOWN_RED;
+	else if (remaining <= AMBER_TOKENS) bg = COMPACT_COUNTDOWN_AMBER;
 	return {
 		text: `~${formatTokens(remaining)} left`,
 		fg: config.fg,

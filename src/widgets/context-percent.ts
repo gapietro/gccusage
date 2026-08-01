@@ -5,6 +5,7 @@ import { formatPercent, formatTokens } from "../utils/format.js";
 import type { ContextUsage } from "../utils/context-usage.js";
 import { deriveContextUsage } from "../utils/context-usage.js";
 import { tokensUntilCompact, AMBER_TOKENS, RED_TOKENS } from "../utils/autocompact.js";
+import { ALERT_AMBER, ALERT_RED } from "./alert-colors.js";
 
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = 0.7;
@@ -30,13 +31,13 @@ function thresholdBg(usage: ContextUsage, configBg?: string): string | undefined
       : null;
 
   if (remaining !== null) {
-    if (remaining <= RED_TOKENS) return "#c01c28"; // red
-    if (remaining <= AMBER_TOKENS) return "#a67c00"; // yellow
+    if (remaining <= RED_TOKENS) return ALERT_RED;
+    if (remaining <= AMBER_TOKENS) return ALERT_AMBER;
     return configBg;
   }
 
-  if (usage.ratio >= THRESHOLD_DANGER) return "#c01c28"; // red
-  if (usage.ratio >= THRESHOLD_WARN) return "#a67c00"; // yellow
+  if (usage.ratio >= THRESHOLD_DANGER) return ALERT_RED;
+  if (usage.ratio >= THRESHOLD_WARN) return ALERT_AMBER;
   return configBg;
 }
 
