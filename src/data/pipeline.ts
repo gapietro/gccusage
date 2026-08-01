@@ -20,23 +20,13 @@ function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
   const durationMs = stdin.cost?.total_duration_ms;
   if (!durationMs || durationMs < 10000) return null;
 
-  const cw = stdin.context_window;
-  if (typeof cw !== "object" || !cw) return null;
-
-  const totalTokens = (cw.total_input_tokens ?? 0) + (cw.total_output_tokens ?? 0);
-  if (totalTokens === 0) return null;
+  const costUsd = stdin.cost?.total_cost_usd;
+  if (costUsd === undefined) return null;
 
   const elapsedMinutes = durationMs / 60000;
-  const tokensPerMinute = totalTokens / elapsedMinutes;
-
-  const costUsd = stdin.cost?.total_cost_usd ?? 0;
   const costPerMinute = costUsd / elapsedMinutes;
 
-  return {
-    tokensPerMinute,
-    costPerHour: costPerMinute * 60,
-    costPerMinute,
-  };
+  return { costPerHour: costPerMinute * 60, costPerMinute };
 }
 
 export async function buildRenderContext(
@@ -96,12 +86,18 @@ export async function buildRenderContext(
   // Block detection
   const block = detectBlock(sessionStartTime);
 
-  // Burn rate: prefer stdin data (always available), fall back to JSONL calculation
+  // Burn rate must come from the same cost source as the session total, or the
+  // bar shows two cost scales side by side — a stdin-priced rate beside a
+  // JSONL-priced total. `sessionCostSource` already encodes both the user's
+  // `costSource` setting and the stdin-missing fallback, so reuse it rather
+  // than re-deriving the decision. Mixing sources is what produced the
+  // today-spend inflation in PR #34.
   const modelId = typeof stdin.model === "string"
     ? stdin.model
     : stdin.model?.id;
-  const burnRate = getStdinBurnRate(stdin)
-    ?? calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const burnRate =
+    sessionCostSource === "stdin" ? (getStdinBurnRate(stdin) ?? jsonlBurnRate) : jsonlBurnRate;
 
   return {
     stdin,

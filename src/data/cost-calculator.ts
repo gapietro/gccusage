@@ -63,26 +63,19 @@ export function calculateBurnRate(
   if (elapsedMs < 10000) return null; // need at least 10s of data
 
   const elapsedMinutes = elapsedMs / 60000;
-  const totalTokens =
-    sessionMetrics.inputTokens +
-    sessionMetrics.outputTokens +
-    sessionMetrics.cacheCreationTokens +
-    sessionMetrics.cacheReadTokens;
 
-  const tokensPerMinute = totalTokens / elapsedMinutes;
+  // Without pricing there is no cost rate to report. Returning zero here
+  // would render a confident "$0.00/hr" next to real token usage, so the
+  // segment is dropped instead — the same stance getStdinBurnRate takes when
+  // stdin carries no cost.
+  if (!sessionModel) return null;
+  const modelPricing = findPricing(sessionModel, pricing);
+  if (!modelPricing) return null;
 
-  // Estimate cost rate
-  let costPerMinute = 0;
-  if (sessionModel) {
-    const modelPricing = findPricing(sessionModel, pricing);
-    if (modelPricing) {
-      const sessionCost = calculateCost(sessionMetrics, modelPricing);
-      costPerMinute = sessionCost / elapsedMinutes;
-    }
-  }
+  const sessionCost = calculateCost(sessionMetrics, modelPricing);
+  const costPerMinute = sessionCost / elapsedMinutes;
 
   return {
-    tokensPerMinute,
     costPerHour: costPerMinute * 60,
     costPerMinute,
   };

@@ -3,7 +3,7 @@
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
 
 ```
- Opus 4.6 ▶ $14.21 ▶ [========--] 82% (200.0k) ▶ ~3.0k left ▶ 11.6k tok/m ▶
+ Opus 4.6 ▶ $14.21 ▶ [========--] 82% (200.0k) ▶ ~3.0k left ▶ $4.20/hr ▶
  main ▶ +2 ~5 -1 ▶ +307 -43 ▶ Today: $14.50 ▶
 ```
 
@@ -161,7 +161,7 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `session-cost` | Session cost in USD (color alerts at thresholds) |
 | `today-spend` | Total daily cost across all sessions |
 | `context-percent` | Context window usage with progress bar |
-| `burn-rate` | Token consumption rate (tok/min) |
+| `burn-rate` | Session spend rate in USD/hour |
 | `cache-hit-rate` | Prompt cache hit percentage |
 | `token-breakdown` | Input vs output token counts |
 | `compact-countdown` | Tokens remaining before auto-compact ([see note](#about-the-auto-compact-countdown)) |
