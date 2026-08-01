@@ -1793,7 +1793,7 @@ This task has no failing-test cycle — the deliverable is a written document. I
 - [ ] **Step 1: Capture the analysis output**
 
 ```bash
-SCRATCH=/private/tmp/claude-501/-Users-gpietro-projects-gccusage/0937061d-2750-4dad-abbf-0a4ebf9f85c1/scratchpad
+SCRATCH=<scratchpad>  # your session scratchpad dir; do not commit the real path
 npm run analyze > "$SCRATCH/analysis.md"
 npm run analyze -- --json > "$SCRATCH/analysis.json"
 wc -l "$SCRATCH/analysis.md" "$SCRATCH/analysis.json"

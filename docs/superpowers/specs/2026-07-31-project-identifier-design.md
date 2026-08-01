@@ -15,7 +15,7 @@ wrong source. The #47 reality harness captured a real Claude Code 2.1.220 payloa
 `cwd` was:
 
 ```
-/Users/gpietro/projects/gccusage/src/widgets
+/Users/x/projects/gccusage/src/widgets
 ```
 
 `basename()` of that is `widgets` — not `gccusage`. `stdin.cwd` is wherever the shell
@@ -57,10 +57,10 @@ Widget #26. Reads `workspace.project_dir`, never `cwd`.
 
 | `workspace.project_dir` | renders |
 |---|---|
-| `/Users/gpietro/projects/gccusage` | `gccusage` |
-| `/Users/gpietro/projects/gccusage` while `cwd` is `.../gccusage/src/widgets` | `gccusage` |
-| `/Users/gpietro/projects/gccusage/` (trailing slash) | `gccusage` |
-| `/Users/gpietro` (equals `$HOME`) | `~` |
+| `/Users/x/projects/gccusage` | `gccusage` |
+| `/Users/x/projects/gccusage` while `cwd` is `.../gccusage/src/widgets` | `gccusage` |
+| `/Users/x/projects/gccusage/` (trailing slash) | `gccusage` |
+| `/Users/x` (equals `$HOME`) | `~` |
 | `/` | `/` |
 | absent, or empty string | `null` — the segment disappears |
 
