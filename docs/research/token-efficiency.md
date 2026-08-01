@@ -380,7 +380,7 @@ The figures marked † are computed from the `sessions` array in the `--json` ou
 same Pearson correlation the script applies to its own signal table:
 
 ```bash
-npm run analyze -- --json > /tmp/analysis.json
+npm run --silent analyze -- --json > /tmp/analysis.json
 node -e '
 const S = require("/tmp/analysis.json").sessions;
 const f = k => S.map(s => s[k]);
