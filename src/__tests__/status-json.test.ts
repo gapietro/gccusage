@@ -18,8 +18,9 @@ describe("StatusJsonSchema workspace", () => {
 
   it("pins #59: cwd is a subdirectory of project_dir in this payload", () => {
     const parsed = v.parse(StatusJsonSchema, fx.stdin);
-    expect(parsed.cwd).toBe(`${fx.homePlaceholder}/projects/demo-project/src/widgets`);
-    expect(parsed.workspace?.project_dir).not.toBe(parsed.cwd);
+    const projectDir = parsed.workspace?.project_dir;
+    expect(projectDir).toBe(`${fx.homePlaceholder}/projects/demo-project`);
+    expect(parsed.cwd).toBe(`${projectDir}/src/widgets`);
   });
 
   it("still accepts a payload with no workspace at all", () => {
