@@ -63,13 +63,6 @@ export function calculateBurnRate(
   if (elapsedMs < 10000) return null; // need at least 10s of data
 
   const elapsedMinutes = elapsedMs / 60000;
-  const totalTokens =
-    sessionMetrics.inputTokens +
-    sessionMetrics.outputTokens +
-    sessionMetrics.cacheCreationTokens +
-    sessionMetrics.cacheReadTokens;
-
-  const tokensPerMinute = totalTokens / elapsedMinutes;
 
   // Estimate cost rate
   let costPerMinute = 0;
@@ -82,7 +75,6 @@ export function calculateBurnRate(
   }
 
   return {
-    tokensPerMinute,
     costPerHour: costPerMinute * 60,
     costPerMinute,
   };

@@ -1740,8 +1740,6 @@ function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionMod
 	const elapsedMs = Date.now() - sessionStartTime;
 	if (elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
-	const totalTokens = sessionMetrics.inputTokens + sessionMetrics.outputTokens + sessionMetrics.cacheCreationTokens + sessionMetrics.cacheReadTokens;
-	const tokensPerMinute = totalTokens / elapsedMinutes;
 	let costPerMinute = 0;
 	if (sessionModel) {
 		const modelPricing = findPricing(sessionModel, pricing);
@@ -1751,7 +1749,6 @@ function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionMod
 		}
 	}
 	return {
-		tokensPerMinute,
 		costPerHour: costPerMinute * 60,
 		costPerMinute
 	};
@@ -1878,16 +1875,11 @@ function trackTurn(sessionId) {
 function getStdinBurnRate(stdin) {
 	const durationMs = stdin.cost?.total_duration_ms;
 	if (!durationMs || durationMs < 1e4) return null;
-	const cw = stdin.context_window;
-	if (typeof cw !== "object" || !cw) return null;
-	const totalTokens = (cw.total_input_tokens ?? 0) + (cw.total_output_tokens ?? 0);
-	if (totalTokens === 0) return null;
+	const costUsd = stdin.cost?.total_cost_usd;
+	if (costUsd === void 0) return null;
 	const elapsedMinutes = durationMs / 6e4;
-	const tokensPerMinute = totalTokens / elapsedMinutes;
-	const costUsd = stdin.cost?.total_cost_usd ?? 0;
 	const costPerMinute = costUsd / elapsedMinutes;
 	return {
-		tokensPerMinute,
 		costPerHour: costPerMinute * 60,
 		costPerMinute
 	};
@@ -1973,10 +1965,15 @@ function formatModelName(model) {
 	}
 	return model;
 }
-function formatTokensPerMinute(tokPerMin) {
-	if (tokPerMin < 1) return "0 tok/m";
-	if (tokPerMin < 1e3) return `${tokPerMin.toFixed(1)} tok/m`;
-	return `${(tokPerMin / 1e3).toFixed(1)}k tok/m`;
+/**
+* Spend rate for the status bar. Mirrors formatDollars' thresholds so a rate
+* and a total read consistently beside each other, and drops the cents above
+* $100/hr because bar width is scarcer than that precision is useful.
+*/
+function formatCostPerHour(costPerHour) {
+	if (costPerHour < .01) return "$0.00/hr";
+	if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
+	return `$${costPerHour.toFixed(0)}/hr`;
 }
 
 //#endregion
@@ -2055,7 +2052,8 @@ const blockTimerWidget = { render(context, config) {
 const burnRateWidget = { render(context, config) {
 	if (!context.burnRate) return null;
 	const label = config.label ?? "";
-	const text = label ? `${label} ${formatTokensPerMinute(context.burnRate.tokensPerMinute)}` : formatTokensPerMinute(context.burnRate.tokensPerMinute);
+	const rate = formatCostPerHour(context.burnRate.costPerHour);
+	const text = label ? `${label} ${rate}` : rate;
 	return {
 		text,
 		fg: config.fg,

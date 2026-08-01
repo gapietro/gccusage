@@ -20,23 +20,13 @@ function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
   const durationMs = stdin.cost?.total_duration_ms;
   if (!durationMs || durationMs < 10000) return null;
 
-  const cw = stdin.context_window;
-  if (typeof cw !== "object" || !cw) return null;
-
-  const totalTokens = (cw.total_input_tokens ?? 0) + (cw.total_output_tokens ?? 0);
-  if (totalTokens === 0) return null;
+  const costUsd = stdin.cost?.total_cost_usd;
+  if (costUsd === undefined) return null;
 
   const elapsedMinutes = durationMs / 60000;
-  const tokensPerMinute = totalTokens / elapsedMinutes;
-
-  const costUsd = stdin.cost?.total_cost_usd ?? 0;
   const costPerMinute = costUsd / elapsedMinutes;
 
-  return {
-    tokensPerMinute,
-    costPerHour: costPerMinute * 60,
-    costPerMinute,
-  };
+  return { costPerHour: costPerMinute * 60, costPerMinute };
 }
 
 export async function buildRenderContext(

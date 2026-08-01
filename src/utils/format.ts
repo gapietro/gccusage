@@ -44,8 +44,13 @@ export function formatModelName(model: string): string {
   return model;
 }
 
-export function formatTokensPerMinute(tokPerMin: number): string {
-  if (tokPerMin < 1) return "0 tok/m";
-  if (tokPerMin < 1000) return `${tokPerMin.toFixed(1)} tok/m`;
-  return `${(tokPerMin / 1000).toFixed(1)}k tok/m`;
+/**
+ * Spend rate for the status bar. Mirrors formatDollars' thresholds so a rate
+ * and a total read consistently beside each other, and drops the cents above
+ * $100/hr because bar width is scarcer than that precision is useful.
+ */
+export function formatCostPerHour(costPerHour: number): string {
+  if (costPerHour < 0.01) return "$0.00/hr";
+  if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
+  return `$${costPerHour.toFixed(0)}/hr`;
 }

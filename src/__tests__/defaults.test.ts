@@ -106,7 +106,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
       },
       block: null,
-      burnRate: { tokensPerMinute: 500, costPerHour: 1, costPerMinute: 0.02 },
+      burnRate: { costPerHour: 1, costPerMinute: 0.02 },
       pricing: {},
       sessionCostUsd: point.session,
       todayCostUsd: point.today,

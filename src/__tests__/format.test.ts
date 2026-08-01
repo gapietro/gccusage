@@ -5,7 +5,7 @@ import {
   formatDuration,
   formatPercent,
   formatModelName,
-  formatTokensPerMinute,
+  formatCostPerHour,
 } from "../utils/format.js";
 
 describe("formatDollars", () => {
@@ -90,12 +90,20 @@ describe("formatModelName", () => {
   });
 });
 
-describe("formatTokensPerMinute", () => {
-  it("formats low rate", () => {
-    expect(formatTokensPerMinute(12.3)).toBe("12.3 tok/m");
+describe("formatCostPerHour", () => {
+  it("formats a sub-cent rate as zero rather than a misleading fraction", () => {
+    expect(formatCostPerHour(0.004)).toBe("$0.00/hr");
   });
 
-  it("formats high rate", () => {
-    expect(formatTokensPerMinute(1500)).toBe("1.5k tok/m");
+  it("formats a rate under a dollar to cents", () => {
+    expect(formatCostPerHour(0.42)).toBe("$0.42/hr");
+  });
+
+  it("formats a typical rate to cents", () => {
+    expect(formatCostPerHour(4.2)).toBe("$4.20/hr");
+  });
+
+  it("drops the cents on large rates to save bar width", () => {
+    expect(formatCostPerHour(120.5)).toBe("$121/hr");
   });
 });
