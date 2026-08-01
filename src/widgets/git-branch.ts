@@ -12,6 +12,6 @@ export const gitBranchWidget: Widget = {
     const label = config.label ?? "";
     const prefix = [icon, label].filter(Boolean).join(" ");
     const text = prefix ? `${prefix} ${branch}` : branch;
-    return { text, fg: config.fg, bg: config.bg };
+    return { text, fg: config.fg, bg: config.bg, shrinkable: true };
   },
 };

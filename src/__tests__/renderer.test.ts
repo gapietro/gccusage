@@ -716,4 +716,108 @@ describe("renderLine at unknown terminal width neither pads nor truncates", () =
     expect(plain).not.toContain("…");
     expect(plain.endsWith(" ")).toBe(false);
   });
+
+  it("does not shrink either — measureLine depends on this", () => {
+    const context = makeContext({
+      terminalWidth: undefined,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "project" }], flex: "left" }],
+      powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+      compact: { mode: "never", threshold: 80 },
+    });
+
+    const line = stripAnsi(renderStatusline(context, settings));
+    expect(line).toContain("an-extremely-long-project-directory-name");
+    expect(line).not.toContain("…");
+  });
+});
+
+describe("long segments shrink to fit instead of truncating the line", () => {
+  const LONG_BRANCH = "feature/an-extremely-long-branch-name-goes-here";
+
+  function settingsWith(powerlineOn: boolean): Settings {
+    return makeSettings({
+      lines: [
+        {
+          widgets: [
+            { type: "custom-text", text: "Today: $2.10" },
+            { type: "custom-text", text: LONG_BRANCH },
+          ],
+          flex: "left",
+        },
+      ],
+      powerline: {
+        enabled: powerlineOn,
+        theme: "default",
+        separator: "▶",
+        separatorThin: "│",
+      },
+      compact: { mode: "never", threshold: 80 },
+    });
+  }
+
+  // custom-text is not shrinkable, so drive the shrink path through the real
+  // widgets instead: a context whose project_dir and cwd produce long names.
+  function longNameContext(width: number | undefined): RenderContext {
+    return makeContext({
+      terminalWidth: width,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+  }
+
+  const projectSettings = makeSettings({
+    lines: [
+      {
+        widgets: [
+          { type: "project" },
+          { type: "custom-text", text: "Today: $2.10" },
+        ],
+        flex: "left",
+      },
+    ],
+    powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    compact: { mode: "never", threshold: 80 },
+  });
+
+  it("shrinks the project segment rather than cutting the line", () => {
+    const natural = visibleLength(
+      renderStatusline(longNameContext(undefined), projectSettings),
+    );
+    const budget = natural - 6;
+
+    const line = stripAnsi(renderStatusline(longNameContext(budget), projectSettings));
+
+    // The line fits...
+    expect(visibleLength(line)).toBeLessThanOrEqual(budget);
+    // ...the unshrinkable segment survived intact...
+    expect(line).toContain("Today: $2.10");
+    // ...and the shrunk segment carries the ellipsis, not the line's tail.
+    expect(line).toContain("…");
+    expect(line.trimEnd().endsWith("…")).toBe(false);
+  });
+
+  it("leaves everything alone when the line already fits", () => {
+    const natural = visibleLength(
+      renderStatusline(longNameContext(undefined), projectSettings),
+    );
+    const roomy = stripAnsi(renderStatusline(longNameContext(natural + 20), projectSettings));
+
+    expect(roomy).toContain("an-extremely-long-project-directory-name");
+    expect(roomy).not.toContain("…");
+  });
+
+  it("falls back to truncation when shrinking to the floor is not enough", () => {
+    const line = stripAnsi(renderStatusline(longNameContext(14), projectSettings));
+    expect(visibleLength(line)).toBeLessThanOrEqual(14);
+  });
 });

@@ -7,6 +7,7 @@ import { renderPowerlineSegments } from "./powerline.js";
 import { applyFlex, type FlexMode } from "./flex.js";
 import { truncateAnsi } from "./truncation.js";
 import { visibleLength } from "../utils/terminal.js";
+import { shrinkOutputs } from "./shrink.js";
 
 interface WidgetResult {
   output: WidgetOutput;
@@ -49,9 +50,25 @@ function renderLine(
   const powerline = settings.powerline;
   const isPowerline = powerline?.enabled ?? false;
 
+  // Shrink over-long segments before laying out, so a long branch name costs
+  // its own tail rather than the tail of the whole line.
+  //
+  // The width check MUST come before the measureLine call: measureLine renders
+  // through this same function with terminalWidth undefined, so an
+  // unconditional call here would recurse forever. Unknown width means "leave
+  // the output alone", the same rule applyFlex and truncateAnsi follow \u2014 which
+  // is exactly what makes measureLine's result a true natural width.
+  let laidOut = outputs;
+  if (context.terminalWidth !== undefined) {
+    const natural = measureLine(outputs, settings, context);
+    if (natural > context.terminalWidth) {
+      laidOut = shrinkOutputs(outputs, natural - context.terminalWidth);
+    }
+  }
+
   let line: string;
   if (isPowerline && powerline) {
-    const nonSeparator = outputs.filter(
+    const nonSeparator = laidOut.filter(
       (o) => o.text !== " | " && o.text.trim() !== "|",
     );
     line = renderPowerlineSegments(nonSeparator, {
@@ -60,7 +77,7 @@ function renderLine(
       separatorThin: powerline.separatorThin ?? "\u2502",
     });
   } else {
-    const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));
+    const segments = laidOut.map((o) => colorize(o.text, o.fg, o.bg));
     line = applyFlex(segments, context.terminalWidth, flex);
   }
 

@@ -30,6 +30,6 @@ export const projectWidget: Widget = {
 
     const label = config.label ?? "";
     const text = label ? `${label} ${name}` : name;
-    return { text, fg: config.fg, bg: config.bg };
+    return { text, fg: config.fg, bg: config.bg, shrinkable: true };
   },
 };
