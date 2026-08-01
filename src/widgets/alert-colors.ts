@@ -46,4 +46,4 @@ export const RUNTIME_ALERT_BACKGROUNDS = [
   COMPACT_COUNTDOWN_RED,
   VIM_NORMAL,
   VIM_INSERT,
-];
+] as const;

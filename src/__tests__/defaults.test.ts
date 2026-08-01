@@ -252,11 +252,6 @@ describe("project segment palette", () => {
   // and renderCompact flattens both lines before sorting by priority, so it
   // can sit beside any other segment — check against all of them.
 
-  // Backgrounds set at render time from thresholds, which never appear in
-  // DEFAULT_SETTINGS: context-percent/session-cost/today-spend alerts,
-  // compact-countdown's own palette, and vim-mode's per-mode colors.
-  const RUNTIME_BACKGROUNDS = RUNTIME_ALERT_BACKGROUNDS;
-
   const configured = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
   const project = configured.find((w) => w.type === "project");
 
@@ -267,7 +262,7 @@ describe("project segment palette", () => {
   it("clears the separator floor against every background the bar can paint", () => {
     const others = [
       ...configured.filter((w) => w.type !== "project" && w.bg !== undefined).map((w) => [w.type, w.bg!] as const),
-      ...RUNTIME_BACKGROUNDS.map((bg) => [`runtime ${bg}`, bg] as const),
+      ...RUNTIME_ALERT_BACKGROUNDS.map((bg) => [`runtime ${bg}`, bg] as const),
     ];
     for (const [type, bg] of others) {
       const distance = colorDistance(project!.bg!, bg);

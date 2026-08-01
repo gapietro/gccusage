@@ -139,3 +139,20 @@ describe.each([
     }
   });
 });
+
+// The primary matrix above can't catch project.ts regressing to stdin.cwd
+// (#59): opus5-1m-mid has cwd === project_dir, so "demo-project" comes out
+// either way. opus5-1m-early is the only fixture where they diverge — its
+// cwd is a subdirectory of the repo root — so it's the only payload that can
+// actually distinguish "read project_dir" from "read cwd". Asserting on
+// cwd's own text too is what makes this non-vacuous: it proves the two
+// widgets genuinely disagree on this payload, rather than both happening to
+// render the same string. Neither widget is time-dependent, but this reads
+// after the describe.each block above, which leaves opus5-1m-early's clock
+// active for its own tests and restores the primary clock in its afterAll —
+// so system time here is back to the primary fixture regardless.
+it("renders the repo root, not the session's subdirectory cwd (#59)", () => {
+  const ctx = contextFromFixture(earlyFixture as unknown as RealPayloadFixture, tmpHome);
+  expect(getWidget("project")!.render(ctx, { type: "project" } as never)!.text).toBe("demo-project");
+  expect(getWidget("cwd")!.render(ctx, { type: "cwd" } as never)!.text).toBe("~/projects/demo-project/src/widgets");
+});
