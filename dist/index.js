@@ -17,6 +17,7 @@ import * as path$1 from "node:path";
 import * as path from "node:path";
 import { dirname, resolve } from "node:path";
 import process$1 from "node:process";
+import * as os$1 from "node:os";
 import os, { homedir } from "node:os";
 import tty from "node:tty";
 import { execSync } from "node:child_process";
@@ -1369,9 +1370,17 @@ function formatConfigError(error, configPath) {
 
 //#endregion
 //#region src/utils/paths.ts
+function getHomeDir() {
+	const home = os$1.homedir();
+	if (path$5.isAbsolute(home)) return home;
+	try {
+		const fromPasswd = os$1.userInfo().homedir;
+		if (path$5.isAbsolute(fromPasswd)) return fromPasswd;
+	} catch {}
+	return os$1.tmpdir();
+}
 function getClaudeDataDir() {
-	const home = process.env["HOME"] || "~";
-	return path$5.join(home, ".claude");
+	return path$5.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
 	return path$5.join(getClaudeDataDir(), "projects");
@@ -1379,7 +1388,7 @@ function getProjectsDir() {
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
 	if (xdg) return path$5.join(xdg, "gccusage");
-	return path$5.join(process.env["HOME"] || "~", ".cache", "gccusage");
+	return path$5.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
 	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });

@@ -28,9 +28,24 @@ export function projectLabel(index: number): string {
  * `USERPROFILE` is set, and an unset or empty `HOME` made `path.join` return
  * a *relative* `.claude/projects`, which then resolved against the current
  * working directory and quietly produced an all-zero report.
+ *
+ * `os.homedir()` closes the unset case but not the empty one — it returns `""`
+ * verbatim when `HOME` is set-but-empty — so the passwd entry backs it up.
  */
 export function defaultProjectsDir(): string {
-  return path.join(os.homedir(), ".claude", "projects");
+  return path.join(homeDir(), ".claude", "projects");
+}
+
+function homeDir(): string {
+  const home = os.homedir();
+  if (path.isAbsolute(home)) return home;
+  try {
+    const fromPasswd = os.userInfo().homedir;
+    if (path.isAbsolute(fromPasswd)) return fromPasswd;
+  } catch {
+    // No passwd entry (some containers); fall through.
+  }
+  return os.tmpdir();
 }
 
 function listDir(dir: string): fs.Dirent[] {

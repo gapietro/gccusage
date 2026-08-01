@@ -2,16 +2,37 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { discoverSessions, projectLabel } from "../lib/discover.ts";
+import { defaultProjectsDir, discoverSessions, projectLabel } from "../lib/discover.ts";
 
 let root: string;
+let originalHome: string | undefined;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-discover-"));
+  originalHome = process.env["HOME"];
 });
 
 afterEach(() => {
+  if (originalHome === undefined) delete process.env["HOME"];
+  else process.env["HOME"] = originalHome;
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe("defaultProjectsDir", () => {
+  it("uses HOME when it is set", () => {
+    process.env["HOME"] = root;
+    expect(defaultProjectsDir()).toBe(path.join(root, ".claude", "projects"));
+  });
+
+  it("stays absolute when HOME is unset", () => {
+    delete process.env["HOME"];
+    expect(path.isAbsolute(defaultProjectsDir())).toBe(true);
+  });
+
+  it("stays absolute when HOME is empty", () => {
+    process.env["HOME"] = "";
+    expect(path.isAbsolute(defaultProjectsDir())).toBe(true);
+  });
 });
 
 function write(relativePath: string, content = "{}\n"): void {
