@@ -140,7 +140,11 @@ is drawn in the previous segment's text color instead.
 
 ### Compact mode
 
-Automatically collapses to a single line on narrow terminals:
+Collapses both lines into a single line when the terminal is narrower than
+`threshold` columns (default 80), keeping segments in `priority` order —
+lower numbers survive. The terminal width comes from the `COLUMNS` variable
+Claude Code sets when it runs the statusline; if it is unavailable, `auto`
+never collapses the bar.
 
 ```json
 {
