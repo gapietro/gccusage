@@ -86,12 +86,18 @@ export async function buildRenderContext(
   // Block detection
   const block = detectBlock(sessionStartTime);
 
-  // Burn rate: prefer stdin data (always available), fall back to JSONL calculation
+  // Burn rate must come from the same cost source as the session total, or the
+  // bar shows two cost scales side by side — a stdin-priced rate beside a
+  // JSONL-priced total. `sessionCostSource` already encodes both the user's
+  // `costSource` setting and the stdin-missing fallback, so reuse it rather
+  // than re-deriving the decision. Mixing sources is what produced the
+  // today-spend inflation in PR #34.
   const modelId = typeof stdin.model === "string"
     ? stdin.model
     : stdin.model?.id;
-  const burnRate = getStdinBurnRate(stdin)
-    ?? calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const burnRate =
+    sessionCostSource === "stdin" ? (getStdinBurnRate(stdin) ?? jsonlBurnRate) : jsonlBurnRate;
 
   return {
     stdin,

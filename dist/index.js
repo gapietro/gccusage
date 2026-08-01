@@ -1925,7 +1925,8 @@ async function buildRenderContext(stdin, settings) {
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const burnRate = getStdinBurnRate(stdin) ?? calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+	const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+	const burnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) ?? jsonlBurnRate : jsonlBurnRate;
 	return {
 		stdin,
 		metrics,

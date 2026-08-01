@@ -235,3 +235,59 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
     });
   });
 });
+
+/**
+ * One priced response, started an hour ago, so the JSONL burn-rate producer
+ * clears its 10-second floor and yields a real rate. 1,000,000 input tokens at
+ * $1/1M is $1.00 over ~1 hour, which is far enough from the stdin rate these
+ * tests supply ($999/hr) that the two sources cannot be confused.
+ */
+function writeBackdatedTranscript(sessionId: string): void {
+  const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(Date.now() - 3_600_000).toISOString(),
+      sessionId,
+      message: {
+        id: "msg_01",
+        model: "test-model",
+        usage: { input_tokens: 1_000_000, output_tokens: 0 },
+      },
+    }) + "\n",
+  );
+}
+
+describe("burn rate cost source", () => {
+  const STDIN_COST = { total_cost_usd: 999, total_duration_ms: 3_600_000 };
+
+  it("uses the JSONL rate in calculated mode even when stdin carries a cost", async () => {
+    // The bug: session-cost honoured costSource while burn-rate always preferred
+    // stdin, so the bar showed a stdin-priced rate beside a JSONL-priced total.
+    writeBackdatedTranscript("session-calc");
+
+    const context = await buildRenderContext(
+      { session_id: "session-calc", model: "test-model", cost: STDIN_COST },
+      settingsWith("calculated"),
+    );
+
+    // Asserted positively: a null burn rate would fail this, where a
+    // `not.toBe(999)` check would pass vacuously.
+    expect(context.burnRate).not.toBeNull();
+    expect(context.burnRate!.costPerHour).toBeCloseTo(1, 1);
+  });
+
+  it("prefers the stdin rate when the session total came from stdin", async () => {
+    writeBackdatedTranscript("session-stdin");
+
+    const context = await buildRenderContext(
+      { session_id: "session-stdin", model: "test-model", cost: STDIN_COST },
+      settingsWith("stdin"),
+    );
+
+    expect(context.burnRate).not.toBeNull();
+    expect(context.burnRate!.costPerHour).toBeCloseTo(999, 6);
+  });
+});
