@@ -1,0 +1,28 @@
+import * as v from "valibot";
+import { StatusJsonSchema } from "../../types/status-json.js";
+import type { RenderContext } from "../../types/render-context.js";
+import type { RealPayloadFixture } from "./real-payloads/fixture-types.js";
+
+/** Rebuild a RenderContext from a fixture's recorded derived values. */
+export function contextFromFixture(fx: RealPayloadFixture, homeDir: string): RenderContext {
+  const stdinRaw = JSON.parse(
+    JSON.stringify(fx.stdin).split(fx.homePlaceholder).join(homeDir),
+  );
+  return {
+    stdin: v.parse(StatusJsonSchema, stdinRaw),
+    metrics: {
+      ...fx.derived.metrics,
+      byModel: new Map(fx.derived.metrics.byModel as unknown as [string, unknown][]),
+    } as RenderContext["metrics"],
+    block: fx.derived.block,
+    burnRate: fx.derived.burnRate,
+    pricing: {},
+    sessionCostUsd: fx.derived.sessionCostUsd,
+    todayCostUsd: fx.derived.todayCostUsd,
+    costByModel: new Map(fx.derived.costByModel),
+    sessionStartTime: fx.derived.sessionStartTime,
+    terminalWidth: 200,
+    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
+    turnCount: fx.controlled.turnCount,
+  };
+}

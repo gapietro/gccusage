@@ -1,0 +1,118 @@
+{
+  "name": "fable5-1m-low",
+  "claudeCodeVersion": "2.1.220",
+  "derivedAt": 1785549701741,
+  "homePlaceholder": "/home/testuser",
+  "stdin": {
+    "session_id": "00000000-0000-4000-8000-000000000000",
+    "transcript_path": "/home/testuser/.claude/projects/demo-project/00000000-0000-4000-8000-000000000000.jsonl",
+    "cwd": "/home/testuser/projects/demo-project",
+    "prompt_id": "00000000-0000-4000-8000-000000000001",
+    "effort": {
+      "level": "high"
+    },
+    "session_name": "Example session",
+    "model": {
+      "id": "claude-fable-5",
+      "display_name": "Fable 5"
+    },
+    "workspace": {
+      "current_dir": "/home/testuser/projects/demo-project",
+      "project_dir": "/home/testuser/projects/demo-project",
+      "added_dirs": [],
+      "repo": {
+        "host": "github.com",
+        "owner": "example",
+        "name": "demo"
+      }
+    },
+    "version": "2.1.220",
+    "output_style": {
+      "name": "default"
+    },
+    "cost": {
+      "total_cost_usd": 1.7673759999999998,
+      "total_duration_ms": 26428081,
+      "total_api_duration_ms": 75151,
+      "total_lines_added": 0,
+      "total_lines_removed": 0
+    },
+    "context_window": {
+      "total_input_tokens": 63016,
+      "total_output_tokens": 722,
+      "context_window_size": 1000000,
+      "current_usage": {
+        "input_tokens": 2,
+        "output_tokens": 722,
+        "cache_creation_input_tokens": 210,
+        "cache_read_input_tokens": 62804
+      },
+      "used_percentage": 6,
+      "remaining_percentage": 94
+    },
+    "exceeds_200k_tokens": false,
+    "fast_mode": false,
+    "thinking": {
+      "enabled": true
+    },
+    "rate_limits": {
+      "five_hour": {
+        "used_percentage": 4,
+        "resets_at": 1785535800
+      },
+      "seven_day": {
+        "used_percentage": 53,
+        "resets_at": 1785668400
+      }
+    }
+  },
+  "derived": {
+    "metrics": {
+      "byModel": [
+        [
+          "claude-fable-5",
+          {
+            "inputTokens": 25,
+            "outputTokens": 4389,
+            "cacheCreationTokens": 42460,
+            "cacheReadTokens": 697904
+          }
+        ]
+      ],
+      "session": {
+        "inputTokens": 25,
+        "outputTokens": 4389,
+        "cacheCreationTokens": 42460,
+        "cacheReadTokens": 697904
+      },
+      "today": {
+        "inputTokens": 4138,
+        "outputTokens": 1800593,
+        "cacheCreationTokens": 7612286,
+        "cacheReadTokens": 535829760
+      }
+    },
+    "sessionCostUsd": 1.7673759999999998,
+    "todayCostUsd": 608.5766846500002,
+    "costByModel": [
+      [
+        "claude-fable-5",
+        1.4483540000000001
+      ]
+    ],
+    "sessionStartTime": 1785521049499,
+    "block": {
+      "blockStartTime": 1785541709669,
+      "elapsedMs": 7992072,
+      "remainingMs": 10007928,
+      "blockDurationMs": 18000000
+    },
+    "burnRate": {
+      "costPerHour": 0.24074973888569512,
+      "costPerMinute": 0.0040124956480949185
+    }
+  },
+  "controlled": {
+    "turnCount": 9
+  }
+}
