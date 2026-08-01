@@ -28,15 +28,19 @@ const ELLIPSIS = "…";
  */
 function trimTo(text: string, width: number): string {
   if (visibleLength(text) <= width) return text;
-  // Drop whole code points until the result FITS BY THE SAME MEASURE the
-  // caller uses. Comparing code-point count against a visibleLength budget
-  // would return `text` unchanged for astral characters (which are one code
-  // point but two code units), and the caller's loop would then spin forever
-  // making no progress. Never trim below MIN_SHRUNK_TEXT.
   let chars = Array.from(text);
-  const minimumWidth = Math.max(width, MIN_SHRUNK_TEXT);
-  while (chars.length > 0 && visibleLength(chars.join("") + ELLIPSIS) > minimumWidth) {
-    chars = chars.slice(0, -1);
+  // Trim by code point until the result fits the target AND never drops below the floor.
+  while (chars.length > 0) {
+    const current = visibleLength(chars.join("") + ELLIPSIS);
+    // Stop if we've reached the target.
+    if (current <= width) break;
+    // Peek ahead: what if we removed one more?
+    const nextChars = chars.slice(0, -1);
+    const next = visibleLength(nextChars.join("") + ELLIPSIS);
+    // Stop if removing one more would drop below the floor.
+    if (next < MIN_SHRUNK_TEXT) break;
+    // Safe to proceed.
+    chars = nextChars;
   }
   return chars.join("") + ELLIPSIS;
 }
