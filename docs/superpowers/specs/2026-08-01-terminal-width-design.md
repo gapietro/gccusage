@@ -62,13 +62,43 @@ but the case is now rare rather than universal.
 The payload builder (`yRS`) carries no width field, so there is nothing to read
 out of stdin.
 
-### Unverified observation
+### Measured: there is no reserve (gutter = 0)
 
-The statusline text appears to be rendered through Ink with `wrap: "truncate"`,
-beside a `minWidth: 2` prefix box, which would make the usable width
-`COLUMNS - 2`. This was read off the JSX colocated with the statusline code and
-is **not** proven end-to-end. It is resolved by measurement during
-implementation rather than assumed — see "Width reserve" below.
+An earlier draft of this spec suspected a 2-column reserve, from JSX colocated
+with the statusline code showing a `minWidth: 2` prefix box beside a
+`wrap: "truncate"` text node. **That guess is wrong. The usable width is
+`COLUMNS` exactly.**
+
+Measured on 2026-08-01 against Claude Code 2.1.220 by pointing
+`statusLine.command` at a ruler script and reading the cut point. Two facts
+settle it:
+
+1. **Structural.** Claude Code derives the child's `COLUMNS` from its own
+   `process.stdout.columns`, and Ink truncates the rendered statusline to that
+   same `process.stdout.columns`. They are one value sampled at two instants, so
+   no systematic reserve can exist between them.
+2. **Empirical.** A ruler emitting a fixed 200 columns — long enough that the
+   cut point is the true render width regardless of how stale the frame is — was
+   cut at exactly column 92 in a spawn that reported `COLUMNS=92`.
+
+Readings that appeared to show a 4-column shortfall were all taken across a
+terminal resize: `COLUMNS` is captured when the command spawns, while Ink
+re-truncates the already-emitted text at display time, so a resize between the
+two makes a fresh frame look truncated. A ruler whose length is derived from
+`COLUMNS` cannot distinguish that case from a real reserve; a fixed-length ruler
+can, which is why the fixed-200 reading is the one that counts.
+
+**Consequence for the design:** no `STATUSLINE_GUTTER` constant and no
+`availableWidth()` helper. A named constant equal to zero, and a subtraction of
+zero, are dead weight — layout works against `terminalWidth` directly. If
+evidence of a reserve ever emerges, reintroducing it is a three-line change; the
+measurement above is recorded so the question is not re-litigated from the JSX
+alone.
+
+**Residual risk, accepted:** if a small reserve does exist at some width we did
+not sample, our ellipsis lands a column or two late and Ink trims the tail
+instead of us. The failure mode is cosmetically identical and loses no
+information.
 
 ## Approaches considered
 
@@ -108,24 +138,16 @@ output" instead of to a wrong number.
 `RenderContext.terminalWidth` becomes `number | undefined` and carries the
 **true terminal width**.
 
-### Width reserve
+### Width reserve: none
 
-The renderer — the only consumer of `terminalWidth` — derives
-`availableWidth = Math.max(1, terminalWidth - STATUSLINE_GUTTER)`. The clamp
-keeps a pathologically narrow terminal from producing a zero or negative budget,
-which `truncateAnsi` and `applyFlex` would otherwise be handed.
+Measurement (above) put the reserve at zero, so layout uses `terminalWidth`
+directly. There is no `STATUSLINE_GUTTER` and no `availableWidth()` helper.
 
-`STATUSLINE_GUTTER` is **measured, not guessed**: implementation includes
-rendering a ruler bar of known width at a known `COLUMNS` and observing the exact
-column at which Claude Code cuts. Whatever value falls out (0, 1, or 2) becomes
-the constant, with the measurement recorded in a comment beside it.
-
-Keeping the reserve at the render layer rather than inside `getTerminalWidth()`
-means the helper stays honest about what it reports.
-
-Rationale for measuring: a plausible constant that is wrong in an unexercised
-case is exactly the failure mode of the old 83.5% auto-compact estimate, which
-survived review because it was exactly right at the window size everyone used.
+The reason for measuring rather than assuming stands regardless of the answer: a
+plausible constant that is wrong in an unexercised case is exactly the failure
+mode of the old 83.5% auto-compact estimate, which survived review because it
+was exactly right at the window size everyone used. Here the guess under test
+was `COLUMNS - 2`, and it was wrong.
 
 ### Line measurement
 

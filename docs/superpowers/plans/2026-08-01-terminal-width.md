@@ -4,7 +4,7 @@
 
 **Goal:** Make `getTerminalWidth()` report the real terminal width so compact `auto` works, the default bar stops truncating mid-word, and the README stops documenting a feature that cannot fire.
 
-**Architecture:** Claude Code injects `COLUMNS` into the statusline subprocess environment (verified against the 2.1.220 binary). `getTerminalWidth()` reads `process.stdout.columns` first, then `COLUMNS`, then returns `undefined`. Unknown width propagates as a *decision* at each consumer — no padding, no truncation, no auto-compaction — rather than as a substitute number. The renderer derives `availableWidth = terminalWidth - STATUSLINE_GUTTER` from an empirically measured constant, and `renderCompact`'s hand-rolled segment-width arithmetic is replaced by measuring a real render.
+**Architecture:** Claude Code injects `COLUMNS` into the statusline subprocess environment (verified against the 2.1.220 binary). `getTerminalWidth()` reads `process.stdout.columns` first, then `COLUMNS`, then returns `undefined`. Unknown width propagates as a *decision* at each consumer — no padding, no truncation, no auto-compaction — rather than as a substitute number. The reserve Claude Code keeps beside the bar was measured at zero, so layout uses `terminalWidth` directly. `renderCompact`'s hand-rolled segment-width arithmetic is replaced by measuring a real render.
 
 **Tech Stack:** TypeScript, tsdown (bundler), vitest, valibot.
 
@@ -23,117 +23,15 @@ Issue: [#67](https://github.com/gapietro/gccusage/issues/67)
 
 ---
 
-### Task 1: Verify `COLUMNS` empirically and measure the statusline gutter
+### Task 1: Verify `COLUMNS` empirically and measure the statusline gutter — COMPLETE
 
-The whole plan rests on two claims read out of a disassembled binary: that Claude Code sets `COLUMNS` in the statusline subprocess, and that it reserves some columns beside the statusline text. This task proves the first and measures the second. **Do this task first** — if `COLUMNS` turns out not to be set, the rest of the plan is wrong and needs rework, not adjustment.
+Performed manually on 2026-08-01 against Claude Code 2.1.220, before any code was written. Results:
 
-This is a manual procedure. It temporarily repoints `statusLine.command` in `~/.claude/settings.json`, the same pattern `src/__tests__/fixtures/real-payloads/capture.md` documents for payload capture.
+- **`COLUMNS` is set.** The probe recorded `COLUMNS=88`/`92`/`96`/`155` and `LINES=70`/`53` across spawns, confirming the binary reading that Claude Code injects both into the statusline subprocess environment.
+- **The reserve is 0.** A ruler emitting a fixed 200 columns — long enough that the cut point is the true render width regardless of frame staleness — was cut at exactly column 92 in a spawn reporting `COLUMNS=92`. The suspected `minWidth: 2` prefix reserve does not exist.
+- Readings that appeared to show a shortfall were all taken across a terminal resize, which changes the render width after `COLUMNS` was captured at spawn. A ruler whose length derives from `COLUMNS` cannot distinguish that from a real reserve; the fixed-length ruler can.
 
-**Files:**
-- Modify: `docs/superpowers/specs/2026-08-01-terminal-width-design.md` (record the measured values)
-
-**Interfaces:**
-- Consumes: nothing
-- Produces: two measured integers used by Task 2 and Task 3 — whether `COLUMNS` is set, and `STATUSLINE_GUTTER` (columns reserved beside the bar)
-
-- [ ] **Step 1: Back up the real settings file**
-
-```bash
-cp ~/.claude/settings.json ~/.claude/settings.json.bak
-```
-
-Confirm the backup exists and is non-empty before continuing:
-
-```bash
-test -s ~/.claude/settings.json.bak && echo OK
-```
-
-- [ ] **Step 2: Write the ruler probe script**
-
-The probe drains stdin (Claude Code writes the payload to it and will error if nothing reads it), records the environment it was given, and prints a ruler exactly `$COLUMNS` characters wide. The digit pattern repeats every 10, so the last visible character identifies the cut column by eye.
-
-```bash
-mkdir -p /tmp/gccusage-probe
-cat > /tmp/gccusage-probe/ruler.sh <<'SH'
-#!/bin/sh
-cat > /dev/null
-{
-  echo "COLUMNS=${COLUMNS:-<unset>}"
-  echo "LINES=${LINES:-<unset>}"
-} > /tmp/gccusage-probe/env.txt
-awk -v n="${COLUMNS:-80}" 'BEGIN{
-  s = "";
-  for (i = 1; i <= n; i++) s = s substr("1234567890", ((i - 1) % 10) + 1, 1);
-  print s;
-}'
-SH
-chmod +x /tmp/gccusage-probe/ruler.sh
-```
-
-- [ ] **Step 3: Smoke-test the probe before installing it**
-
-Never install an untested statusline command — a broken one leaves no bar and no error.
-
-```bash
-echo '{}' | COLUMNS=40 /tmp/gccusage-probe/ruler.sh
-```
-
-Expected: exactly `1234567890123456789012345678901234567890` (40 characters), and `/tmp/gccusage-probe/env.txt` reads `COLUMNS=40`.
-
-- [ ] **Step 4: Install the probe as the statusline**
-
-Edit `~/.claude/settings.json` and set:
-
-```json
-"statusLine": { "type": "command", "command": "/tmp/gccusage-probe/ruler.sh" }
-```
-
-Leave every other key untouched.
-
-- [ ] **Step 5: Measure**
-
-Open a Claude Code session in a terminal, send any prompt to force a statusline refresh, then read off two things:
-
-1. `cat /tmp/gccusage-probe/env.txt` — does it show a real `COLUMNS`, or `<unset>`?
-2. The rendered ruler in the terminal — how many characters are actually visible before it is cut or wraps?
-
-Record:
-- `COLUMNS` as reported by the probe: `______`
-- Visible ruler characters: `______`
-- `STATUSLINE_GUTTER = COLUMNS - visible characters`: `______`
-
-Repeat once at a different terminal width (resize the window and send another prompt) to confirm the gutter is a constant and not a proportion.
-
-**If `env.txt` reports `COLUMNS=<unset>`:** stop. The binary reading was wrong or version-specific. Do not continue to Task 2 — reopen the design.
-
-- [ ] **Step 6: Restore the real statusline immediately**
-
-```bash
-cp ~/.claude/settings.json.bak ~/.claude/settings.json
-rm -rf /tmp/gccusage-probe
-```
-
-Verify the bar renders normally again before moving on.
-
-- [ ] **Step 7: Record the measurement in the spec**
-
-In `docs/superpowers/specs/2026-08-01-terminal-width-design.md`, replace the "Unverified observation" section with the measured result: the Claude Code version, both `COLUMNS` values tried, the visible width at each, and the derived gutter. Delete the wording that calls the observation unproven.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add docs/superpowers/specs/2026-08-01-terminal-width-design.md
-git commit -m "$(cat <<'EOF'
-Record the measured statusline gutter (#67)
-
-Confirms empirically that Claude Code sets COLUMNS in the statusline
-subprocess environment, and measures the columns it reserves beside the
-bar at two terminal widths.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
+**Consequence: Task 3 is dropped.** With a zero reserve there is no `STATUSLINE_GUTTER` constant and no `availableWidth()` helper — a named zero and a subtraction of zero are dead weight. Layout works against `context.terminalWidth` directly. See the spec's "Measured: there is no reserve" section.
 
 ---
 
@@ -471,151 +369,9 @@ EOF
 
 ---
 
-### Task 3: Reserve the measured gutter
+### Task 3: DROPPED — the measured reserve was zero
 
-**Files:**
-- Modify: `src/utils/terminal.ts`
-- Modify: `src/render/renderer.ts` (`renderStatusline`, `renderLine`, `renderCompact`)
-- Modify: `src/__tests__/terminal.test.ts`
-
-**Interfaces:**
-- Consumes: `STATUSLINE_GUTTER` value measured in Task 1; `getTerminalWidth()` from Task 2
-- Produces: `availableWidth(terminalWidth: number | undefined): number | undefined` (`src/utils/terminal.ts`)
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `src/__tests__/terminal.test.ts`. Replace `<MEASURED>` with the integer measured in Task 1, and the two `<...>` expectations with `200 - <MEASURED>` and `1`:
-
-```ts
-import { availableWidth, STATUSLINE_GUTTER } from "../utils/terminal.js";
-
-describe("availableWidth", () => {
-  it("subtracts the gutter Claude Code reserves beside the bar", () => {
-    expect(availableWidth(200)).toBe(200 - STATUSLINE_GUTTER);
-  });
-
-  it("stays unknown when the terminal width is unknown", () => {
-    expect(availableWidth(undefined)).toBeUndefined();
-  });
-
-  it("never returns a budget below one column", () => {
-    expect(availableWidth(1)).toBe(1);
-  });
-});
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `npx vitest run src/__tests__/terminal.test.ts`
-Expected: FAIL with "does not provide an export named 'availableWidth'".
-
-- [ ] **Step 3: Implement it**
-
-Append to `src/utils/terminal.ts`. Replace `<MEASURED>` with the Task 1 value and fill the comment in with the real numbers — the comment is the record that this constant was measured rather than guessed:
-
-```ts
-/**
- * Columns Claude Code reserves beside the statusline text.
- *
- * Measured on Claude Code 2.1.220 by pointing `statusLine.command` at a ruler
- * script printing exactly `$COLUMNS` characters: at COLUMNS=<A> the terminal
- * showed <B> characters, and at COLUMNS=<C> it showed <D> — a constant
- * reserve, not a proportion. See issue #67 and the design spec.
- *
- * Do not adjust this by intuition. Re-measure with the same procedure.
- */
-export const STATUSLINE_GUTTER = <MEASURED>;
-
-/**
- * Columns the bar may actually occupy, or undefined when the terminal width is
- * unknown. Clamped to at least 1 so a pathologically narrow terminal cannot
- * hand `truncateAnsi` a zero or negative budget.
- */
-export function availableWidth(terminalWidth: number | undefined): number | undefined {
-  if (terminalWidth === undefined) return undefined;
-  return Math.max(1, terminalWidth - STATUSLINE_GUTTER);
-}
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `npx vitest run src/__tests__/terminal.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Apply the budget in the renderer**
-
-In `src/render/renderer.ts`, import the helper:
-
-```ts
-import { visibleLength, availableWidth } from "../utils/terminal.js";
-```
-
-Change `renderLine` to lay out against the budget rather than the raw terminal width:
-
-```ts
-  const budget = availableWidth(context.terminalWidth);
-
-  let line: string;
-  if (isPowerline && powerline) {
-    // ...unchanged...
-  } else {
-    const segments = outputs.map((o) => colorize(o.text, o.fg, o.bg));
-    line = applyFlex(segments, budget, flex);
-  }
-
-  return truncateAnsi(line, budget);
-```
-
-In `renderCompact`, replace `context.terminalWidth` in the fitting loop with the budget:
-
-```ts
-  const budget = availableWidth(context.terminalWidth);
-```
-
-and compare against `budget` instead of `context.terminalWidth`. When `budget` is `undefined`, every segment fits:
-
-```ts
-    if (budget !== undefined && usedWidth + segWidth > budget && fitted.length > 0) break;
-```
-
-Leave `shouldCompact` comparing against `context.terminalWidth`: the `threshold` option means "the terminal is narrower than N", which is a property of the terminal, not of our layout budget. Add that as a comment above the call in `renderStatusline`:
-
-```ts
-export function renderStatusline(context: RenderContext, settings: Settings): string {
-  // The compact threshold is a statement about the terminal ("collapse below N
-  // columns"), so it compares against the true width. Only layout — padding,
-  // truncation, and compact fitting — works against the reduced budget.
-  if (shouldCompact(settings, context.terminalWidth)) {
-    return renderCompact(context, settings);
-  }
-  return renderFull(context, settings);
-}
-```
-
-- [ ] **Step 6: Run the full suite**
-
-Run: `npm test && npm run typecheck`
-Expected: PASS.
-
-If `STATUSLINE_GUTTER` turned out to be non-zero, the spawn test from Task 2 that asserts `visible.length <= 40` still holds (the budget only shrinks), and the `>80` assertion holds with a 200-column terminal. If any other test fails on an off-by-gutter expectation, fix the expectation — do not weaken the clamp.
-
-- [ ] **Step 7: Commit**
-
-```bash
-npm run build
-git add src/utils/terminal.ts src/render/renderer.ts src/__tests__/terminal.test.ts
-git add -f dist/index.js
-git commit -m "$(cat <<'EOF'
-Reserve the columns Claude Code keeps beside the bar (#67)
-
-Layout now works against availableWidth() rather than the raw terminal
-width. The gutter is measured, not estimated; the procedure and both
-measurements are recorded beside the constant.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
+See Task 1. No code change; layout uses `context.terminalWidth` directly.
 
 ---
 
@@ -628,7 +384,7 @@ EOF
 - Modify: `src/__tests__/renderer.test.ts`
 
 **Interfaces:**
-- Consumes: `availableWidth()` from Task 3; `renderLine(outputs, settings, context, flex)` as it exists in `src/render/renderer.ts`
+- Consumes: `renderLine(outputs, settings, context, flex)` as it exists in `src/render/renderer.ts`
 - Produces: `measureLine(outputs: WidgetOutput[], settings: Settings, context: RenderContext): number` — module-private to `renderer.ts`
 
 - [ ] **Step 1: Write the failing tests**
@@ -686,7 +442,7 @@ describe("compact fitting measures the real line", () => {
 });
 ```
 
-Note: `makeContext`'s `terminalWidth` is the *true* terminal width, so these budgets are reduced by `STATUSLINE_GUTTER` before fitting. The assertions are `<= width`, which holds either way.
+Note: `makeContext`'s `terminalWidth` is the width the fitting loop works against directly — the measured reserve is zero, so there is no adjustment between the two.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -722,9 +478,9 @@ function measureLine(
 Then replace the fitting loop in `renderCompact`:
 
 ```ts
-  // Greedily add widgets until the line would exceed the budget
+  // Greedily add widgets until the line would exceed the terminal width
   const fitted: WidgetOutput[] = [];
-  const budget = availableWidth(context.terminalWidth);
+  const budget = context.terminalWidth;
 
   for (const { output } of allWidgets) {
     const candidate = [...fitted, output];
@@ -987,10 +743,8 @@ Expected: empty output. If `dist/index.js` shows as modified, an earlier task co
 | Malformed `COLUMNS` treated as unknown | 2 |
 | `RenderContext.terminalWidth` widened | 2 |
 | Unknown → no truncation / no flex padding / no auto-compact | 2 |
-| `STATUSLINE_GUTTER` measured, not guessed | 1, 3 |
-| `availableWidth = Math.max(1, width - gutter)` | 3 |
-| Reserve applied at the render layer, not in `getTerminalWidth` | 3 |
-| Compact threshold stays 80, compared against true width | 3 |
+| Reserve measured, not guessed (result: 0, Task 3 dropped) | 1 |
+| Compact threshold stays 80, compared against true width | 2 |
 | Measure-by-rendering replaces the segment estimate | 4 |
 | `getTerminalWidth` unit tests controlling `COLUMNS` | 2 |
 | End-to-end spawn test with a piped stdout | 2 |
@@ -999,6 +753,6 @@ Expected: empty output. If `dist/index.js` shows as modified, an earlier task co
 | README correction | 6 |
 | Build + stage `dist/index.js` on every src commit | Global constraint, every task |
 
-**Type consistency:** `getTerminalWidth(): number | undefined`, `availableWidth(number | undefined): number | undefined`, `truncateAnsi(string, number | undefined)`, `applyFlex(string[], number | undefined, FlexMode)`, `shouldCompact(Settings, number | undefined)`, `measureLine(WidgetOutput[], Settings, RenderContext): number`. `RenderContext.terminalWidth` is `number | undefined` throughout; the key stays required so no construction site can omit it.
+**Type consistency:** `getTerminalWidth(): number | undefined`, `truncateAnsi(string, number | undefined)`, `applyFlex(string[], number | undefined, FlexMode)`, `shouldCompact(Settings, number | undefined)`, `measureLine(WidgetOutput[], Settings, RenderContext): number`. `RenderContext.terminalWidth` is `number | undefined` throughout; the key stays required so no construction site can omit it.
 
 **Known open decision:** Task 5 Step 3 stops for a layout decision rather than guessing. That is deliberate — how wide the shipped default bar should be is the user's call, not the implementer's.
