@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
 import { layoutPowerline } from "../render/powerline.js";
@@ -5,6 +6,7 @@ import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -739,29 +741,6 @@ describe("renderLine at unknown terminal width neither pads nor truncates", () =
 });
 
 describe("long segments shrink to fit instead of truncating the line", () => {
-  const LONG_BRANCH = "feature/an-extremely-long-branch-name-goes-here";
-
-  function settingsWith(powerlineOn: boolean): Settings {
-    return makeSettings({
-      lines: [
-        {
-          widgets: [
-            { type: "custom-text", text: "Today: $2.10" },
-            { type: "custom-text", text: LONG_BRANCH },
-          ],
-          flex: "left",
-        },
-      ],
-      powerline: {
-        enabled: powerlineOn,
-        theme: "default",
-        separator: "▶",
-        separatorThin: "│",
-      },
-      compact: { mode: "never", threshold: 80 },
-    });
-  }
-
   // custom-text is not shrinkable, so drive the shrink path through the real
   // widgets instead: a context whose project_dir and cwd produce long names.
   function longNameContext(width: number | undefined): RenderContext {
@@ -819,5 +798,79 @@ describe("long segments shrink to fit instead of truncating the line", () => {
   it("falls back to truncation when shrinking to the floor is not enough", () => {
     const line = stripAnsi(renderStatusline(longNameContext(14), projectSettings));
     expect(visibleLength(line)).toBeLessThanOrEqual(14);
+
+    // A budget this tight is not just "narrower than natural" — it's narrower
+    // than the shrinkable segment's floor plus the unshrinkable segment
+    // combined, so shrinking alone cannot make it fit and truncateAnsi has to
+    // cut on top of the shrink. Assert the SIGNATURE of both mechanisms
+    // firing together, not just the width bound truncateAnsi guarantees on
+    // its own (which a reverted feature satisfies trivially): two ellipses —
+    // one from the shrunk project segment, one from truncateAnsi biting into
+    // the second segment — and the powerline separator, which only survives
+    // into the output if shrinking ran first and got far enough for layout to
+    // reach the second segment at all. With shrinking disabled, the raw
+    // (~46-character) project text alone consumes the entire 14-column
+    // budget, so truncateAnsi cuts before the separator or second segment are
+    // ever reached: one ellipsis, no separator.
+    expect(line.split("…").length - 1).toBe(2);
+    expect(line).toContain("▶");
+  });
+
+  // git-branch is the other widget marked shrinkable, and unlike project it
+  // shells out to real `git` against `stdin.cwd` (src/utils/git.ts) rather
+  // than reading anything off the payload — a fixture whose `cwd` doesn't
+  // exist on disk makes it silently emit nothing, which would make this test
+  // pass vacuously no matter what `shrinkable` is set to. Build a real,
+  // throwaway git repo with a fixed, deterministic branch name so the widget
+  // genuinely executes, reusing the exact repo-construction helper
+  // `default-layout-width.test.ts` built for this same problem rather than
+  // inventing a second one.
+  const gitBranchSettings = makeSettings({
+    lines: [
+      {
+        widgets: [
+          { type: "git-branch" },
+          { type: "custom-text", text: "Today: $2.10" },
+        ],
+        flex: "left",
+      },
+    ],
+    powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    compact: { mode: "never", threshold: 80 },
+  });
+
+  function gitBranchContext(width: number | undefined, cwd: string): RenderContext {
+    return makeContext({
+      terminalWidth: width,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        cwd,
+      },
+    });
+  }
+
+  it("shrinks the git-branch segment rather than cutting the line", () => {
+    const repoDir = makeDeterministicGitRepo();
+    try {
+      const natural = visibleLength(
+        renderStatusline(gitBranchContext(undefined, repoDir), gitBranchSettings),
+      );
+      const budget = natural - 6;
+
+      const line = stripAnsi(
+        renderStatusline(gitBranchContext(budget, repoDir), gitBranchSettings),
+      );
+
+      // The line fits...
+      expect(visibleLength(line)).toBeLessThanOrEqual(budget);
+      // ...the unshrinkable segment survived intact...
+      expect(line).toContain("Today: $2.10");
+      // ...and the shrunk segment carries the ellipsis, not the line's tail.
+      expect(line).toContain("…");
+      expect(line.trimEnd().endsWith("…")).toBe(false);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
   });
 });
