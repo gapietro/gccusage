@@ -62,3 +62,25 @@ describe("checkCache cost matching", () => {
     expect(checkCache(60000, "session-a", undefined)).toBeNull();
   });
 });
+
+describe("checkCache terminal width matching", () => {
+  it("misses when the terminal width differs but session and cost match", () => {
+    writeCache("output-a", "session-a", 1.25, 200);
+    expect(checkCache(60000, "session-a", 1.25, 60)).toBeNull();
+  });
+
+  it("returns cached output when the terminal width is unchanged", () => {
+    writeCache("output-a", "session-a", 1.25, 200);
+    expect(checkCache(60000, "session-a", 1.25, 200)).toBe("output-a");
+  });
+
+  it("returns cached output when both the write and lookup have an unknown width", () => {
+    writeCache("output-a", "session-a", 1.25, undefined);
+    expect(checkCache(60000, "session-a", 1.25, undefined)).toBe("output-a");
+  });
+
+  it("misses when the cache entry has an unknown width but a known width is requested", () => {
+    writeCache("output-a", "session-a", 1.25, undefined);
+    expect(checkCache(60000, "session-a", 1.25, 80)).toBeNull();
+  });
+});

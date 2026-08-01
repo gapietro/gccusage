@@ -3208,7 +3208,7 @@ function isSeparatorOutput(output) {
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
-function checkCache(ttlMs, sessionId, costUsd) {
+function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
 	const cachePath = getCachePath();
 	try {
 		if (!fs.existsSync(cachePath)) return null;
@@ -3216,13 +3216,14 @@ function checkCache(ttlMs, sessionId, costUsd) {
 		const entry = JSON.parse(raw);
 		if (entry.sessionId !== sessionId) return null;
 		if (entry.costUsd !== costUsd) return null;
+		if (entry.terminalWidth !== terminalWidth) return null;
 		if (Date.now() - entry.timestamp > ttlMs) return null;
 		return entry.output;
 	} catch {
 		return null;
 	}
 }
-function writeCache(output, sessionId, costUsd) {
+function writeCache(output, sessionId, costUsd, terminalWidth) {
 	const cachePath = getCachePath();
 	try {
 		ensureDir(path.dirname(cachePath));
@@ -3230,7 +3231,8 @@ function writeCache(output, sessionId, costUsd) {
 			output,
 			timestamp: Date.now(),
 			sessionId,
-			costUsd
+			costUsd,
+			terminalWidth
 		};
 		fs.writeFileSync(cachePath, JSON.stringify(entry));
 	} catch {}
@@ -3241,11 +3243,12 @@ function writeCache(output, sessionId, costUsd) {
 async function runStatusline(stdin, settings) {
 	const sessionId = stdin.session_id;
 	const stdinCost = stdin.cost?.total_cost_usd;
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId, stdinCost);
+	const terminalWidth = getTerminalWidth();
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId, stdinCost, terminalWidth);
 	if (cached !== null) return cached;
 	const context = await buildRenderContext(stdin, settings);
 	const output = renderStatusline(context, settings);
-	writeCache(output, sessionId, stdinCost);
+	writeCache(output, sessionId, stdinCost, terminalWidth);
 	return output;
 }
 
