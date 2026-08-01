@@ -160,4 +160,57 @@ describe("shrinkOutputs", () => {
       expect(visibleLength(after[0]!.text)).toBe(15);
     });
   });
+
+  describe("a parked (stuck) segment does not stop other segments from shrinking", () => {
+    // Mutating `stuck.add(widest); continue;` to `stuck.add(widest); break;`
+    // (src/render/shrink.ts) leaves every other test in this suite green: no
+    // other case has one shrinkable segment park above the floor WHILE a
+    // second shrinkable segment still has room left to give. This is that
+    // case.
+    //
+    // 20 rockets (2 columns/code-unit each) cannot land exactly on
+    // MIN_SHRUNK_TEXT (8): repro 1 above already pins that, alone, it parks
+    // one column short, at width 9 -- "\u{1F680}\u{1F680}\u{1F680}\u{1F680}…".
+    // A plain-ASCII segment moves 1 column per removed character, so it CAN
+    // land exactly on 8.
+    //
+    // Widths below were derived by hand-tracing shrinkOutputs/trimTo (both
+    // widest-first selection and trimTo's floor peek-ahead), not by running
+    // the code and copying the output:
+    //
+    // Every round, the widest still-eligible segment is trimmed toward the
+    // runner-up (leveling), alternating between the rocket segment and the
+    // ascii one as they cross. The rocket segment's count of surviving
+    // rockets falls 20 -> 9 -> 8 -> 7 -> 6 -> 5 -> 4, and at 4 rockets
+    // (width 9) any further removal would land at 3 rockets = width 7, one
+    // below the floor -- trimTo's peek-ahead refuses, so the segment is
+    // marked stuck at width 9 with zero progress made that round.
+    //
+    // At the moment the rocket segment parks, the ascii segment sits at 8
+    // letters + ellipsis (width 9) -- ABOVE the floor, with room left. Real
+    // code `continue`s: the outer loop runs again, the rocket segment is now
+    // excluded (stuck), and the ascii segment -- still the only eligible
+    // one -- gets trimmed one more step, to 7 letters + ellipsis, width 8,
+    // exactly the floor. Mutated code `break`s the instant the rocket
+    // segment parks, so the ascii segment is abandoned at width 9
+    // ("abcdefgh…") and never reaches the floor.
+    it("finishes shrinking an ascii segment to the floor after an emoji segment parks above it", () => {
+      const outputs = [
+        shrinkable("\u{1F680}".repeat(20)), // width 40; parks at width 9
+        shrinkable("abcdefghijklmnopqrst"), // width 20; can reach the floor (8) exactly
+      ];
+      const after = shrinkOutputs(outputs, 10_000);
+
+      // The rocket segment parks floor-adjacent, same value as repro 1.
+      expect(after[0]!.text).toBe("\u{1F680}\u{1F680}\u{1F680}\u{1F680}…");
+      expect(visibleLength(after[0]!.text)).toBe(9);
+
+      // The distinguishing assertion: the ascii segment must be trimmed all
+      // the way to the floor, which only happens if shrinking continues
+      // past the rocket segment parking. Under the `break` mutation this
+      // segment stalls at "abcdefgh…" (width 9) instead.
+      expect(after[1]!.text).toBe("abcdefg…");
+      expect(visibleLength(after[1]!.text)).toBe(MIN_SHRUNK_TEXT);
+    });
+  });
 });

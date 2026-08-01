@@ -137,12 +137,36 @@ per-mode branch.
   `truncateAnsi` cuts it exactly as today. No new failure mode.
 - No shrinkable segments on the line → behaviour byte-identical to current.
 
-### Deliberate non-goal: compact mode
+### Deliberate non-goal: compact mode's OWN logic
 
-`renderCompact` is unchanged. It drops segments by priority, which is its job;
-a long branch there still pushes out low-priority widgets. Adding shrink to
-both paths doubles the interaction surface for a mode that is already a
-degraded fallback.
+`renderCompact`'s own logic is unchanged: it still drops segments by
+priority, and its greedy fit still measures each candidate's **unshrunk**
+width via `measureLine` (which renders at `terminalWidth: undefined`, the
+same "unknown means natural" rule the rest of this design relies on). A long
+branch still pushes out low-priority widgets there exactly as before, and
+nothing about that decision changed.
+
+That is not the same claim as "shrinking never happens in compact mode."
+`renderCompact` ends by calling `renderLine(fitted, settings, context,
+"left")` with the *real* terminal width — the same `renderLine` the full
+layout uses, shrink block included. So the segments compact mode decides to
+keep still go through shrinking on that final call. Concretely: the greedy
+loop always keeps the first widget regardless of its own width (the budget
+check is gated by `fitted.length > 0`, so there is always at least one
+candidate to show), and if that widget is shrinkable and wider than the
+terminal, the final `renderLine` call shrinks it. `compact.mode: "always"`
+at width 20 with a long `project` segment renders `" an-extremely-lon… ▶"`
+— shrunk, not tail-cut.
+
+This is a behavioural improvement over the previous tail-cut, not a
+regression: before this change, that same case fell straight through to
+`truncateAnsi` and lost the line's tail (arrow and all) instead of just the
+one long segment's suffix. Adding shrink to both paths doubles the
+interaction surface for a mode that is already a degraded fallback, which is
+why compact's own drop-by-priority logic was deliberately left alone rather
+than rewritten to measure shrunk widths — but the two paths still share
+`renderLine`, and that sharing is what makes the improvement apply here for
+free.
 
 ## Testing
 
@@ -181,6 +205,9 @@ running the old code.
 
 - Reclaiming `maxWidth`, and `custom-command`'s use of it as a cache TTL — file
   separately.
-- Shrinking in compact mode.
+- Changing `renderCompact`'s own fitting logic to measure shrunk widths
+  instead of natural ones. (Its final render still shrinks, same as the full
+  layout — see "Deliberate non-goal: compact mode's OWN logic" above — this
+  bullet is about the drop-by-priority decision itself, not the render.)
 - Fixing `visibleLength` for wide/CJK glyphs.
 - The remaining open issues (#69, #68, #64, #63, #62, #61, #60, #58, #46).

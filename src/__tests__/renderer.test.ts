@@ -874,3 +874,51 @@ describe("long segments shrink to fit instead of truncating the line", () => {
     }
   });
 });
+
+// The design doc's "compact mode" section says renderCompact's own logic
+// (drop-by-priority, fit measured against UNSHRUNK widths) is unchanged --
+// true. It does NOT mean shrinking is absent from compact's rendered output:
+// renderCompact's last line is `renderLine(fitted, settings, context, "left")`
+// with the real terminal width, and that is the exact same renderLine the
+// full layout uses, shrink block included. The greedy loop always keeps the
+// first widget regardless of its own width ("fitted.length > 0" gates the
+// budget check), so a long shrinkable segment can survive compaction wider
+// than the terminal and still needs shrinking on the final render. Reproduced
+// by the reviewer at width 20 with a long `project` segment.
+describe("compact mode also shrinks (renderCompact renders through the shared renderLine)", () => {
+  it("shrinks the surviving project segment instead of tail-cutting the compact line", () => {
+    const context = makeContext({
+      terminalWidth: 20,
+      stdin: {
+        model: "claude-sonnet-4-20250514",
+        cost: { total_cost_usd: 2.45 },
+        workspace: { project_dir: "/tmp/an-extremely-long-project-directory-name" },
+      },
+    });
+    const settings = makeSettings({
+      lines: [{ widgets: [{ type: "project", priority: 1 }], flex: "left" }],
+      compact: { mode: "always", threshold: 80 },
+      powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
+    });
+
+    const output = renderStatusline(context, settings);
+    expect(output.split("\n")).toHaveLength(1);
+    const plain = stripAnsi(output);
+
+    // Exact reproduction: the project text shrinks to "an-extremely-lon…"
+    // (16 chars + ellipsis) padded and followed by the powerline arrow.
+    expect(plain).toBe(" an-extremely-lon… ▶");
+
+    // CONTENT, not width: a bare tail-cut (truncateAnsi with no shrink) would
+    // end the whole line on "…" with nothing after it. Here the ellipsis
+    // sits inside the segment -- padding and the arrow follow it -- which is
+    // only possible if the segment itself was shortened before layout, not
+    // the finished line cut from the end.
+    expect(plain.trimEnd().endsWith("…")).toBe(false);
+    expect(plain).toContain("…");
+
+    // The full, unshrunk directory name must be gone -- proves real
+    // shrinking happened rather than everything coincidentally fitting.
+    expect(plain).not.toContain("an-extremely-long-project-directory-name");
+  });
+});
