@@ -2,10 +2,11 @@ import type { Widget, WidgetOutput } from "./base.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetConfig } from "../config/schema.js";
 import { formatDollars } from "../utils/format.js";
+import { ALERT_AMBER, ALERT_RED } from "./alert-colors.js";
 
 function alertBg(cost: number, warn: number, danger: number, configBg?: string): string | undefined {
-  if (cost >= danger) return "#c01c28"; // red
-  if (cost >= warn) return "#a67c00"; // yellow/amber
+  if (cost >= danger) return ALERT_RED;
+  if (cost >= warn) return ALERT_AMBER;
   return configBg;
 }
 

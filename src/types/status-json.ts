@@ -47,6 +47,15 @@ const VimSchema = v.object({
   mode: v.optional(v.string()),
 });
 
+// Claude Code's `workspace` block also carries `current_dir` (a duplicate of
+// top-level `cwd`), `added_dirs[]` and `repo{host,owner,name}`. None has a
+// consumer, and valibot strips unrecognised keys, so they stay unparsed until
+// one does. `project_dir` is the repo root — the only correct source for a
+// project identifier (#59); `cwd` is wherever the shell happened to be.
+const WorkspaceSchema = v.object({
+  project_dir: v.optional(v.string()),
+});
+
 export const StatusJsonSchema = v.object({
   model: v.optional(ModelSchema),
   cost: v.optional(CostSchema),
@@ -54,6 +63,7 @@ export const StatusJsonSchema = v.object({
   token_usage: v.optional(TokenUsageSchema),
   vim: v.optional(VimSchema),
   cwd: v.optional(v.string()),
+  workspace: v.optional(WorkspaceSchema),
   session_id: v.optional(v.string()),
 });
 

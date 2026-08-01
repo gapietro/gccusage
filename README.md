@@ -182,6 +182,7 @@ Modes: `auto` (collapse below threshold), `always`, `never`
 | `per-model` | Cost breakdown by model |
 | `session-clock` | Session start time |
 | `cwd` | Current working directory |
+| `project` | Project name (repo root), from `workspace.project_dir` |
 
 ### About the auto-compact countdown
 

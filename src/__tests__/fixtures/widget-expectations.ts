@@ -56,7 +56,14 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "tokens-cached": { text: "Cache: 35.37M", why: "cacheCreation + cacheRead", knownWrong: 60 },
   "per-model": { text: "O5:$22.52", why: "one model this session", knownWrong: 63 },
   "session-clock": { text: "2hr 13m", why: "derivedAt - sessionStartTime", knownWrong: 61 },
-  cwd: { text: "~/projects/demo-project", why: "full path, home abbreviated", knownWrong: 59 },
+  cwd: {
+    text: "~/projects/demo-project",
+    why: "full path, home abbreviated — correct for cwd's own job. The project identifier moved to the `project` widget, which reads workspace.project_dir (#59 resolved)",
+  },
+  project: {
+    text: "demo-project",
+    why: "basename(workspace.project_dir) — the repo root, never the session's cwd",
+  },
   "custom-text": { text: null, why: "declines without user-supplied text — correct" },
   "custom-command": { text: null, why: "declines without a configured command — correct" },
   separator: { text: " | ", why: "structural widget, renders its glyph" },

@@ -13,6 +13,7 @@ import { tokensCachedWidget } from "./tokens-cached.js";
 import { perModelBreakdownWidget } from "./per-model-breakdown.js";
 import { sessionClockWidget } from "./session-clock.js";
 import { cwdWidget } from "./cwd.js";
+import { projectWidget } from "./project.js";
 import { customTextWidget } from "./custom-text.js";
 import { customCommandWidget } from "./custom-command.js";
 import { separatorWidget } from "./separator.js";
@@ -40,6 +41,7 @@ const WIDGET_MAP: Record<string, Widget> = {
   "per-model": perModelBreakdownWidget,
   "session-clock": sessionClockWidget,
   cwd: cwdWidget,
+  project: projectWidget,
   "custom-text": customTextWidget,
   "custom-command": customCommandWidget,
   separator: separatorWidget,

@@ -8,6 +8,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as path$7 from "node:path";
 import * as path$6 from "node:path";
 import * as path$5 from "node:path";
 import * as path$4 from "node:path";
@@ -615,6 +616,7 @@ const TokenUsageSchema = object({
 	cache_read_input_tokens: optional(number(), 0)
 });
 const VimSchema = object({ mode: optional(string()) });
+const WorkspaceSchema = object({ project_dir: optional(string()) });
 const StatusJsonSchema = object({
 	model: optional(ModelSchema),
 	cost: optional(CostSchema),
@@ -622,6 +624,7 @@ const StatusJsonSchema = object({
 	token_usage: optional(TokenUsageSchema),
 	vim: optional(VimSchema),
 	cwd: optional(string()),
+	workspace: optional(WorkspaceSchema),
 	session_id: optional(string())
 });
 
@@ -1223,35 +1226,41 @@ const DEFAULT_SETTINGS = {
 				type: "burn-rate",
 				fg: "#ffffff",
 				bg: "#555555",
-				priority: 7
+				priority: 8
 			}
 		],
 		flex: "left"
 	}, {
 		widgets: [
 			{
+				type: "project",
+				fg: "#ffffff",
+				bg: "#264653",
+				priority: 5
+			},
+			{
 				type: "git-branch",
 				fg: "#ffffff",
 				bg: "#613583",
-				priority: 5
+				priority: 6
 			},
 			{
 				type: "git-changes",
 				fg: "#ffffff",
 				bg: "#7d4fa8",
-				priority: 8
+				priority: 9
 			},
 			{
 				type: "lines-changed",
 				fg: "#ffffff",
 				bg: "#0d7377",
-				priority: 9
+				priority: 10
 			},
 			{
 				type: "today-spend",
 				fg: "#ffffff",
 				bg: "#26a269",
-				priority: 6
+				priority: 7
 			},
 			{ type: "vim-mode" }
 		],
@@ -1284,11 +1293,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$6.join(xdg, "gccusage");
-	return path$6.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$7.join(xdg, "gccusage");
+	return path$7.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$6.join(getConfigDir(), "settings.json");
+	return path$7.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1372,23 +1381,23 @@ function formatConfigError(error, configPath) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$5.isAbsolute(home)) return home;
+	if (path$6.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$5.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$6.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$5.join(getHomeDir(), ".claude");
+	return path$6.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$5.join(getClaudeDataDir(), "projects");
+	return path$6.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$5.join(xdg, "gccusage");
-	return path$5.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$6.join(xdg, "gccusage");
+	return path$6.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
 	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
@@ -1396,7 +1405,7 @@ function ensureDir(dir) {
 function findJsonlFiles(dir) {
 	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$5.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$6.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1408,11 +1417,11 @@ function findSessionJsonlFiles(sessionId) {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$5.join(projectsDir, projectDir);
+			const fullPath = path$6.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$5.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$6.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
@@ -1426,7 +1435,7 @@ function findTodayJsonlFiles() {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$5.join(projectsDir, projectDir);
+			const fullPath = path$6.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
@@ -1594,7 +1603,7 @@ const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 //#endregion
 //#region src/cache/block-cache.ts
 function getBlockCachePath() {
-	return path$4.join(getCacheDir(), "blocks", "current.json");
+	return path$5.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
@@ -1614,7 +1623,7 @@ function loadBlockCache() {
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();
 	try {
-		ensureDir(path$4.dirname(cachePath));
+		ensureDir(path$5.dirname(cachePath));
 		fs$4.writeFileSync(cachePath, JSON.stringify(data));
 	} catch {}
 }
@@ -1651,7 +1660,7 @@ function detectBlock(sessionStartTime) {
 //#endregion
 //#region src/cache/pricing-cache.ts
 function getCachePath$1() {
-	return path$3.join(getCacheDir(), "pricing.json");
+	return path$4.join(getCacheDir(), "pricing.json");
 }
 function loadPricingCache(ttlMs) {
 	const cachePath = getCachePath$1();
@@ -1666,7 +1675,7 @@ function loadPricingCache(ttlMs) {
 function savePricingCache(data) {
 	const cachePath = getCachePath$1();
 	try {
-		ensureDir(path$3.dirname(cachePath));
+		ensureDir(path$4.dirname(cachePath));
 		const cache = {
 			timestamp: Date.now(),
 			data
@@ -1794,7 +1803,7 @@ function visibleLength(str) {
 //#endregion
 //#region src/data/daily-cost-tracker.ts
 function getDailyCostPath() {
-	return path$2.join(getCacheDir(), "daily-costs.json");
+	return path$3.join(getCacheDir(), "daily-costs.json");
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -1833,7 +1842,7 @@ function readDailyCostFile(now) {
 }
 function writeDailyCostFile(data) {
 	const filePath = getDailyCostPath();
-	ensureDir(path$2.dirname(filePath));
+	ensureDir(path$3.dirname(filePath));
 	fs$2.writeFileSync(filePath, JSON.stringify(data), "utf-8");
 }
 /**
@@ -1868,7 +1877,7 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 //#endregion
 //#region src/data/turn-tracker.ts
 function getTurnPath() {
-	return path$1.join(getCacheDir(), "turn-count.json");
+	return path$2.join(getCacheDir(), "turn-count.json");
 }
 /**
 * Increment and return the turn count for the given session.
@@ -1890,7 +1899,7 @@ function trackTurn(sessionId) {
 		count: 0
 	};
 	data.count++;
-	ensureDir(path$1.dirname(filePath));
+	ensureDir(path$2.dirname(filePath));
 	fs$1.writeFileSync(filePath, JSON.stringify(data), "utf-8");
 	return data.count;
 }
@@ -2023,10 +2032,31 @@ const modelWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/alert-colors.ts
+/**
+* The set of backgrounds widgets can paint at render time from thresholds,
+* rather than from configured colors — so they never appear in
+* DEFAULT_SETTINGS and a static scan of the config misses them entirely.
+*
+* These six colours are not six independent choices: each is required to
+* stay CIEDE2000-distinct from every other one a segment could end up
+* adjacent to (issues #36, #40, #45). Keeping them in one module, rather
+* than scattered across the widgets that use them, is what lets that
+* mutual-distinctness constraint be checked in one place instead of via
+* cross-referencing comments that can drift out of sync.
+*/
+const ALERT_AMBER = "#a67c00";
+const ALERT_RED = "#c01c28";
+const COMPACT_COUNTDOWN_AMBER = "#b8860b";
+const COMPACT_COUNTDOWN_RED = "#a01822";
+const VIM_NORMAL = "#2ec27e";
+const VIM_INSERT = "#e5a50a";
+
+//#endregion
 //#region src/widgets/session-cost.ts
 function alertBg$1(cost, warn, danger, configBg) {
-	if (cost >= danger) return "#c01c28";
-	if (cost >= warn) return "#a67c00";
+	if (cost >= danger) return ALERT_RED;
+	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
 const sessionCostWidget = { render(context, config) {
@@ -2044,8 +2074,8 @@ const sessionCostWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/today-spend.ts
 function alertBg(cost, warn, danger, configBg) {
-	if (cost >= danger) return "#c01c28";
-	if (cost >= warn) return "#a67c00";
+	if (cost >= danger) return ALERT_RED;
+	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
 const todaySpendWidget = { render(context, config) {
@@ -2199,12 +2229,12 @@ function buildBar(ratio) {
 function thresholdBg(usage, configBg) {
 	const remaining = usage.usedTokens !== null && usage.windowSize !== null ? tokensUntilCompact(usage.usedTokens, usage.windowSize) : null;
 	if (remaining !== null) {
-		if (remaining <= RED_TOKENS) return "#c01c28";
-		if (remaining <= AMBER_TOKENS) return "#a67c00";
+		if (remaining <= RED_TOKENS) return ALERT_RED;
+		if (remaining <= AMBER_TOKENS) return ALERT_AMBER;
 		return configBg;
 	}
-	if (usage.ratio >= THRESHOLD_DANGER) return "#c01c28";
-	if (usage.ratio >= THRESHOLD_WARN) return "#a67c00";
+	if (usage.ratio >= THRESHOLD_DANGER) return ALERT_RED;
+	if (usage.ratio >= THRESHOLD_WARN) return ALERT_AMBER;
 	return configBg;
 }
 const contextPercentWidget = { render(context, config) {
@@ -2382,6 +2412,35 @@ const cwdWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/project.ts
+/**
+* The current project's name, from `workspace.project_dir` — the repo root.
+*
+* Deliberately never reads `stdin.cwd`: cwd is wherever the shell happened to
+* be when Claude Code started, so its basename names a subdirectory whenever
+* the session did not start at the root (#59). When `project_dir` is absent
+* this declines rather than falling back to cwd, because that fallback is
+* silently wrong in exactly the case the widget exists to handle.
+*
+* Two checkouts of the same repo still render identically; that is a known
+* limit of any basename, recorded in the #48 design doc.
+*/
+const projectWidget = { render(context, config) {
+	const projectDir = context.stdin.workspace?.project_dir;
+	if (!projectDir) return null;
+	const dir = projectDir.replace(/\/+$/, "") || "/";
+	const home = process.env["HOME"];
+	const name = dir === home ? "~" : path$1.basename(dir) || "/";
+	const label = config.label ?? "";
+	const text = label ? `${label} ${name}` : name;
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/custom-text.ts
 const customTextWidget = { render(_context, config) {
 	const text = config.text ?? "";
@@ -2506,8 +2565,8 @@ const linesChangedWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/vim-mode.ts
 const MODE_COLORS = {
-	NORMAL: "#2ec27e",
-	INSERT: "#e5a50a"
+	NORMAL: VIM_NORMAL,
+	INSERT: VIM_INSERT
 };
 const vimModeWidget = { render(context, config) {
 	const mode = context.stdin.vim?.mode;
@@ -2576,11 +2635,11 @@ const compactCountdownWidget = { render(context, config) {
 	if (remaining <= 0) return {
 		text: "Compact imminent!",
 		fg: "#ffffff",
-		bg: "#a01822"
+		bg: COMPACT_COUNTDOWN_RED
 	};
 	let bg = config.bg;
-	if (remaining <= RED_TOKENS) bg = "#a01822";
-	else if (remaining <= AMBER_TOKENS) bg = "#b8860b";
+	if (remaining <= RED_TOKENS) bg = COMPACT_COUNTDOWN_RED;
+	else if (remaining <= AMBER_TOKENS) bg = COMPACT_COUNTDOWN_AMBER;
 	return {
 		text: `~${formatTokens(remaining)} left`,
 		fg: config.fg,
@@ -2619,6 +2678,7 @@ const WIDGET_MAP = {
 	"per-model": perModelBreakdownWidget,
 	"session-clock": sessionClockWidget,
 	cwd: cwdWidget,
+	project: projectWidget,
 	"custom-text": customTextWidget,
 	"custom-command": customCommandWidget,
 	separator: separatorWidget,
