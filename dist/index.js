@@ -615,6 +615,7 @@ const TokenUsageSchema = object({
 	cache_read_input_tokens: optional(number(), 0)
 });
 const VimSchema = object({ mode: optional(string()) });
+const WorkspaceSchema = object({ project_dir: optional(string()) });
 const StatusJsonSchema = object({
 	model: optional(ModelSchema),
 	cost: optional(CostSchema),
@@ -622,6 +623,7 @@ const StatusJsonSchema = object({
 	token_usage: optional(TokenUsageSchema),
 	vim: optional(VimSchema),
 	cwd: optional(string()),
+	workspace: optional(WorkspaceSchema),
 	session_id: optional(string())
 });
 
