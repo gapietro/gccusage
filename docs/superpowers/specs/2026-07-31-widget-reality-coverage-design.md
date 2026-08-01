@@ -113,7 +113,9 @@ notice the linked issue.
 
 ### Determinism
 
-- `vi.setSystemTime` from a `capturedAt` field pins `session-clock` and `block-timer`.
+- `vi.setSystemTime` from a `derivedAt` field pins `session-clock` and `block-timer`.
+  `derivedAt` is the instant the derived context was computed, not the instant the
+  stdin payload was captured (the two can be ~30 minutes apart).
 - `git-branch` / `git-changes` run against a scratch repo with a known branch and diff.
 
 No widget falls back to a shape-only assertion.
