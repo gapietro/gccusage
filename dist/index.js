@@ -2632,11 +2632,23 @@ const apiLatencyWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/token-breakdown.ts
+/**
+* Session input and output tokens in one segment.
+*
+* Reads `metrics.session`, the JSONL-derived cumulative totals — the same
+* source `tokens-input` and `tokens-output` read, so the three agree about
+* one session rather than contradicting each other on the same bar (#58).
+*
+* Deliberately NOT `context_window.total_input_tokens` /
+* `total_output_tokens`, which this widget used to read: those are a snapshot
+* of the last assistant message, not session totals. On the captured 2.1.220
+* payload that rendered `In:268.8k Out:536` for a session whose real totals
+* were 396 in and 137.8k out. `compact-countdown` had the identical
+* misreading before PR #38.
+*/
 const tokenBreakdownWidget = { render(context, config) {
-	const cw = context.stdin.context_window;
-	if (!cw || typeof cw !== "object") return null;
-	const input = cw.total_input_tokens ?? 0;
-	const output = cw.total_output_tokens ?? 0;
+	const input = context.metrics.session.inputTokens;
+	const output = context.metrics.session.outputTokens;
 	if (input === 0 && output === 0) return null;
 	const text = `In:${formatTokens(input)} Out:${formatTokens(output)}`;
 	return {

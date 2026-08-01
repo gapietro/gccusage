@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
 import type { RenderContext } from "../types/render-context.js";
 import { cwdWidget } from "../widgets/cwd.js";
+import { tokenBreakdownWidget } from "../widgets/token-breakdown.js";
+import { tokensInputWidget } from "../widgets/tokens-input.js";
+import { tokensOutputWidget } from "../widgets/tokens-output.js";
 import { modelWidget } from "../widgets/model.js";
 import { sessionCostWidget } from "../widgets/session-cost.js";
 import { contextPercentWidget } from "../widgets/context-percent.js";
@@ -547,6 +550,70 @@ describe("projectWidget", () => {
       label: "proj",
     });
     expect(out?.text).toBe("proj gccusage");
+  });
+});
+
+describe("tokenBreakdownWidget", () => {
+  // The real numbers from the 2.1.220 payload in #58: context_window's totals
+  // are a last-assistant-message snapshot, the session really billed 122 in
+  // and 37,659 out. Both are present here so the assertion distinguishes the
+  // two sources rather than passing on whichever one is wired up.
+  function ctx(session: Partial<RenderContext["metrics"]["session"]>): RenderContext {
+    return makeContext({
+      stdin: {
+        context_window: { total_input_tokens: 115847, total_output_tokens: 2 },
+      } as never,
+      metrics: {
+        byModel: new Map(),
+        session: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          ...session,
+        },
+        today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      },
+    });
+  }
+
+  it("reads session totals, not the context_window snapshot (#58)", () => {
+    const context = ctx({ inputTokens: 122, outputTokens: 37659 });
+    const out = tokenBreakdownWidget.render(context, { type: "token-breakdown" });
+    expect(out?.text).toBe("In:122 Out:37.7k");
+  });
+
+  it("agrees with tokens-input and tokens-output about the same session (#58)", () => {
+    // The defect's visible symptom was three widgets on one bar reporting
+    // different numbers for one session.
+    const context = ctx({ inputTokens: 122, outputTokens: 37659 });
+    const breakdown = tokenBreakdownWidget.render(context, { type: "token-breakdown" })!.text;
+    const input = tokensInputWidget.render(context, { type: "tokens-input" })!.text;
+    const output = tokensOutputWidget.render(context, { type: "tokens-output" })!.text;
+    expect(breakdown).toBe(`In:${input.replace("In: ", "")} Out:${output.replace("Out: ", "")}`);
+  });
+
+  it("renders without a context_window block at all", () => {
+    const context = makeContext({
+      stdin: {} as never,
+      metrics: {
+        byModel: new Map(),
+        session: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      },
+    });
+    expect(tokenBreakdownWidget.render(context, { type: "token-breakdown" })?.text).toBe(
+      "In:10 Out:20",
+    );
+  });
+
+  it("declines when nothing has been measured", () => {
+    expect(tokenBreakdownWidget.render(ctx({}), { type: "token-breakdown" })).toBeNull();
   });
 });
 
