@@ -63,10 +63,21 @@ export function shrinkOutputs(
   const result = outputs.map((output) => ({ ...output }));
   let remaining = overflow;
 
+  // Indices `trimTo` cannot shorten any further without breaching the floor.
+  // Without this, a segment made of multi-column (astral) characters can sit
+  // ABOVE the floor (say, width 9) purely as `trimTo`'s peek-ahead overshoot,
+  // so the `width > MIN_SHRUNK_TEXT` eligibility check below keeps re-selecting
+  // it — and re-trimming it to the exact same text forever, since the very
+  // same peek-ahead refuses to take it down to 7. Comparing `trimTo`'s output
+  // width against the input width (not against MIN_SHRUNK_TEXT) is what
+  // detects that zero progress was made, regardless of why.
+  const stuck = new Set<number>();
+
   while (remaining > 0) {
     let widest = -1;
     let widestWidth = 0;
     for (let i = 0; i < result.length; i++) {
+      if (stuck.has(i)) continue;
       const output = result[i]!;
       if (!output.shrinkable) continue;
       const width = visibleLength(output.text);
@@ -75,8 +86,8 @@ export function shrinkOutputs(
         widestWidth = width;
       }
     }
-    // Every shrinkable segment sits at the floor; the caller's truncation is
-    // the backstop from here.
+    // Every shrinkable segment sits at the floor (or is stuck just above it);
+    // the caller's truncation is the backstop from here.
     if (widest === -1) break;
 
     // Take this segment down toward the next-widest rather than all the way in
@@ -85,16 +96,29 @@ export function shrinkOutputs(
     const runnerUp = Math.max(
       MIN_SHRUNK_TEXT,
       ...result
-        .filter((o, i) => o.shrinkable && i !== widest)
+        .filter((o, i) => o.shrinkable && i !== widest && !stuck.has(i))
         .map((o) => visibleLength(o.text)),
     );
     const target = Math.max(MIN_SHRUNK_TEXT, runnerUp, widestWidth - remaining);
     // `widestWidth > MIN_SHRUNK_TEXT` and `remaining >= 1`, so `target` is
-    // always strictly less than `widestWidth` — the loop cannot spin.
+    // always strictly less than `widestWidth` — the loop cannot spin ON THAT
+    // ARITHMETIC. It can still spin if `trimTo` itself refuses to move (see
+    // `stuck` above), which is why progress is verified below rather than
+    // assumed from this bound.
     const capped = Math.min(target, widestWidth - 1);
 
     const trimmed = trimTo(result[widest]!.text, capped);
-    remaining -= widestWidth - visibleLength(trimmed);
+    const trimmedWidth = visibleLength(trimmed);
+    if (trimmedWidth >= widestWidth) {
+      // `trimTo`'s floor peek-ahead declined to remove anything (the next
+      // code point would have breached MIN_SHRUNK_TEXT). Retrying this
+      // segment would repeat the exact same refusal forever, so stop
+      // considering it and let another segment (or the outer break above)
+      // take over.
+      stuck.add(widest);
+      continue;
+    }
+    remaining -= widestWidth - trimmedWidth;
     result[widest] = { ...result[widest]!, text: trimmed };
   }
 
