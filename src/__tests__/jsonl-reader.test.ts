@@ -63,6 +63,54 @@ describe("parseJsonlContent", () => {
     expect(entries[0]!.model).toBeUndefined();
     expect(entries[0]!.usage).toBeUndefined();
   });
+
+  it("counts one entry per message.id, not per content-block line", () => {
+    // Claude Code splits one API response across a line per content block,
+    // repeating an identical usage object on each. Counting lines double-counts
+    // tokens, and does it non-uniformly: responses with more blocks weigh more.
+    const usage = '"usage":{"input_tokens":2,"output_tokens":296,"cache_read_input_tokens":20233}';
+    const content = [
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"thinking"}]}}`,
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"text"}]}}`,
+      `{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-4-6",${usage},"content":[{"type":"tool_use"}]}}`,
+    ].join("\n");
+
+    const entries = parseJsonlContent(content);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.usage?.output_tokens).toBe(296);
+  });
+
+  it("keeps distinct message ids as separate entries", () => {
+    const usage = '"usage":{"input_tokens":10,"output_tokens":20}';
+    const content = [
+      `{"type":"assistant","message":{"id":"msg_01",${usage}}}`,
+      `{"type":"assistant","message":{"id":"msg_02",${usage}}}`,
+    ].join("\n");
+
+    expect(parseJsonlContent(content)).toHaveLength(2);
+  });
+
+  it("keeps usage-bearing entries that carry no message id", () => {
+    // The legacy flat format has no `message` wrapper and was never split
+    // across lines, so it must not be collapsed.
+    const content = [
+      '{"type":"response","model":"claude-sonnet-4-20250514","usage":{"input_tokens":100}}',
+      '{"type":"response","model":"claude-sonnet-4-20250514","usage":{"input_tokens":100}}',
+    ].join("\n");
+
+    expect(parseJsonlContent(content)).toHaveLength(2);
+  });
+
+  it("leaves lines that carry no usage alone", () => {
+    // Only token sums are at risk from duplication. A repeated id on a
+    // usage-free line must not suppress costUsd or timestamp data.
+    const content = [
+      '{"type":"assistant","message":{"id":"msg_01"},"costUsd":0.25}',
+      '{"type":"assistant","message":{"id":"msg_01"},"costUsd":0.25}',
+    ].join("\n");
+
+    expect(parseJsonlContent(content)).toHaveLength(2);
+  });
 });
 
 describe("filterTodayEntries", () => {

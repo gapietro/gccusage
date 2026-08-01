@@ -25,13 +25,47 @@ export function parseJsonlFile(filePath: string): JsonlEntry[] {
   }
 }
 
+/**
+ * Parse a transcript's lines into entries, one per API response.
+ *
+ * Claude Code writes one line per content block — a response with a
+ * `thinking` block, a `text` block and two `tool_use` blocks is four
+ * `type: "assistant"` lines — and repeats a byte-identical `message.usage`
+ * on every one of them. Counting lines therefore over-counts tokens by
+ * roughly 2.1x on a real corpus, and does so non-uniformly: responses with
+ * more content blocks weigh more, so it is not a constant factor that
+ * cancels out downstream.
+ *
+ * The gate is narrow on purpose. A line is dropped only when it has a
+ * `message.id`, carries usage, and that id has been seen. Entries without a
+ * `message.id` stay separate: the legacy flat format has no `message`
+ * wrapper and was never split across lines. Entries without usage stay too,
+ * so nothing reading `costUsd`, `timestamp` or `sessionId` is affected.
+ */
 export function parseJsonlContent(content: string): JsonlEntry[] {
   const entries: JsonlEntry[] = [];
+  const seenMessageIds = new Set<string>();
+
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const parsed = JSON.parse(line);
-      entries.push(normalizeEntry(parsed));
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      const entry = normalizeEntry(parsed);
+
+      if (entry.usage) {
+        const message =
+          typeof parsed["message"] === "object" && parsed["message"] !== null
+            ? (parsed["message"] as Record<string, unknown>)
+            : undefined;
+        const messageId = typeof message?.["id"] === "string" ? message["id"] : null;
+
+        if (messageId !== null) {
+          if (seenMessageIds.has(messageId)) continue;
+          seenMessageIds.add(messageId);
+        }
+      }
+
+      entries.push(entry);
     } catch {
       // skip malformed lines
     }
