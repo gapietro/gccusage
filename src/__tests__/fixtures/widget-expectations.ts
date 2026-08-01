@@ -32,7 +32,11 @@
 export interface WidgetExpectation {
   /** Exact text against opus5-1m-mid, or null when the widget declines to render. */
   text: string | null;
-  /** Why this is the right output — or why the widget correctly declines. */
+  /**
+   * Why `text` is the right output; or why the widget correctly declines
+   * (`text: null`); or, for `knownWrong` entries, the mechanism that
+   * produces this known-wrong value (not an argument that it is correct).
+   */
   why: string;
   /** Issue number tracking confirmed-wrong output. */
   knownWrong?: number;
@@ -63,5 +67,8 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "token-breakdown": { text: "In:117.3k Out:3", why: "context_window totals — a last-message snapshot", knownWrong: 58 },
   "session-timer": { text: "27m 44s", why: "cost.total_duration_ms", knownWrong: 61 },
   "compact-countdown": { text: "~847.0k left", why: "windowSize - used - 33k reserve" },
-  "turn-counter": { text: "#9", why: "turnCount from the turn tracker" },
+  "turn-counter": {
+    text: "#9",
+    why: "controlled.turnCount fixture input (9) — the live turn tracker is a single-slot cache and cannot be recorded retroactively",
+  },
 };
