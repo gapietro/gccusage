@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import type { RenderContext } from "../types/render-context.js";
 import { modelWidget } from "../widgets/model.js";
 import { sessionCostWidget } from "../widgets/session-cost.js";
@@ -7,6 +7,7 @@ import { separatorWidget } from "../widgets/separator.js";
 import { todaySpendWidget } from "../widgets/today-spend.js";
 import { blockTimerWidget } from "../widgets/block-timer.js";
 import { compactCountdownWidget } from "../widgets/compact-countdown.js";
+import { projectWidget } from "../widgets/project.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -454,5 +455,83 @@ describe("compactCountdownWidget", () => {
     });
     expect(result!.text).toBe("~5.0k left");
     expect(result!.bg).toBe("#a01822");
+  });
+});
+
+describe("projectWidget", () => {
+  // HOME is read directly by the widget (as cwd.ts does), so pin it and put
+  // it back — src/__tests__/error-line.test.ts uses the same save/restore.
+  const originalHome = process.env["HOME"];
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+  });
+
+  function ctx(workspace: unknown, cwd?: string): RenderContext {
+    return makeContext({ stdin: { cwd, workspace } as never });
+  }
+
+  it("renders the basename of project_dir", () => {
+    const out = projectWidget.render(ctx({ project_dir: "/Users/x/projects/gccusage" }), {
+      type: "project",
+    });
+    expect(out?.text).toBe("gccusage");
+  });
+
+  it("ignores cwd when the session started in a subdirectory (#59)", () => {
+    const out = projectWidget.render(
+      ctx({ project_dir: "/Users/x/projects/gccusage" }, "/Users/x/projects/gccusage/src/widgets"),
+      { type: "project" },
+    );
+    expect(out?.text).toBe("gccusage");
+  });
+
+  it("ignores a trailing slash", () => {
+    const out = projectWidget.render(ctx({ project_dir: "/Users/x/projects/gccusage/" }), {
+      type: "project",
+    });
+    expect(out?.text).toBe("gccusage");
+  });
+
+  it("renders ~ when the project dir is HOME itself", () => {
+    process.env["HOME"] = "/Users/x";
+    const out = projectWidget.render(ctx({ project_dir: "/Users/x" }), { type: "project" });
+    expect(out?.text).toBe("~");
+  });
+
+  it("renders / for the filesystem root", () => {
+    const out = projectWidget.render(ctx({ project_dir: "/" }), { type: "project" });
+    expect(out?.text).toBe("/");
+  });
+
+  it("falls back to the basename when HOME is unset", () => {
+    delete process.env["HOME"];
+    const out = projectWidget.render(ctx({ project_dir: "/Users/x/projects/gccusage" }), {
+      type: "project",
+    });
+    expect(out?.text).toBe("gccusage");
+  });
+
+  it("declines when workspace is absent rather than falling back to cwd", () => {
+    // A cwd fallback would be right whenever the session started at the repo
+    // root and silently wrong whenever it did not — the #59 defect with no
+    // signal that it fired. Fail closed instead.
+    const out = projectWidget.render(ctx(undefined, "/Users/x/projects/gccusage/src/widgets"), {
+      type: "project",
+    });
+    expect(out).toBeNull();
+  });
+
+  it("declines when project_dir is an empty string", () => {
+    const out = projectWidget.render(ctx({ project_dir: "" }), { type: "project" });
+    expect(out).toBeNull();
+  });
+
+  it("prefixes a configured label", () => {
+    const out = projectWidget.render(ctx({ project_dir: "/Users/x/projects/gccusage" }), {
+      type: "project",
+      label: "proj",
+    });
+    expect(out?.text).toBe("proj gccusage");
   });
 });

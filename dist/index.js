@@ -8,6 +8,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as path$7 from "node:path";
 import * as path$6 from "node:path";
 import * as path$5 from "node:path";
 import * as path$4 from "node:path";
@@ -1286,11 +1287,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$6.join(xdg, "gccusage");
-	return path$6.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$7.join(xdg, "gccusage");
+	return path$7.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$6.join(getConfigDir(), "settings.json");
+	return path$7.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1374,23 +1375,23 @@ function formatConfigError(error, configPath) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$5.isAbsolute(home)) return home;
+	if (path$6.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$5.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$6.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$5.join(getHomeDir(), ".claude");
+	return path$6.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$5.join(getClaudeDataDir(), "projects");
+	return path$6.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$5.join(xdg, "gccusage");
-	return path$5.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$6.join(xdg, "gccusage");
+	return path$6.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
 	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
@@ -1398,7 +1399,7 @@ function ensureDir(dir) {
 function findJsonlFiles(dir) {
 	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$5.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$6.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1410,11 +1411,11 @@ function findSessionJsonlFiles(sessionId) {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$5.join(projectsDir, projectDir);
+			const fullPath = path$6.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$5.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$6.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
@@ -1428,7 +1429,7 @@ function findTodayJsonlFiles() {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$5.join(projectsDir, projectDir);
+			const fullPath = path$6.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
@@ -1596,7 +1597,7 @@ const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 //#endregion
 //#region src/cache/block-cache.ts
 function getBlockCachePath() {
-	return path$4.join(getCacheDir(), "blocks", "current.json");
+	return path$5.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
@@ -1616,7 +1617,7 @@ function loadBlockCache() {
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();
 	try {
-		ensureDir(path$4.dirname(cachePath));
+		ensureDir(path$5.dirname(cachePath));
 		fs$4.writeFileSync(cachePath, JSON.stringify(data));
 	} catch {}
 }
@@ -1653,7 +1654,7 @@ function detectBlock(sessionStartTime) {
 //#endregion
 //#region src/cache/pricing-cache.ts
 function getCachePath$1() {
-	return path$3.join(getCacheDir(), "pricing.json");
+	return path$4.join(getCacheDir(), "pricing.json");
 }
 function loadPricingCache(ttlMs) {
 	const cachePath = getCachePath$1();
@@ -1668,7 +1669,7 @@ function loadPricingCache(ttlMs) {
 function savePricingCache(data) {
 	const cachePath = getCachePath$1();
 	try {
-		ensureDir(path$3.dirname(cachePath));
+		ensureDir(path$4.dirname(cachePath));
 		const cache = {
 			timestamp: Date.now(),
 			data
@@ -1796,7 +1797,7 @@ function visibleLength(str) {
 //#endregion
 //#region src/data/daily-cost-tracker.ts
 function getDailyCostPath() {
-	return path$2.join(getCacheDir(), "daily-costs.json");
+	return path$3.join(getCacheDir(), "daily-costs.json");
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -1835,7 +1836,7 @@ function readDailyCostFile(now) {
 }
 function writeDailyCostFile(data) {
 	const filePath = getDailyCostPath();
-	ensureDir(path$2.dirname(filePath));
+	ensureDir(path$3.dirname(filePath));
 	fs$2.writeFileSync(filePath, JSON.stringify(data), "utf-8");
 }
 /**
@@ -1870,7 +1871,7 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 //#endregion
 //#region src/data/turn-tracker.ts
 function getTurnPath() {
-	return path$1.join(getCacheDir(), "turn-count.json");
+	return path$2.join(getCacheDir(), "turn-count.json");
 }
 /**
 * Increment and return the turn count for the given session.
@@ -1892,7 +1893,7 @@ function trackTurn(sessionId) {
 		count: 0
 	};
 	data.count++;
-	ensureDir(path$1.dirname(filePath));
+	ensureDir(path$2.dirname(filePath));
 	fs$1.writeFileSync(filePath, JSON.stringify(data), "utf-8");
 	return data.count;
 }
@@ -2384,6 +2385,35 @@ const cwdWidget = { render(context, config) {
 } };
 
 //#endregion
+//#region src/widgets/project.ts
+/**
+* The current project's name, from `workspace.project_dir` — the repo root.
+*
+* Deliberately never reads `stdin.cwd`: cwd is wherever the shell happened to
+* be when Claude Code started, so its basename names a subdirectory whenever
+* the session did not start at the root (#59). When `project_dir` is absent
+* this declines rather than falling back to cwd, because that fallback is
+* silently wrong in exactly the case the widget exists to handle.
+*
+* Two checkouts of the same repo still render identically; that is a known
+* limit of any basename, recorded in the #48 design doc.
+*/
+const projectWidget = { render(context, config) {
+	const projectDir = context.stdin.workspace?.project_dir;
+	if (!projectDir) return null;
+	const dir = projectDir.replace(/\/+$/, "") || "/";
+	const home = process.env["HOME"];
+	const name = dir === home ? "~" : path$1.basename(dir) || "/";
+	const label = config.label ?? "";
+	const text = label ? `${label} ${name}` : name;
+	return {
+		text,
+		fg: config.fg,
+		bg: config.bg
+	};
+} };
+
+//#endregion
 //#region src/widgets/custom-text.ts
 const customTextWidget = { render(_context, config) {
 	const text = config.text ?? "";
@@ -2621,6 +2651,7 @@ const WIDGET_MAP = {
 	"per-model": perModelBreakdownWidget,
 	"session-clock": sessionClockWidget,
 	cwd: cwdWidget,
+	project: projectWidget,
 	"custom-text": customTextWidget,
 	"custom-command": customCommandWidget,
 	separator: separatorWidget,
