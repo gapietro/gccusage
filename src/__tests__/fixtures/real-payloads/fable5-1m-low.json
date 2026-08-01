@@ -1,7 +1,7 @@
 {
   "name": "fable5-1m-low",
   "claudeCodeVersion": "2.1.220",
-  "capturedAt": 1785549250888,
+  "derivedAt": 1785549701741,
   "homePlaceholder": "/home/testuser",
   "stdin": {
     "session_id": "00000000-0000-4000-8000-000000000000",
@@ -86,14 +86,14 @@
         "cacheReadTokens": 697904
       },
       "today": {
-        "inputTokens": 4062,
-        "outputTokens": 1756881,
-        "cacheCreationTokens": 7552186,
-        "cacheReadTokens": 526345937
+        "inputTokens": 4138,
+        "outputTokens": 1800593,
+        "cacheCreationTokens": 7612286,
+        "cacheReadTokens": 535829760
       }
     },
     "sessionCostUsd": 1.7673759999999998,
-    "todayCostUsd": 587.0514986000001,
+    "todayCostUsd": 608.5766846500002,
     "costByModel": [
       [
         "claude-fable-5",
@@ -101,16 +101,18 @@
       ]
     ],
     "sessionStartTime": 1785521049499,
-    "turnCount": 1,
     "block": {
       "blockStartTime": 1785541709669,
-      "elapsedMs": 7541219,
-      "remainingMs": 10458781,
+      "elapsedMs": 7992072,
+      "remainingMs": 10007928,
       "blockDurationMs": 18000000
     },
     "burnRate": {
       "costPerHour": 0.24074973888569512,
       "costPerMinute": 0.0040124956480949185
     }
+  },
+  "controlled": {
+    "turnCount": 9
   }
 }

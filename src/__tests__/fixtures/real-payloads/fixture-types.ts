@@ -13,12 +13,29 @@ import type { BurnRate } from "../../../types/burn-rate.js";
 export interface RealPayloadFixture {
   name: string;
   claudeCodeVersion: string;
-  /** Epoch ms at capture. Pins Date.now() so elapsed-time widgets are exact. */
-  capturedAt: number;
+  /**
+   * Epoch ms when `derived` was computed (the instant `buildRenderContext()`
+   * ran during fixture generation) — NOT when `stdin` was captured. The raw
+   * `stdin` line was tee-captured earlier (up to ~30 minutes earlier, in this
+   * corpus); `derived` was computed later, against the live JSONL transcript
+   * for that same session, which keeps growing in between. `stdin` and
+   * `derived` are therefore two different instants of the SAME session, not
+   * one simultaneous snapshot. Pin `Date.now()` to this value when testing
+   * elapsed-time widgets.
+   */
+  derivedAt: number;
   /** Absolute path prefix standing in for the real home dir in sanitized paths. */
   homePlaceholder: string;
   /** The raw payload as Claude Code sent it, with identifying values replaced. */
   stdin: Record<string, unknown>;
+  /**
+   * Values computed by a real `buildRenderContext()` run against the real
+   * session transcript. RECORDED, not invented — hand-written context values
+   * are exactly the failure mode #47 exists to close: they encode what we
+   * believe the pipeline produces rather than what it does produce. Never
+   * hand-edit anything in this block; if a value needs to change, regenerate
+   * the fixture.
+   */
   derived: {
     /** AggregatedMetrics as recorded, except byModel is entries (Maps don't survive JSON). */
     metrics: Omit<AggregatedMetrics, "byModel"> & { byModel: [string, TokenMetrics][] };
@@ -27,8 +44,22 @@ export interface RealPayloadFixture {
     /** Map is not JSON-serialisable; stored as entries. */
     costByModel: [string, number][];
     sessionStartTime: number | null;
-    turnCount: number;
     block: BlockMetrics | null;
     burnRate: BurnRate | null;
+  };
+  /**
+   * Deliberately chosen test inputs, NOT recordings. `turnCount` lives here,
+   * separate from `derived`, because `src/data/turn-tracker.ts`'s
+   * `trackTurn()` is a live, single-slot global cache
+   * (`~/.cache/gccusage/turn-count.json`, one `sessionId` field at a time) —
+   * its per-session history cannot be reconstructed after the fact.
+   * Generating fixtures for three different session ids back-to-back in one
+   * process makes each call see a session-id mismatch, reset the cache to 0,
+   * and increment to 1 — a "recorded" turnCount would only encode generation
+   * order, not real pipeline output. Everything under `derived`, by
+   * contrast, IS a real recording and must never be hand-edited.
+   */
+  controlled: {
+    turnCount: number;
   };
 }

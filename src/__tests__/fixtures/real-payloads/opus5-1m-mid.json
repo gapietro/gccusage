@@ -1,7 +1,7 @@
 {
   "name": "opus5-1m-mid",
   "claudeCodeVersion": "2.1.220",
-  "capturedAt": 1785549250808,
+  "derivedAt": 1785549701658,
   "homePlaceholder": "/home/testuser",
   "stdin": {
     "session_id": "00000000-0000-4000-8000-000000000000",
@@ -86,14 +86,14 @@
         "cacheReadTokens": 35129989
       },
       "today": {
-        "inputTokens": 4062,
-        "outputTokens": 1756881,
-        "cacheCreationTokens": 7552186,
-        "cacheReadTokens": 526345937
+        "inputTokens": 4138,
+        "outputTokens": 1800593,
+        "cacheCreationTokens": 7612286,
+        "cacheReadTokens": 535829760
       }
     },
     "sessionCostUsd": 23.52721549999999,
-    "todayCostUsd": 587.0514986000001,
+    "todayCostUsd": 608.5766846500002,
     "costByModel": [
       [
         "claude-opus-5",
@@ -101,16 +101,18 @@
       ]
     ],
     "sessionStartTime": 1785541709669,
-    "turnCount": 1,
     "block": {
       "blockStartTime": 1785541709669,
-      "elapsedMs": 7541136,
-      "remainingMs": 10458864,
+      "elapsedMs": 7991989,
+      "remainingMs": 10008011,
       "blockDurationMs": 18000000
     },
     "burnRate": {
       "costPerHour": 13.267947960203973,
       "costPerMinute": 0.22113246600339953
     }
+  },
+  "controlled": {
+    "turnCount": 9
   }
 }
