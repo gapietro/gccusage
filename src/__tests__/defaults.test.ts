@@ -89,6 +89,10 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       stdin: {
         model: "claude-sonnet-4-20250514",
         cwd: process.cwd(),
+        // Without this the `project` widget declines and the sweeps below
+        // silently cover zero of its adjacencies — the same blind spot that
+        // let 12 dormant widgets go unexercised (#47).
+        workspace: { project_dir: process.cwd() },
         context_window: {
           used_percentage: point.used,
           context_window_size: WINDOW_SIZE,
@@ -234,5 +238,43 @@ describe("shipped default colors", () => {
 
   it("round-trips through its own schema", () => {
     expect(v.safeParse(SettingsSchema, DEFAULT_SETTINGS).success).toBe(true);
+  });
+});
+
+describe("project segment palette", () => {
+  // The rendered-adjacency sweep above deliberately does NOT guard the
+  // palette itself — see the comment on assertEveryPieceVisible. A wide
+  // separator is only emitted once colorDistance already cleared
+  // MIN_SEPARATOR_DELTA, so re-asserting it there is a tautology, and two
+  // backgrounds that drift together degrade to the thin glyph instead of
+  // failing. #48 asks specifically that this segment's background clear ΔE 8,
+  // and renderCompact flattens both lines before sorting by priority, so it
+  // can sit beside any other segment — check against all of them.
+
+  // Backgrounds set at render time from thresholds, which never appear in
+  // DEFAULT_SETTINGS: context-percent/session-cost/today-spend alerts,
+  // compact-countdown's own palette, and vim-mode's per-mode colors.
+  const RUNTIME_BACKGROUNDS = ["#a67c00", "#c01c28", "#b8860b", "#a01822", "#2ec27e", "#e5a50a"];
+
+  const configured = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
+  const project = configured.find((w) => w.type === "project");
+
+  it("is on the default bar with a background", () => {
+    expect(project?.bg).toBeDefined();
+  });
+
+  it("clears the separator floor against every background the bar can paint", () => {
+    const others = [
+      ...configured.filter((w) => w.type !== "project" && w.bg !== undefined).map((w) => [w.type, w.bg!] as const),
+      ...RUNTIME_BACKGROUNDS.map((bg) => [`runtime ${bg}`, bg] as const),
+    ];
+    for (const [type, bg] of others) {
+      const distance = colorDistance(project!.bg!, bg);
+      expect(
+        distance,
+        `project bg ${project!.bg} is only ΔE ${distance.toFixed(2)} from ${type} bg ${bg} ` +
+          `(floor ${MIN_SEPARATOR_DELTA})`,
+      ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+    }
   });
 });

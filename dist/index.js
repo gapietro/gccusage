@@ -1226,35 +1226,41 @@ const DEFAULT_SETTINGS = {
 				type: "burn-rate",
 				fg: "#ffffff",
 				bg: "#555555",
-				priority: 7
+				priority: 8
 			}
 		],
 		flex: "left"
 	}, {
 		widgets: [
 			{
+				type: "project",
+				fg: "#ffffff",
+				bg: "#264653",
+				priority: 5
+			},
+			{
 				type: "git-branch",
 				fg: "#ffffff",
 				bg: "#613583",
-				priority: 5
+				priority: 6
 			},
 			{
 				type: "git-changes",
 				fg: "#ffffff",
 				bg: "#7d4fa8",
-				priority: 8
+				priority: 9
 			},
 			{
 				type: "lines-changed",
 				fg: "#ffffff",
 				bg: "#0d7377",
-				priority: 9
+				priority: 10
 			},
 			{
 				type: "today-spend",
 				fg: "#ffffff",
 				bg: "#26a269",
-				priority: 6
+				priority: 7
 			},
 			{ type: "vim-mode" }
 		],
