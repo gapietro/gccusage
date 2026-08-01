@@ -91,16 +91,20 @@ function gitEnvFor(dir: string): NodeJS.ProcessEnv {
  * draft of `default-layout-width.test.ts`'s "busiest bar" test passed
  * vacuously: it never measured two of the six segments it claimed to.
  *
- * The branch name and change set are hardcoded, not read from whatever repo
- * happens to contain this checkout — a real git developer's actual branch
- * name and working-tree state vary per machine and per moment, and a test
- * that depended on either would be flaky (or worse, silently vacuous again
- * on a machine/branch combination that happens to produce short output).
- * `worktree-terminal-width-67` (26 characters) and exactly two untracked
- * files are the fixed values `default-layout-width.test.ts`'s
- * `SUPPORTED_WIDTH` comment's "88 columns, 26 character branch name" figure
- * was measured against; other callers reuse the same fixed repo rather than
- * inventing their own branch name/change set.
+ * The change set is hardcoded, not read from whatever repo happens to
+ * contain this checkout — a real git developer's actual working-tree state
+ * varies per machine and per moment, and a test that depended on it would be
+ * flaky (or worse, silently vacuous again on a machine whose state happens
+ * to produce short output). The branch name defaults to
+ * `worktree-terminal-width-67` (26 characters) for the same reason, and
+ * exactly two untracked files are always created — those are the fixed
+ * values `default-layout-width.test.ts`'s `SUPPORTED_WIDTH` comment's "88
+ * columns, 26 character branch name" figure was measured against; existing
+ * callers that don't pass `branch` reuse that exact fixed repo rather than
+ * inventing their own branch name. A caller that needs a DIFFERENT branch
+ * name (for instance, one long enough to force the shrink pass rather than
+ * merely reach the accepted-truncation case above) passes it explicitly
+ * instead of duplicating this whole builder.
  *
  * The whole body runs inside a try/finally around the temp dir itself: if
  * any git call here throws (as it did during fix-round-1 review, under a
@@ -111,7 +115,7 @@ function gitEnvFor(dir: string): NodeJS.ProcessEnv {
  * `gccusage-width-fixture-*` directories were left behind in $TMPDIR during
  * that review.
  */
-export function makeDeterministicGitRepo(): string {
+export function makeDeterministicGitRepo(branch = "worktree-terminal-width-67"): string {
   const dir = mkdtempSync(path.join(tmpdir(), "gccusage-width-fixture-"));
   try {
     const env = gitEnvFor(dir);
@@ -125,7 +129,7 @@ export function makeDeterministicGitRepo(): string {
     // on GIT_ENV above: block it in this repo's own LOCAL config too, not
     // just via the XDG_CONFIG_HOME redirect.
     git(["config", "core.excludesFile", "/dev/null"]);
-    git(["checkout", "-q", "-b", "worktree-terminal-width-67"]);
+    git(["checkout", "-q", "-b", branch]);
     // A commit is required: with zero commits HEAD is unborn and
     // `git rev-parse --abbrev-ref HEAD` (what getGitBranch runs) fails,
     // which getGitBranch treats identically to "not a git repo" (null).

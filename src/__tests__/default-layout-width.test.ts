@@ -183,5 +183,42 @@ describe("default layout width against real payloads", () => {
         rmSync(repoDir, { recursive: true, force: true });
       }
     });
+
+    it("fits a much longer branch name by shrinking rather than truncating", () => {
+      // 42 characters — deliberately longer than the 26-character branch
+      // used above, which (with vim-mode on) only needed a partial shrink to
+      // land exactly at SUPPORTED_WIDTH. This one pushes the natural width to
+      // 104 columns, well past what a single segment's shrink floor alone
+      // could satisfy if the shrink pass were merely cosmetic, so it forces
+      // real trimming rather than passing by coincidence.
+      const repoDir = makeDeterministicGitRepo("feature/an-extremely-long-branch-name-here");
+      try {
+        const context = buildBusiestContext(true, repoDir);
+        const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
+        const line2 = stripAnsi(output).split("\n")[1] ?? "";
+
+        // Fits...
+        expect(visibleLength(line2)).toBeLessThanOrEqual(SUPPORTED_WIDTH);
+        // ...every segment this case exists to measure is still present —
+        // shrinking, not silent loss, produced the fit. A width-only
+        // assertion can't distinguish this from truncateAnsi cutting the
+        // tail; the presence checks below are what would fail if shrinking
+        // were removed and the raw truncateAnsi backstop took over instead
+        // (verified directly in Step 3 of this task's report).
+        expect(line2).toContain("demo-project-repo"); // project, untouched
+        expect(line2).toContain("feature/an-extrem"); // git-branch, shrunk not dropped
+        expect(line2).toContain("+2"); // git-changes
+        expect(line2).toContain("+649 -66"); // lines-changed
+        expect(line2).toContain("Today: $609"); // today-spend — would be the
+        // first casualty of a tail truncation, since it sits well after the
+        // long branch segment in line order.
+        expect(line2).toContain("NORMAL"); // vim-mode
+        // ...and the loss was taken inside a segment, not off the line's end.
+        expect(line2).toContain("…");
+        expect(line2.trimEnd().endsWith("…")).toBe(false);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
   });
 });

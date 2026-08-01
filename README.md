@@ -157,6 +157,16 @@ never collapses the bar.
 
 Modes: `auto` (collapse below threshold), `always`, `never`
 
+Long `project` and `git-branch` segments can also be shortened on their own,
+independently of the settings above: whenever a line does not fit the
+terminal on its own, its shrinkable segments are trimmed — widest first —
+down toward an ellipsis, never below a small floor (8 characters, including
+the ellipsis) below which a name stops distinguishing one project or branch
+from another. This takes no configuration. On a terminal wide enough for the
+line to fit as-is, nothing is shortened; if trimming every shrinkable segment
+down to the floor is still not enough, the line's tail is truncated as
+before.
+
 ## Widgets
 
 | Widget | Description |
