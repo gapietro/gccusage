@@ -84,9 +84,31 @@ function migrateLegacyStore(now: Date): void {
   const legacyPath = getLegacyPath();
   if (!fs.existsSync(legacyPath)) return; // The common case.
 
-  // A null result here means the file exists but carries nothing usable.
-  // Fall through so it still gets deleted — retrying cannot help.
-  const legacy = readJsonValidated(legacyPath, LegacyStoreSchema);
+  // Unlike the four `readJsonValidated` call sites, this caller cannot treat
+  // "unreadable" and "unparseable" the same way: the unlink below depends on
+  // directory permissions, not file permissions, so it will typically
+  // *succeed* even when the read just failed (e.g. a root-owned file left by
+  // one `sudo` invocation). Deleting the evidence on a transient read error
+  // is exactly the bug this function exists to avoid, so read it locally
+  // instead of through the shared two-outcome helper.
+  let raw: string;
+  try {
+    raw = fs.readFileSync(legacyPath, "utf-8");
+  } catch {
+    return; // Unreadable (EACCES/EMFILE/EIO): keep the file, retry next render.
+  }
+
+  // From here the file was read successfully. A null result means it parsed
+  // to JSON that does not match the schema, or did not parse at all — either
+  // way retrying cannot help, so fall through and let it be deleted below.
+  let legacy: v.InferOutput<typeof LegacyStoreSchema> | null;
+  try {
+    const result = v.safeParse(LegacyStoreSchema, JSON.parse(raw));
+    legacy = result.success ? result.output : null;
+  } catch {
+    legacy = null;
+  }
+
   const sessions = legacy?.sessions ?? [];
   const date = legacy?.date ?? dateStr(now);
 

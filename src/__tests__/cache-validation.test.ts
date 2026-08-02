@@ -219,6 +219,38 @@ describe("daily cost shard validation", () => {
     // not merely excluded later by a second, independent validation pass.
     expect(fs.existsSync(path.join(tmpDir, "gccusage", "daily", "bad.json"))).toBe(false);
   });
+
+  // root bypasses permission bits entirely, which would make this vacuous.
+  const isRoot = process.getuid?.() === 0;
+
+  (isRoot ? it.skip : it)(
+    "keeps an unreadable legacy store in place instead of deleting it",
+    () => {
+      const legacyPath = path.join(tmpDir, "gccusage", "daily-costs.json");
+      fs.writeFileSync(
+        legacyPath,
+        JSON.stringify({
+          date: TODAY,
+          sessions: [{ sessionId: "good", costUsd: 2, baselineUsd: 0, updatedAt: NOW.getTime() }],
+        }),
+      );
+      fs.chmodSync(legacyPath, 0o000);
+
+      try {
+        // A transient read failure (EACCES here) must not be treated the
+        // same as malformed JSON: unlike a genuinely unparseable file,
+        // retrying an unreadable one might succeed later, so it must survive
+        // this call rather than be migrated-and-deleted.
+        trackDailyCost("mine", 1, "stdin", NOW);
+        expect(fs.existsSync(legacyPath)).toBe(true);
+      } finally {
+        // Restore permissions so tmpdir cleanup in afterEach can't fail —
+        // guarded because the behaviour under test governs whether the file
+        // still exists to chmod back.
+        if (fs.existsSync(legacyPath)) fs.chmodSync(legacyPath, 0o644);
+      }
+    },
+  );
 });
 
 describe("pricing cache validation", () => {

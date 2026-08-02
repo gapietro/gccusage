@@ -2507,12 +2507,24 @@ function dateStr(d) {
 function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
 	if (!fs.existsSync(legacyPath)) return;
-	const legacy = readJsonValidated(legacyPath, LegacyStoreSchema);
+	let raw;
+	try {
+		raw = fs.readFileSync(legacyPath, "utf-8");
+	} catch {
+		return;
+	}
+	let legacy;
+	try {
+		const result = safeParse(LegacyStoreSchema, JSON.parse(raw));
+		legacy = result.success ? result.output : null;
+	} catch {
+		legacy = null;
+	}
 	const sessions = legacy?.sessions ?? [];
 	const date = legacy?.date ?? dateStr(now);
 	try {
-		for (const raw of sessions) {
-			const parsed = safeParse(LegacyEntrySchema, raw);
+		for (const raw$1 of sessions) {
+			const parsed = safeParse(LegacyEntrySchema, raw$1);
 			if (!parsed.success) continue;
 			const s = parsed.output;
 			const target = shardPath(s.sessionId);
