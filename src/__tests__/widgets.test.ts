@@ -17,6 +17,13 @@ import { perModelBreakdownWidget } from "../widgets/per-model-breakdown.js";
 import { sessionClockWidget } from "../widgets/session-clock.js";
 import { sessionTimerWidget } from "../widgets/session-timer.js";
 import { getHomeDir } from "../utils/paths.js";
+import { tokensUntilCompact } from "../utils/autocompact.js";
+import {
+  ALERT_AMBER,
+  ALERT_RED,
+  COMPACT_COUNTDOWN_AMBER,
+  COMPACT_COUNTDOWN_RED,
+} from "../widgets/alert-colors.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -720,5 +727,110 @@ describe("session duration widgets (#61)", () => {
       label: "",
     });
     expect(out?.text).toBe("1hr 0m");
+  });
+});
+
+// #46. Every pre-existing band test drove these widgets with a FRACTIONAL
+// used_percentage (73.5, 81, 94.7). Those exercise the arithmetic but cannot
+// occur in a real payload — Claude Code rounds the field — so none of them
+// showed whether a band is reachable in production. These sweep whole-number
+// percentages, which is the only kind that ships.
+describe("alert bands are reachable from real payloads (#46)", () => {
+  const at = (pct: number, windowSize: number) =>
+    makeContext({
+      stdin: { context_window: { used_percentage: pct, context_window_size: windowSize } },
+    });
+
+  // Percentages strictly BEFORE the compaction point. Past it, compact-countdown
+  // renders "Compact imminent!" in red and context-percent reports zero
+  // remaining, so both show red no matter how the bands are set — sweeping
+  // those in would make "red was seen" true even with the bug present. This
+  // asks the question that matters: does red ever appear as a WARNING?
+  const bandsSeen = (windowSize: number) => {
+    const countdown = new Set<string | undefined>();
+    const percent = new Set<string | undefined>();
+    let swept = 0;
+    for (let pct = 0; pct <= 100; pct++) {
+      const remaining = tokensUntilCompact((pct / 100) * windowSize, windowSize);
+      if (remaining === null || remaining <= 0) continue;
+      swept++;
+      const ctx = at(pct, windowSize);
+      countdown.add(
+        compactCountdownWidget.render(ctx, { type: "compact-countdown", bg: "#1a5fb4" })?.bg,
+      );
+      percent.add(
+        contextPercentWidget.render(ctx, { type: "context-percent", bg: "#0d7377" })?.bg,
+      );
+    }
+    expect(swept, "no pre-compaction percentages swept").toBeGreaterThan(50);
+    return { countdown, percent };
+  };
+
+  it("reaches red on both widgets at a 1M window", () => {
+    const { countdown, percent } = bandsSeen(1_000_000);
+    expect(countdown.has(COMPACT_COUNTDOWN_RED), "compact-countdown never turned red").toBe(true);
+    expect(countdown.has(COMPACT_COUNTDOWN_AMBER), "compact-countdown never turned amber").toBe(
+      true,
+    );
+    expect(percent.has(ALERT_RED), "context-percent never turned red").toBe(true);
+    expect(percent.has(ALERT_AMBER), "context-percent never turned amber").toBe(true);
+  });
+
+  it("reaches red on both widgets at a 200k window", () => {
+    const { countdown, percent } = bandsSeen(200_000);
+    expect(countdown.has(COMPACT_COUNTDOWN_RED)).toBe(true);
+    expect(percent.has(ALERT_RED)).toBe(true);
+  });
+
+  // The property PR #45 was built around: the two segments must never
+  // contradict each other, which widening one band without the other would
+  // break. Checked across the whole sweep, not at one hand-picked percentage.
+  it("keeps the two widgets in agreement at every whole percentage", () => {
+    for (const windowSize of [200_000, 1_000_000]) {
+      for (let pct = 0; pct <= 100; pct++) {
+        const ctx = at(pct, windowSize);
+        const cd = compactCountdownWidget.render(ctx, {
+          type: "compact-countdown",
+          bg: "#1a5fb4",
+        });
+        const cp = contextPercentWidget.render(ctx, {
+          type: "context-percent",
+          bg: "#0d7377",
+        });
+        const cdLevel =
+          cd?.bg === COMPACT_COUNTDOWN_RED ? "red" : cd?.bg === COMPACT_COUNTDOWN_AMBER ? "amber" : "none";
+        const cpLevel = cp?.bg === ALERT_RED ? "red" : cp?.bg === ALERT_AMBER ? "amber" : "none";
+        expect(cdLevel, `disagreement at ${pct}% of ${windowSize}`).toBe(cpLevel);
+      }
+    }
+  });
+
+  it("still uses the tight 5k red band when an exact breakdown is present", () => {
+    // 962k of 1M leaves exactly 5k. With current_usage the count is exact, so
+    // the band must NOT widen — the fix is scoped to coarse input only.
+    const exact = (used: number) =>
+      makeContext({
+        stdin: {
+          context_window: {
+            context_window_size: 1_000_000,
+            current_usage: {
+              input_tokens: used,
+              output_tokens: 0,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+            },
+          },
+        },
+      });
+
+    expect(
+      compactCountdownWidget.render(exact(962_000), { type: "compact-countdown", bg: "#1a5fb4" })
+        ?.bg,
+    ).toBe(COMPACT_COUNTDOWN_RED);
+    // 6k left — inside the widened band, outside the exact one.
+    expect(
+      compactCountdownWidget.render(exact(961_000), { type: "compact-countdown", bg: "#1a5fb4" })
+        ?.bg,
+    ).toBe(COMPACT_COUNTDOWN_AMBER);
   });
 });

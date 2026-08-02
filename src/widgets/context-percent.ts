@@ -4,7 +4,7 @@ import type { WidgetConfig } from "../config/schema.js";
 import { formatPercent, formatTokens } from "../utils/format.js";
 import type { ContextUsage } from "../utils/context-usage.js";
 import { deriveContextUsage } from "../utils/context-usage.js";
-import { tokensUntilCompact, AMBER_TOKENS, RED_TOKENS } from "../utils/autocompact.js";
+import { tokensUntilCompact, alertLevel } from "../utils/autocompact.js";
 import { ALERT_AMBER, ALERT_RED } from "./alert-colors.js";
 
 const BAR_WIDTH = 10;
@@ -31,8 +31,11 @@ function thresholdBg(usage: ContextUsage, configBg?: string): string | undefined
       : null;
 
   if (remaining !== null) {
-    if (remaining <= RED_TOKENS) return ALERT_RED;
-    if (remaining <= AMBER_TOKENS) return ALERT_AMBER;
+    // Same resolution-widened bands as compact-countdown, so the two segments
+    // still change on the same turn at any window size (#46).
+    const level = alertLevel(remaining, usage.usedTokensStep);
+    if (level === "red") return ALERT_RED;
+    if (level === "amber") return ALERT_AMBER;
     return configBg;
   }
 

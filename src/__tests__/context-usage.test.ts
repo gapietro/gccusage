@@ -6,7 +6,12 @@ describe("deriveContextUsage", () => {
     const usage = deriveContextUsage({
       context_window: { remaining_percentage: 93, context_window_size: 1_000_000 },
     });
-    expect(usage).toEqual({ ratio: 0.07, windowSize: 1_000_000, usedTokens: 70_000 });
+    expect(usage).toEqual({
+      ratio: 0.07,
+      windowSize: 1_000_000,
+      usedTokens: 70_000,
+      usedTokensStep: 10_000,
+    });
   });
 
   it("ignores cumulative token totals when a percentage is available", () => {
@@ -27,7 +32,12 @@ describe("deriveContextUsage", () => {
     const usage = deriveContextUsage({
       context_window: { used_percentage: 25, context_window_size: 200_000 },
     });
-    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000, usedTokens: 50_000 });
+    expect(usage).toEqual({
+      ratio: 0.25,
+      windowSize: 200_000,
+      usedTokens: 50_000,
+      usedTokensStep: 2_000,
+    });
   });
 
   it("remaining_percentage beats used_percentage when both are present", () => {
@@ -39,12 +49,22 @@ describe("deriveContextUsage", () => {
         context_window_size: 1_000_000,
       },
     });
-    expect(usage).toEqual({ ratio: 0.07, windowSize: 1_000_000, usedTokens: 70_000 });
+    expect(usage).toEqual({
+      ratio: 0.07,
+      windowSize: 1_000_000,
+      usedTokens: 70_000,
+      usedTokensStep: 10_000,
+    });
   });
 
   it("returns a null windowSize when the size is absent", () => {
     const usage = deriveContextUsage({ context_window: { used_percentage: 25 } });
-    expect(usage).toEqual({ ratio: 0.25, windowSize: null, usedTokens: null });
+    expect(usage).toEqual({
+      ratio: 0.25,
+      windowSize: null,
+      usedTokens: null,
+      usedTokensStep: 1,
+    });
   });
 
   it("falls back to summing current_usage", () => {
@@ -59,7 +79,12 @@ describe("deriveContextUsage", () => {
         },
       },
     });
-    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000, usedTokens: 50_000 });
+    expect(usage).toEqual({
+      ratio: 0.25,
+      windowSize: 200_000,
+      usedTokens: 50_000,
+      usedTokensStep: 1,
+    });
   });
 
   it("used_percentage beats current_usage when both are present", () => {
@@ -77,7 +102,12 @@ describe("deriveContextUsage", () => {
       },
     });
     // used_percentage (25) yields ratio 0.25, whereas current_usage would yield 0.5
-    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000, usedTokens: 100_000 });
+    expect(usage).toEqual({
+      ratio: 0.25,
+      windowSize: 200_000,
+      usedTokens: 100_000,
+      usedTokensStep: 1,
+    });
   });
 
   it("supports the legacy numeric context_window with token_usage", () => {
@@ -90,7 +120,12 @@ describe("deriveContextUsage", () => {
         cache_read_input_tokens: 0,
       },
     });
-    expect(usage).toEqual({ ratio: 0.25, windowSize: 200_000, usedTokens: 50_000 });
+    expect(usage).toEqual({
+      ratio: 0.25,
+      windowSize: 200_000,
+      usedTokens: 50_000,
+      usedTokensStep: 1,
+    });
   });
 
   it("returns null when there is no context window at all", () => {
@@ -184,6 +219,61 @@ describe("deriveContextUsage", () => {
       },
     });
     expect(usage!.usedTokens).toBe(160_000);
+  });
+
+  // #46: usedTokensStep says how coarse usedTokens is, so consumers can widen
+  // a band that would otherwise be narrower than its own input's resolution.
+  describe("usedTokensStep", () => {
+    it("is one token when the exact breakdown wins", () => {
+      const usage = deriveContextUsage({
+        context_window: {
+          used_percentage: 96,
+          context_window_size: 1_000_000,
+          current_usage: {
+            input_tokens: 960_000,
+            output_tokens: 1_000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      });
+      expect(usage!.usedTokensStep).toBe(1);
+    });
+
+    it("is one percentage point of the window when the percentage wins", () => {
+      // Claude Code rounds the percentage (2.1.220 mro), so one point is the
+      // finest distinction the figure can express: 10k tokens at a 1M window.
+      expect(
+        deriveContextUsage({
+          context_window: { used_percentage: 96, context_window_size: 1_000_000 },
+        })!.usedTokensStep,
+      ).toBe(10_000);
+      expect(
+        deriveContextUsage({
+          context_window: { used_percentage: 96, context_window_size: 200_000 },
+        })!.usedTokensStep,
+      ).toBe(2_000);
+    });
+
+    it("reports the coarse step when a partial breakdown loses to the percentage", () => {
+      // The distinguishing case: current_usage IS present, so keying the step
+      // off "was there an exact breakdown" rather than "which figure won"
+      // would report 1 while handing out a percentage-derived number.
+      const usage = deriveContextUsage({
+        context_window: {
+          used_percentage: 96,
+          context_window_size: 1_000_000,
+          current_usage: {
+            input_tokens: 1_200,
+            output_tokens: 800,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      });
+      expect(usage!.usedTokens).toBe(960_000);
+      expect(usage!.usedTokensStep).toBe(10_000);
+    });
   });
 
   it("ignores a partial current_usage breakdown in favour of used_percentage", () => {

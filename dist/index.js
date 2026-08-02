@@ -2160,11 +2160,15 @@ function sumTokens(counts) {
 }
 function withTokens(ratio, windowSize, exact) {
 	const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
-	const usedTokens = exact !== void 0 && exact > 0 ? Math.max(exact, derived ?? exact) : derived;
+	const hasExact = exact !== void 0 && exact > 0;
+	const usedTokens = hasExact ? Math.max(exact, derived ?? exact) : derived;
+	const usedFromExact = hasExact && usedTokens === exact;
+	const usedTokensStep = usedFromExact || windowSize === null ? 1 : windowSize / 100;
 	return {
 		ratio,
 		windowSize,
-		usedTokens
+		usedTokens,
+		usedTokensStep
 	};
 }
 /**
@@ -2229,6 +2233,32 @@ const AMBER_TOKENS = 2e4;
 /** Red band: the last warning before compaction. */
 const RED_TOKENS = 5e3;
 /**
+* Alert level for a countdown, widened to the resolution of its input.
+*
+* `stepTokens` is the granularity of the `usedTokens` figure being counted
+* down — 1 when it came from an exact `current_usage` breakdown, and
+* `windowSize / 100` when it was derived from a whole-number percentage.
+*
+* Why the bands cannot be flat constants (#46): Claude Code rounds the
+* percentage (2.1.220 `mro`: `Math.round(r / t * 100)`), so at a 1M window one
+* point is 10,000 tokens — twice the width of the 5k red band. A countdown fed
+* that figure steps straight from amber to past-the-threshold and red never
+* appears at all. A band narrower than its own input's step is unreachable by
+* construction.
+*
+* So each band is at least one step wide, and amber sits at least one step
+* above red, which keeps BOTH reachable rather than fixing red by swallowing
+* amber. At the two real window sizes on the exact path this changes nothing:
+* step 1 gives back 5k and 20k exactly.
+*/
+function alertLevel(remainingTokens, stepTokens) {
+	const red = Math.max(RED_TOKENS, stepTokens);
+	const amber = Math.max(AMBER_TOKENS, red + stepTokens);
+	if (remainingTokens <= red) return "red";
+	if (remainingTokens <= amber) return "amber";
+	return null;
+}
+/**
 * Token count at which auto-compact fires.
 *
 * Null when the window is too small for the reserve to make sense — callers
@@ -2265,8 +2295,9 @@ function buildBar(ratio) {
 function thresholdBg(usage, configBg) {
 	const remaining = usage.usedTokens !== null && usage.windowSize !== null ? tokensUntilCompact(usage.usedTokens, usage.windowSize) : null;
 	if (remaining !== null) {
-		if (remaining <= RED_TOKENS) return ALERT_RED;
-		if (remaining <= AMBER_TOKENS) return ALERT_AMBER;
+		const level = alertLevel(remaining, usage.usedTokensStep);
+		if (level === "red") return ALERT_RED;
+		if (level === "amber") return ALERT_AMBER;
 		return configBg;
 	}
 	if (usage.ratio >= THRESHOLD_DANGER) return ALERT_RED;
@@ -2683,9 +2714,10 @@ const compactCountdownWidget = { render(context, config) {
 		fg: "#ffffff",
 		bg: COMPACT_COUNTDOWN_RED
 	};
+	const level = alertLevel(remaining, usage.usedTokensStep);
 	let bg = config.bg;
-	if (remaining <= RED_TOKENS) bg = COMPACT_COUNTDOWN_RED;
-	else if (remaining <= AMBER_TOKENS) bg = COMPACT_COUNTDOWN_AMBER;
+	if (level === "red") bg = COMPACT_COUNTDOWN_RED;
+	else if (level === "amber") bg = COMPACT_COUNTDOWN_AMBER;
 	return {
 		text: `~${formatTokens(remaining)} left`,
 		fg: config.fg,

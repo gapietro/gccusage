@@ -24,6 +24,20 @@ export interface ContextUsage {
    * when there is no window size either.
    */
   usedTokens: number | null;
+  /**
+   * Granularity of `usedTokens`, in tokens.
+   *
+   * 1 when it came from an exact `current_usage` breakdown. `windowSize / 100`
+   * when it was derived from a percentage, because Claude Code rounds both
+   * `used_percentage` and `remaining_percentage` to whole numbers (2.1.220
+   * `mro`: `Math.round(r / t * 100)`, `remaining = 100 - used`) — 10,000-token
+   * steps at a 1M window.
+   *
+   * Consumers comparing `usedTokens` against a band narrower than this cannot
+   * ever land inside it (#46). `alertLevel` in autocompact.ts takes this and
+   * widens the bands accordingly.
+   */
+  usedTokensStep: number;
 }
 
 interface TokenCounts {
@@ -48,9 +62,14 @@ function withTokens(
   exact: number | undefined,
 ): ContextUsage {
   const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
-  const usedTokens =
-    exact !== undefined && exact > 0 ? Math.max(exact, derived ?? exact) : derived;
-  return { ratio, windowSize, usedTokens };
+  const hasExact = exact !== undefined && exact > 0;
+  const usedTokens = hasExact ? Math.max(exact, derived ?? exact) : derived;
+  // The step tracks which figure actually won the Math.max above, not merely
+  // whether an exact breakdown was present: when a partial `current_usage`
+  // loses to the percentage, the number being handed out IS the coarse one.
+  const usedFromExact = hasExact && usedTokens === exact;
+  const usedTokensStep = usedFromExact || windowSize === null ? 1 : windowSize / 100;
+  return { ratio, windowSize, usedTokens, usedTokensStep };
 }
 
 /**
