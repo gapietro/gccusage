@@ -77,6 +77,19 @@ Claude Code pipes JSON status data via stdin on each render. gccusage parses it 
 
 Create `~/.config/gccusage/settings.json` to customize. You only need to specify the keys you want to override — everything else uses defaults.
 
+### Editor autocomplete
+
+Point the file at the published JSON Schema and most editors will autocomplete widget types, option lists and defaults, and flag typos as you write:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/gapietro/gccusage/main/config-schema.json",
+  "powerline": { "theme": "ocean" }
+}
+```
+
+The schema is generated from the code — widget types from the registry, defaults from the shipped settings — and a test fails if the two ever disagree, so it cannot silently fall behind a newly added widget. gccusage itself ignores the `$schema` key.
+
 ### Change theme
 
 ```json

@@ -18,60 +18,192 @@
                 "type": {
                   "type": "string",
                   "enum": [
-                    "model", "session-cost", "today-spend", "block-timer",
-                    "burn-rate", "context-percent", "git-branch", "git-changes",
-                    "tokens-input", "tokens-output", "tokens-cached",
-                    "per-model", "session-clock", "cwd",
-                    "custom-text", "custom-command", "separator"
+                    "model",
+                    "session-cost",
+                    "today-spend",
+                    "block-timer",
+                    "burn-rate",
+                    "context-percent",
+                    "git-branch",
+                    "git-changes",
+                    "tokens-input",
+                    "tokens-output",
+                    "tokens-cached",
+                    "per-model",
+                    "session-clock",
+                    "cwd",
+                    "project",
+                    "custom-text",
+                    "custom-command",
+                    "separator",
+                    "cache-hit-rate",
+                    "lines-changed",
+                    "vim-mode",
+                    "api-latency",
+                    "token-breakdown",
+                    "session-timer",
+                    "compact-countdown",
+                    "turn-counter"
                   ],
                   "description": "Widget type"
                 },
-                "label": { "type": "string", "description": "Optional label prefix" },
-                "fg": { "type": "string", "description": "Foreground color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)" },
-                "bg": { "type": "string", "description": "Background color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)" },
-                "icon": { "type": "string", "description": "Icon prefix" },
-                "format": { "type": "string", "description": "Custom format string" },
-                "command": { "type": "string", "description": "Shell command (custom-command widget)" },
-                "text": { "type": "string", "description": "Static text (custom-text widget)" },
-                "separator": { "type": "string", "description": "Separator string (separator widget)" },
-                "maxWidth": { "type": "number", "description": "Maximum width for this widget" }
+                "label": {
+                  "type": "string",
+                  "description": "Optional label prefix"
+                },
+                "fg": {
+                  "type": "string",
+                  "description": "Foreground color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)"
+                },
+                "bg": {
+                  "type": "string",
+                  "description": "Background color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)"
+                },
+                "icon": {
+                  "type": "string",
+                  "description": "Icon prefix"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Custom format string"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "Shell command (custom-command widget)"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Static text (custom-text widget)"
+                },
+                "separator": {
+                  "type": "string",
+                  "description": "Separator string (separator widget)"
+                },
+                "maxWidth": {
+                  "type": "number",
+                  "description": "Maximum width for this widget"
+                },
+                "priority": {
+                  "type": "number",
+                  "description": "Compaction priority — LOWER survives longer. renderCompact sorts ascending and keeps widgets until the terminal width runs out; widgets without a priority sort last."
+                }
               },
-              "required": ["type"]
+              "required": [
+                "type"
+              ]
             }
           },
           "flex": {
             "type": "string",
-            "enum": ["left", "right", "center", "space-between"],
+            "enum": [
+              "left",
+              "right",
+              "center",
+              "space-between"
+            ],
             "default": "left",
             "description": "Flex alignment mode for the line"
           }
         },
-        "required": ["widgets"]
+        "required": [
+          "widgets"
+        ]
       }
     },
     "powerline": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean", "default": false },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "theme": {
           "type": "string",
-          "enum": ["default", "ocean", "forest", "sunset", "minimal"],
+          "enum": [
+            "default",
+            "ocean",
+            "forest",
+            "sunset",
+            "minimal"
+          ],
           "default": "default"
         },
-        "separator": { "type": "string", "default": "\ue0b0" },
-        "separatorThin": { "type": "string", "default": "\ue0b1" }
+        "separator": {
+          "type": "string",
+          "default": "▶"
+        },
+        "separatorThin": {
+          "type": "string",
+          "default": "│",
+          "description": "Drawn instead of the main separator between segments whose backgrounds are too close to tell apart (issues #36, #40)"
+        }
+      }
+    },
+    "compact": {
+      "type": "object",
+      "description": "How the bar behaves when it does not fit the terminal",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto",
+          "description": "auto compacts only when the rendered bar exceeds threshold and the terminal width is known"
+        },
+        "threshold": {
+          "type": "number",
+          "default": 80,
+          "description": "Width in columns below which auto mode compacts"
+        }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "description": "Dollar thresholds at which cost widgets repaint amber, then red",
+      "properties": {
+        "sessionWarn": {
+          "type": "number",
+          "default": 5
+        },
+        "sessionDanger": {
+          "type": "number",
+          "default": 15
+        },
+        "dailyWarn": {
+          "type": "number",
+          "default": 10
+        },
+        "dailyDanger": {
+          "type": "number",
+          "default": 25
+        }
       }
     },
     "cache": {
       "type": "object",
       "properties": {
-        "statuslineTtlMs": { "type": "number", "default": 5000, "description": "Statusline cache TTL in ms" },
-        "pricingTtlMs": { "type": "number", "default": 86400000, "description": "Pricing cache TTL in ms (default 24h)" }
+        "statuslineTtlMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Statusline cache TTL in ms"
+        },
+        "pricingTtlMs": {
+          "type": "number",
+          "default": 86400000,
+          "description": "Pricing cache TTL in ms (default 24h)"
+        }
       }
     },
     "costSource": {
       "type": "string",
-      "enum": ["auto", "calculated", "stdin"],
+      "enum": [
+        "auto",
+        "calculated",
+        "stdin"
+      ],
       "default": "auto",
       "description": "How to determine session cost"
     }
