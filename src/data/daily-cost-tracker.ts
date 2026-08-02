@@ -1,19 +1,45 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 
 export type CostSource = "stdin" | "calculated";
 
-interface SessionCostEntry {
-  sessionId: string;
-  date: string; // local date the baseline belongs to
-  costUsd: number; // latest cumulative session cost
-  baselineUsd: number; // cumulative cost at the start of `date`
-  source?: CostSource; // where costUsd came from (absent in legacy files)
-  updatedAt: number;
-}
+const CostSourceSchema = v.picklist(["stdin", "calculated"]);
+
+/**
+ * The shard schema replaces four hand-rolled `typeof` checks scattered through
+ * this file (#92). `v.fallback` preserves each tolerance exactly: a shard
+ * written before `baselineUsd` existed reads as 0, and one with no `updatedAt`
+ * reads as 0 and is therefore pruned as stale, which is what the old
+ * `entry.updatedAt ?? 0` did.
+ */
+const ShardSchema = v.object({
+  sessionId: v.string(),
+  date: v.string(), // local date the baseline belongs to
+  costUsd: v.number(), // latest cumulative session cost
+  baselineUsd: v.fallback(v.number(), 0), // cumulative cost at the start of `date`
+  // Absent in legacy files, and an unrecognised value is treated the same way.
+  source: v.fallback(v.optional(CostSourceSchema), undefined),
+  updatedAt: v.fallback(v.number(), 0),
+});
+
+type SessionCostEntry = v.InferOutput<typeof ShardSchema>;
+
+const LegacyStoreSchema = v.object({
+  date: v.fallback(v.optional(v.string()), undefined),
+  sessions: v.fallback(v.array(v.unknown()), []),
+});
+
+const LegacyEntrySchema = v.object({
+  sessionId: v.string(),
+  costUsd: v.number(),
+  baselineUsd: v.fallback(v.number(), 0),
+  source: v.fallback(v.optional(CostSourceSchema), undefined),
+  updatedAt: v.fallback(v.optional(v.number()), undefined),
+});
 
 const STALE_SESSION_MS = 48 * 3600 * 1000;
 
@@ -48,14 +74,6 @@ function dateStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-interface LegacyEntry {
-  sessionId?: unknown;
-  costUsd?: unknown;
-  baselineUsd?: unknown;
-  source?: unknown;
-  updatedAt?: unknown;
-}
-
 /**
  * Split a pre-shard `daily-costs.json` into per-session files, then remove it.
  * Without this, today's total would reset to zero once on upgrade. Two
@@ -64,38 +82,32 @@ interface LegacyEntry {
  */
 function migrateLegacyStore(now: Date): void {
   const legacyPath = getLegacyPath();
-  let raw: string;
-  try {
-    raw = fs.readFileSync(legacyPath, "utf-8");
-  } catch {
-    return; // No legacy store — the common case.
-  }
+  if (!fs.existsSync(legacyPath)) return; // The common case.
 
-  let data: { date?: unknown; sessions?: unknown } | null = null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") data = parsed;
-  } catch {
-    // Unparseable: nothing to carry forward, and retrying cannot help.
-  }
-
-  const sessions: LegacyEntry[] = Array.isArray(data?.sessions) ? data.sessions : [];
-  const date = typeof data?.date === "string" ? data.date : dateStr(now);
+  // A null result here means the file exists but carries nothing usable.
+  // Fall through so it still gets deleted — retrying cannot help.
+  const legacy = readJsonValidated(legacyPath, LegacyStoreSchema);
+  const sessions = legacy?.sessions ?? [];
+  const date = legacy?.date ?? dateStr(now);
 
   try {
-    for (const s of sessions) {
-      if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
+    for (const raw of sessions) {
+      const parsed = v.safeParse(LegacyEntrySchema, raw);
+      if (!parsed.success) continue;
+      const s = parsed.output;
+
       const target = shardPath(s.sessionId);
       // A shard already written by the new code is newer than the legacy file.
       if (fs.existsSync(target)) continue;
+
       const entry: SessionCostEntry = {
         sessionId: s.sessionId,
         date,
         costUsd: s.costUsd,
-        baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0,
-        updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : now.getTime(),
+        baselineUsd: s.baselineUsd,
+        source: s.source,
+        updatedAt: s.updatedAt ?? now.getTime(),
       };
-      if (s.source === "stdin" || s.source === "calculated") entry.source = s.source;
       writeJsonAtomic(target, entry);
     }
   } catch {
@@ -133,15 +145,10 @@ function readEntries(now: Date): SessionCostEntry[] {
     if (!file.endsWith(".json")) continue;
     const fullPath = path.join(getShardDir(), file);
 
-    let entry: SessionCostEntry;
-    try {
-      entry = JSON.parse(fs.readFileSync(fullPath, "utf-8")) as SessionCostEntry;
-    } catch {
-      continue; // Unreadable shard: one session's data, not the whole day.
-    }
-    if (typeof entry?.sessionId !== "string" || typeof entry.costUsd !== "number") continue;
+    const entry = readJsonValidated(fullPath, ShardSchema);
+    if (!entry) continue; // Unreadable shard: one session's data, not the whole day.
 
-    if (now.getTime() - (entry.updatedAt ?? 0) >= STALE_SESSION_MS) {
+    if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
       try {
         fs.unlinkSync(fullPath);
       } catch {
@@ -150,10 +157,7 @@ function readEntries(now: Date): SessionCostEntry[] {
       continue;
     }
 
-    entries.push({
-      ...entry,
-      baselineUsd: typeof entry.baselineUsd === "number" ? entry.baselineUsd : 0,
-    });
+    entries.push(entry);
   }
   return entries;
 }

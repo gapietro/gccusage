@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { trackTurn } from "../data/turn-tracker.js";
+import { trackDailyCost } from "../data/daily-cost-tracker.js";
 
 /**
  * Every cache file used to be read with `JSON.parse(raw) as SomeType`, a cast
@@ -92,5 +93,98 @@ describe("turn counter validation", () => {
   it("rebuilds from a torn file", () => {
     write("turn-count.json", '{"sessionId": "s1", "cou');
     expect(trackTurn("s1")).toBe(1);
+  });
+});
+
+describe("daily cost shard validation", () => {
+  function writeShard(sessionId: string, contents: unknown): void {
+    const dir = path.join(tmpDir, "gccusage", "daily");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${sessionId}.json`), JSON.stringify(contents));
+  }
+
+  const NOW = new Date("2026-08-02T12:00:00");
+  const TODAY = "2026-08-02";
+
+  it("totals a well-formed shard from another session", () => {
+    writeShard("other", {
+      sessionId: "other",
+      date: TODAY,
+      costUsd: 2,
+      baselineUsd: 0,
+      source: "stdin",
+      updatedAt: NOW.getTime(),
+    });
+
+    expect(trackDailyCost("mine", 1, "stdin", NOW)).toBeCloseTo(3);
+  });
+
+  // The shape that would put NaN on the bar: right keys, wrong types.
+  it("skips a shard whose costUsd is a string", () => {
+    writeShard("other", {
+      sessionId: "other",
+      date: TODAY,
+      costUsd: "2.00",
+      baselineUsd: 0,
+      source: "stdin",
+      updatedAt: NOW.getTime(),
+    });
+
+    const total = trackDailyCost("mine", 1, "stdin", NOW);
+    expect(Number.isNaN(total)).toBe(false);
+    expect(total).toBeCloseTo(1);
+  });
+
+  it("skips a bare null shard", () => {
+    writeShard("other", null);
+    expect(trackDailyCost("mine", 1, "stdin", NOW)).toBeCloseTo(1);
+  });
+
+  it("treats a shard with a non-numeric baseline as having none", () => {
+    writeShard("other", {
+      sessionId: "other",
+      date: TODAY,
+      costUsd: 2,
+      baselineUsd: "nope",
+      source: "stdin",
+      updatedAt: NOW.getTime(),
+    });
+
+    expect(trackDailyCost("mine", 1, "stdin", NOW)).toBeCloseTo(3);
+  });
+
+  it("ignores a shard carrying an unrecognised source", () => {
+    writeShard("mine", {
+      sessionId: "mine",
+      date: TODAY,
+      costUsd: 5,
+      baselineUsd: 0,
+      source: "telepathy",
+      updatedAt: NOW.getTime(),
+    });
+
+    // Unrecognised source is treated as absent, i.e. a legacy file: no
+    // source-switch re-baseline, so the rise from 5 to 6 counts normally.
+    const total = trackDailyCost("mine", 6, "stdin", NOW);
+    expect(Number.isNaN(total)).toBe(false);
+    expect(total).toBeCloseTo(6);
+  });
+
+  it("migrates a legacy store and drops its malformed entries", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "gccusage", "daily-costs.json"),
+      JSON.stringify({
+        date: TODAY,
+        sessions: [
+          { sessionId: "good", costUsd: 2, baselineUsd: 0, updatedAt: NOW.getTime() },
+          { sessionId: "bad", costUsd: "2", baselineUsd: 0, updatedAt: NOW.getTime() },
+          null,
+        ],
+      }),
+    );
+
+    const total = trackDailyCost("mine", 1, "stdin", NOW);
+    expect(Number.isNaN(total)).toBe(false);
+    expect(total).toBeCloseTo(3);
   });
 });

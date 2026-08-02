@@ -557,6 +557,28 @@ function union(options, message$1) {
 	};
 }
 /**
+* Creates a unknown schema.
+*
+* @returns A unknown schema.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function unknown() {
+	return {
+		kind: "schema",
+		type: "unknown",
+		reference: unknown,
+		expects: "unknown",
+		async: false,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset) {
+			dataset.typed = true;
+			return dataset;
+		}
+	};
+}
+/**
 * Parses an unknown input based on a schema.
 *
 * @param schema The schema to be used.
@@ -2339,6 +2361,33 @@ function visibleLength(str) {
 
 //#endregion
 //#region src/data/daily-cost-tracker.ts
+const CostSourceSchema = picklist(["stdin", "calculated"]);
+/**
+* The shard schema replaces four hand-rolled `typeof` checks scattered through
+* this file (#92). `v.fallback` preserves each tolerance exactly: a shard
+* written before `baselineUsd` existed reads as 0, and one with no `updatedAt`
+* reads as 0 and is therefore pruned as stale, which is what the old
+* `entry.updatedAt ?? 0` did.
+*/
+const ShardSchema = object({
+	sessionId: string(),
+	date: string(),
+	costUsd: number(),
+	baselineUsd: fallback(number(), 0),
+	source: fallback(optional(CostSourceSchema), void 0),
+	updatedAt: fallback(number(), 0)
+});
+const LegacyStoreSchema = object({
+	date: fallback(optional(string()), void 0),
+	sessions: fallback(array(unknown()), [])
+});
+const LegacyEntrySchema = object({
+	sessionId: string(),
+	costUsd: number(),
+	baselineUsd: fallback(number(), 0),
+	source: fallback(optional(CostSourceSchema), void 0),
+	updatedAt: fallback(optional(number()), void 0)
+});
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function getShardDir() {
@@ -2370,32 +2419,25 @@ function dateStr(d) {
 */
 function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
-	let raw;
+	if (!fs.existsSync(legacyPath)) return;
+	const legacy = readJsonValidated(legacyPath, LegacyStoreSchema);
+	const sessions = legacy?.sessions ?? [];
+	const date = legacy?.date ?? dateStr(now);
 	try {
-		raw = fs.readFileSync(legacyPath, "utf-8");
-	} catch {
-		return;
-	}
-	let data = null;
-	try {
-		const parsed = JSON.parse(raw);
-		if (parsed && typeof parsed === "object") data = parsed;
-	} catch {}
-	const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
-	const date = typeof data?.date === "string" ? data.date : dateStr(now);
-	try {
-		for (const s of sessions) {
-			if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
+		for (const raw of sessions) {
+			const parsed = safeParse(LegacyEntrySchema, raw);
+			if (!parsed.success) continue;
+			const s = parsed.output;
 			const target = shardPath(s.sessionId);
 			if (fs.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
 				date,
 				costUsd: s.costUsd,
-				baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0,
-				updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : now.getTime()
+				baselineUsd: s.baselineUsd,
+				source: s.source,
+				updatedAt: s.updatedAt ?? now.getTime()
 			};
-			if (s.source === "stdin" || s.source === "calculated") entry.source = s.source;
 			writeJsonAtomic(target, entry);
 		}
 	} catch {
@@ -2422,23 +2464,15 @@ function readEntries(now) {
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
 		const fullPath = path$3.join(getShardDir(), file);
-		let entry;
-		try {
-			entry = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-		} catch {
-			continue;
-		}
-		if (typeof entry?.sessionId !== "string" || typeof entry.costUsd !== "number") continue;
-		if (now.getTime() - (entry.updatedAt ?? 0) >= STALE_SESSION_MS) {
+		const entry = readJsonValidated(fullPath, ShardSchema);
+		if (!entry) continue;
+		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
 			try {
 				fs.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
-		entries.push({
-			...entry,
-			baselineUsd: typeof entry.baselineUsd === "number" ? entry.baselineUsd : 0
-		});
+		entries.push(entry);
 	}
 	return entries;
 }
