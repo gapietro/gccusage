@@ -1,13 +1,22 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
+import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
+import { sanitisePricingTable } from "../data/pricing-validation.js";
 import type { PricingTable } from "../types/pricing.js";
 
 interface PricingCacheFile {
   timestamp: number;
   data: PricingTable;
 }
+
+// The envelope is validated as a whole; `data` is left as unknown values and
+// filtered per entry below, so one corrupted price drops one model rather than
+// the whole table (#92).
+const PricingCacheSchema = v.object({
+  timestamp: v.number(),
+  data: v.record(v.string(), v.unknown()),
+});
 
 function getCachePath(): string {
   return path.join(getCacheDir(), "pricing.json");
@@ -26,16 +35,17 @@ export interface PricingCacheEntry {
  * the table is too old to price from at all.
  */
 export function loadPricingCacheEntry(): PricingCacheEntry | null {
-  const cachePath = getCachePath();
-  try {
-    if (!fs.existsSync(cachePath)) return null;
-    const raw = fs.readFileSync(cachePath, "utf-8");
-    const cache = JSON.parse(raw) as PricingCacheFile;
-    if (typeof cache?.timestamp !== "number" || !cache.data) return null;
-    return { data: cache.data, ageMs: Date.now() - cache.timestamp };
-  } catch {
-    return null;
-  }
+  const cache = readJsonValidated(getCachePath(), PricingCacheSchema);
+  if (!cache) return null;
+
+  // Bounds only, never the snapshot anchor: the anchor is about trusting the
+  // feed, these entries already passed it at write time, and re-running it
+  // would silently invalidate a legitimately cached price the day someone
+  // regenerates the snapshot after a real price move.
+  const data = sanitisePricingTable(cache.data);
+  if (Object.keys(data).length === 0) return null;
+
+  return { data, ageMs: Date.now() - cache.timestamp };
 }
 
 export function loadPricingCache(ttlMs: number): PricingTable | null {

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
+import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
 
 /**
  * Every cache file used to be read with `JSON.parse(raw) as SomeType`, a cast
@@ -191,5 +192,56 @@ describe("daily cost shard validation", () => {
     // total: the malformed entry must never be migrated to a shard at all,
     // not merely excluded later by a second, independent validation pass.
     expect(fs.existsSync(path.join(tmpDir, "gccusage", "daily", "bad.json"))).toBe(false);
+  });
+});
+
+describe("pricing cache validation", () => {
+  const SANE = {
+    inputCostPerToken: 3 / 1_000_000,
+    outputCostPerToken: 15 / 1_000_000,
+    cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheReadCostPerToken: 0.3 / 1_000_000,
+  };
+
+  function writePricing(data: unknown, ageMs = 0): void {
+    write("pricing.json", JSON.stringify({ timestamp: Date.now() - ageMs, data }));
+  }
+
+  it("loads a well-formed table", () => {
+    writePricing({ "claude-x": SANE });
+    expect(loadPricingCacheEntry()!.data["claude-x"]).toEqual(SANE);
+  });
+
+  it("drops a corrupted entry and keeps the rest of the table", () => {
+    writePricing({
+      "claude-x": SANE,
+      "claude-broken": { ...SANE, inputCostPerToken: "3e-6" },
+    });
+
+    const entry = loadPricingCacheEntry()!;
+    expect(entry.data["claude-x"]).toEqual(SANE);
+    expect(entry.data["claude-broken"]).toBeUndefined();
+  });
+
+  it("returns null when the timestamp is not a number", () => {
+    write("pricing.json", JSON.stringify({ timestamp: "now", data: { "claude-x": SANE } }));
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
+
+  it("returns null when nothing in the table survives", () => {
+    writePricing({ "claude-broken": { inputCostPerToken: -1 } });
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
+
+  it("returns null for a bare null document", () => {
+    write("pricing.json", "null");
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
+
+  // The anchor is a fetch-time check, not a read-time one: a price legitimately
+  // cached before the snapshot was regenerated must still load.
+  it("does not re-anchor cached entries against the snapshot", () => {
+    writePricing({ "claude-haiku-4-5": SANE });
+    expect(loadPricingCacheEntry()!.data["claude-haiku-4-5"]).toEqual(SANE);
   });
 });

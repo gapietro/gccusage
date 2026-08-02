@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -151,6 +150,21 @@ function _getStandardProps(context) {
 			return context["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig());
 		}
 	};
+}
+/**
+* Disallows inherited object properties and prevents object prototype
+* pollution by disallowing certain keys.
+*
+* @param object The object to check.
+* @param key The key to check.
+*
+* @returns Whether the key is allowed.
+*
+* @internal
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _isValidObjectKey(object$1, key) {
+	return Object.hasOwn(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
 }
 /**
 * Joins multiple `expects` values with the given separator.
@@ -478,6 +492,74 @@ function picklist(options, message$1) {
 		"~run"(dataset, config$1) {
 			if (this.options.includes(dataset.value)) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function record(key, value$1, message$1) {
+	return {
+		kind: "schema",
+		type: "record",
+		reference: record,
+		expects: "Object",
+		async: false,
+		key,
+		value: value$1,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const input = dataset.value;
+			if (input && typeof input === "object") {
+				dataset.typed = true;
+				dataset.value = {};
+				for (const entryKey in input) if (/* @__PURE__ */ _isValidObjectKey(input, entryKey)) {
+					const entryValue = input[entryKey];
+					const keyDataset = this.key["~run"]({ value: entryKey }, config$1);
+					if (keyDataset.issues) {
+						const pathItem = {
+							type: "object",
+							origin: "key",
+							input,
+							key: entryKey,
+							value: entryValue
+						};
+						for (const issue of keyDataset.issues) {
+							issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = keyDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					const valueDataset = this.value["~run"]({ value: entryValue }, config$1);
+					if (valueDataset.issues) {
+						const pathItem = {
+							type: "object",
+							origin: "value",
+							input,
+							key: entryKey,
+							value: entryValue
+						};
+						for (const issue of valueDataset.issues) {
+							if (issue.path) issue.path.unshift(pathItem);
+							else issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = valueDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					if (!keyDataset.typed || !valueDataset.typed) dataset.typed = false;
+					if (keyDataset.typed) dataset.value[keyDataset.value] = valueDataset.value;
+				}
+			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -1444,10 +1526,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1516,12 +1598,12 @@ function getCacheDir() {
 	return path$8.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
+	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$6.existsSync(dir)) return [];
+	if (!fs$5.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
+		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1529,12 +1611,12 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
 			files.push(...jsonlFiles.filter((f) => path$8.basename(f, ".jsonl") === sessionId));
@@ -1544,18 +1626,18 @@ function findSessionJsonlFiles(sessionId) {
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$6.statSync(f);
+				const fstat = fs$5.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1566,9 +1648,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$5.existsSync(filePath)) return [];
+	if (!fs$4.existsSync(filePath)) return [];
 	try {
-		const content = fs$5.readFileSync(filePath, "utf-8");
+		const content = fs$4.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1732,12 +1814,12 @@ function writeJsonAtomic(filePath, data) {
 	ensureDir(dir);
 	const serialised = JSON.stringify(data);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$4.writeFileSync(tmpPath, serialised, "utf-8");
+	fs$3.writeFileSync(tmpPath, serialised, "utf-8");
 	try {
-		fs$4.renameSync(tmpPath, filePath);
+		fs$3.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$4.unlinkSync(tmpPath);
+			fs$3.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
@@ -1756,7 +1838,7 @@ function writeJsonAtomic(filePath, data) {
 function readJsonValidated(filePath, schema) {
 	let raw;
 	try {
-		raw = fs$4.readFileSync(filePath, "utf-8");
+		raw = fs$3.readFileSync(filePath, "utf-8");
 	} catch {
 		return null;
 	}
@@ -1778,11 +1860,11 @@ function getBlockCachePath() {
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
 	try {
-		if (!fs$3.existsSync(cachePath)) return null;
-		const raw = fs$3.readFileSync(cachePath, "utf-8");
+		if (!fs$2.existsSync(cachePath)) return null;
+		const raw = fs$2.readFileSync(cachePath, "utf-8");
 		const data = JSON.parse(raw);
 		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
-			fs$3.unlinkSync(cachePath);
+			fs$2.unlinkSync(cachePath);
 			return null;
 		}
 		return data;
@@ -1824,49 +1906,6 @@ function detectBlock(sessionStartTime) {
 		}
 	}
 	return null;
-}
-
-//#endregion
-//#region src/cache/pricing-cache.ts
-function getCachePath$1() {
-	return path$5.join(getCacheDir(), "pricing.json");
-}
-/**
-* Loads the cache regardless of age and reports how old it is, leaving the
-* age policy to the caller. The render path and the CLI want different
-* answers from the same file: the render path serves a stale table (and
-* refreshes out of band) rather than block, while an age ceiling decides when
-* the table is too old to price from at all.
-*/
-function loadPricingCacheEntry() {
-	const cachePath = getCachePath$1();
-	try {
-		if (!fs$2.existsSync(cachePath)) return null;
-		const raw = fs$2.readFileSync(cachePath, "utf-8");
-		const cache = JSON.parse(raw);
-		if (typeof cache?.timestamp !== "number" || !cache.data) return null;
-		return {
-			data: cache.data,
-			ageMs: Date.now() - cache.timestamp
-		};
-	} catch {
-		return null;
-	}
-}
-function loadPricingCache(ttlMs) {
-	const entry = loadPricingCacheEntry();
-	if (!entry) return null;
-	return entry.ageMs < ttlMs ? entry.data : null;
-}
-function savePricingCache(data) {
-	const cachePath = getCachePath$1();
-	try {
-		const cache = {
-			timestamp: Date.now(),
-			data
-		};
-		writeJsonAtomic(cachePath, cache);
-	} catch {}
 }
 
 //#endregion
@@ -2055,13 +2094,19 @@ const COST_KEYS = [
 */
 function isSaneModelPricing(value) {
 	if (!value || typeof value !== "object") return false;
-	const record = value;
+	const record$1 = value;
 	for (const key of COST_KEYS) {
-		const cost = record[key];
+		const cost = record$1[key];
 		if (typeof cost !== "number" || !Number.isFinite(cost)) return false;
 		if (cost < 0 || cost > MAX_COST_PER_TOKEN) return false;
 	}
-	return record["inputCostPerToken"] > 0;
+	return record$1["inputCostPerToken"] > 0;
+}
+/** Drop the entries that fail bounds, keep the rest. Never all-or-nothing. */
+function sanitisePricingTable(table) {
+	const out = {};
+	for (const [key, value] of Object.entries(table)) if (isSaneModelPricing(value)) out[key] = value;
+	return out;
 }
 /**
 * Integrity anchor. Bounds alone still admit a 13x overcharge, so a fetched
@@ -2098,6 +2143,48 @@ function withinDeviation(fetched, known) {
 	if (known === 0) return fetched === 0;
 	const ratio = fetched / known;
 	return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
+}
+
+//#endregion
+//#region src/cache/pricing-cache.ts
+const PricingCacheSchema = object({
+	timestamp: number(),
+	data: record(string(), unknown())
+});
+function getCachePath$1() {
+	return path$5.join(getCacheDir(), "pricing.json");
+}
+/**
+* Loads the cache regardless of age and reports how old it is, leaving the
+* age policy to the caller. The render path and the CLI want different
+* answers from the same file: the render path serves a stale table (and
+* refreshes out of band) rather than block, while an age ceiling decides when
+* the table is too old to price from at all.
+*/
+function loadPricingCacheEntry() {
+	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
+	if (!cache) return null;
+	const data = sanitisePricingTable(cache.data);
+	if (Object.keys(data).length === 0) return null;
+	return {
+		data,
+		ageMs: Date.now() - cache.timestamp
+	};
+}
+function loadPricingCache(ttlMs) {
+	const entry = loadPricingCacheEntry();
+	if (!entry) return null;
+	return entry.ageMs < ttlMs ? entry.data : null;
+}
+function savePricingCache(data) {
+	const cachePath = getCachePath$1();
+	try {
+		const cache = {
+			timestamp: Date.now(),
+			data
+		};
+		writeJsonAtomic(cachePath, cache);
+	} catch {}
 }
 
 //#endregion
