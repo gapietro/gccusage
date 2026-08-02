@@ -8,6 +8,7 @@ import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
 import { runStatusline } from "../statusline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { getTerminalWidth } from "../utils/terminal.js";
 
 // Pricing normally comes from the network. Pin it so the render is
 // deterministic; every other boundary (transcripts, the daily store, the
@@ -290,16 +291,52 @@ describe("pricing cache validation", () => {
 });
 
 describe("no NaN survives a hostile cache directory (#92)", () => {
-  it("renders a correct bar with every cache file corrupted", async () => {
+  it("renders a correct bar with the turn counter, statusline cache, and daily shard all corrupted", async () => {
     const stdin = {
       session_id: "hostile",
       model: { id: "claude-opus-4-5", display_name: "Opus" },
       cost: { total_cost_usd: 1.5 },
     };
 
+    // A null turn-count.json throws inside trackTurn when the reader is
+    // unvalidated (see the sabotage below) — that throw propagates straight
+    // out of runStatusline here, since this test calls it directly rather
+    // than through src/index.ts's main().catch(), which is what turns the
+    // same throw into an empty bar and exit 0 in production.
     write("turn-count.json", "null");
-    write("statusline-cache.json", JSON.stringify({ output: 42, timestamp: "soon" }));
-    write("pricing.json", JSON.stringify({ timestamp: "soon", data: null }));
+
+    // Every exact-match gate in checkCache (sessionId, costUsd,
+    // terminalWidth) must clear so only the schema can reject this entry —
+    // otherwise a mismatched gate rejects it for a reason unrelated to
+    // validation and this leg proves nothing (the daily-shard fixture below
+    // had exactly that problem before its updatedAt was added). sessionId
+    // and costUsd mirror stdin exactly; terminalWidth is read from the real
+    // getTerminalWidth() so it matches whatever this test process actually
+    // resolves (undefined under vitest: no TTY, no COLUMNS) instead of a
+    // guessed number. `output` and `timestamp` are the wrong-typed fields: a
+    // validated reader rejects this envelope outright; the old unchecked
+    // cast lets `Date.now() - "soon"` (NaN) through the TTL check — NaN
+    // comparisons are always false, so it reads as "not expired" — and
+    // serves `output: 42` verbatim in place of the real bar.
+    write(
+      "statusline-cache.json",
+      JSON.stringify({
+        output: 42,
+        timestamp: "soon",
+        sessionId: "hostile",
+        costUsd: 1.5,
+        terminalWidth: getTerminalWidth(),
+      }),
+    );
+
+    // pricing.json is deliberately NOT part of this fixture. The file-wide
+    // vi.mock("../data/pricing-fetcher.js", ...) above replaces the module
+    // wholesale, and the only caller of loadPricingCacheEntry is that
+    // module's getPricingForRender — so a corrupted pricing.json here would
+    // never be read by anything runStatusline touches in this test; the
+    // write would be dead weight. That boundary is already covered directly
+    // by describe("pricing cache validation", ...) above, including the
+    // anchor-invariant test — do not re-add it here.
     fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
     // `updatedAt` must be fresh (same clock runStatusline's own `new Date()`
     // uses) or the shard is pruned as stale before its `costUsd` is ever
@@ -324,6 +361,5 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // The real session cost still renders — degrading is not the same as
     // rendering nothing, which is what the null turn-count used to do.
     expect(output).toContain("$1.50");
-    expect(output.length).toBeGreaterThan(0);
   });
 });
