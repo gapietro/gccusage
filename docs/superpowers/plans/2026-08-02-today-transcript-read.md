@@ -1107,14 +1107,19 @@ async function reportToday(): Promise<void> {
   // total, and the report looks complete (#82).
   if (unpriced.length > 0) {
     console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
-    console.log("Run \`npm run pricing\` to refresh the offline table.");
+    console.log(ORIGINAL_PRICING_HINT_LINE);
   }
 
   console.log(`\nSessions analyzed: ${fileCount} files`);
 }
 ```
 
-Note the backticks inside the `npm run pricing` string must stay as plain backticks in a normal string literal — copy that line from the original file rather than retyping it, to be certain the output is byte-identical.
+`ORIGINAL_PRICING_HINT_LINE` is a placeholder in this plan only: leave
+`src/cli.ts`'s existing `console.log("Run ...npm run pricing... to refresh the
+offline table.")` line **exactly as it already is on disk**, backticks and all.
+Do not retype it — the backticks inside that double-quoted string are literal
+and easy to mangle into `\`` escapes, and this output is asserted byte-identical
+in Step 6.
 
 Then fix the imports: delete lines 1-3 and replace with
 
