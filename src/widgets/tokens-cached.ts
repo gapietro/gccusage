@@ -8,7 +8,8 @@ export const tokensCachedWidget: Widget = {
     const cached =
       context.metrics.session.cacheCreationTokens +
       context.metrics.session.cacheReadTokens;
-    const label = config.label ?? "Cache:";
+    // "Cached:" (a count), distinct from cache-hit-rate's "Hit:" (a percentage) — #60.
+    const label = config.label ?? "Cached:";
     const text = `${label} ${formatTokens(cached)}`;
     return { text, fg: config.fg, bg: config.bg };
   },

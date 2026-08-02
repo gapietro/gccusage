@@ -189,14 +189,14 @@ before.
 | `today-spend` | Total daily cost across all sessions |
 | `context-percent` | Context window usage with progress bar |
 | `burn-rate` | Session spend rate in USD/hour |
-| `cache-hit-rate` | Prompt cache hit percentage |
+| `cache-hit-rate` | Prompt cache hit percentage (`Hit: 99%`) |
 | `token-breakdown` | Input vs output token counts |
 | `compact-countdown` | Tokens remaining before auto-compact ([see note](#about-the-auto-compact-countdown)) |
 | `git-branch` | Current git branch |
 | `git-changes` | Staged/unstaged file counts |
 | `lines-changed` | Lines added/removed in session |
-| `api-latency` | Total API wait time |
-| `session-timer` | Wall-clock session duration |
+| `api-latency` | Cumulative API wait time across the whole session (`API total: 8m 26s`) — not a single request's latency |
+| `session-timer` | Time since the Claude Code process started (`Up: 1hr 46m`); resets when the session is resumed |
 | `turn-counter` | Conversation turn count |
 | `block-timer` | Time since last block event |
 | `vim-mode` | Current vim mode (NORMAL/INSERT) |
@@ -205,9 +205,9 @@ before.
 | `separator` | Pipe separator (non-powerline mode) |
 | `tokens-input` | Input token count |
 | `tokens-output` | Output token count |
-| `tokens-cached` | Cached token count |
-| `per-model` | Cost breakdown by model |
-| `session-clock` | Session start time |
+| `tokens-cached` | Cached token count (`Cached: 5.24M`) |
+| `per-model` | Cost breakdown by model (`Sonnet 4.5:$3.40`) |
+| `session-clock` | Time since the session began (`Session: 2hr 13m`); measured from the transcript, so it survives a resume |
 | `cwd` | Current working directory |
 | `project` | Project name (repo root), from `workspace.project_dir` |
 

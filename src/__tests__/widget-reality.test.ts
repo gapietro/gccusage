@@ -96,6 +96,59 @@ describe("widget matrix against a real payload", () => {
   }
 });
 
+// #60 was two widgets — cache-hit-rate and tokens-cached — both defaulting to
+// the label "Cache:" for two different quantities, which made them
+// indistinguishable when placed side by side. Nothing structural stopped a
+// third widget from doing the same, so this guards the property rather than
+// the instance: no two widgets may lead with the same `Word:` label.
+//
+// The labels are read back out of RENDERED text, not from the widget sources,
+// because each default lives inline as `config.label ?? "..."` and is not
+// exported. That has two consequences worth stating: widgets that decline on
+// this payload (custom-text, custom-command, vim-mode) are not covered, and a
+// label is only seen if it survives into the output.
+//
+// The pattern requires the label to be alphabetic, which is what keeps
+// per-model out: it renders "Opus 5:$22.52", where the text before the colon
+// is data, not a label.
+const LABEL_PATTERN = /^([A-Za-z][A-Za-z ]*):/;
+
+// Duplicate labels that are accepted, each with the reason. An entry here is a
+// deliberate exemption, not a way to silence the guard: adding one should
+// require the same argument this one makes.
+const ALLOWED_LABEL_COLLISIONS: Record<string, { types: string[]; why: string }> = {
+  In: {
+    types: ["tokens-input", "token-breakdown"],
+    why: "token-breakdown is the compound form ('In:396 Out:137.8k') of the two single-metric widgets, so it reuses their labels by design. Nobody configures the compound alongside its own parts.",
+  },
+};
+
+it("gives no two widgets the same label (#60)", () => {
+  const ctx = contextFromFixture(midFixture as unknown as RealPayloadFixture, tmpHome);
+  const byLabel = new Map<string, string[]>();
+
+  for (const type of Object.keys(WIDGET_EXPECTATIONS)) {
+    const text = getWidget(type)!.render(ctx, { type } as never)?.text;
+    const label = text?.match(LABEL_PATTERN)?.[1];
+    if (label === undefined) continue;
+    byLabel.set(label, [...(byLabel.get(label) ?? []), type]);
+  }
+
+  // Non-vacuity: if the extraction ever stops finding labels, this test would
+  // pass while checking nothing at all.
+  expect(byLabel.size, "no labels extracted — the guard would be vacuous").toBeGreaterThan(5);
+
+  const collisions = [...byLabel.entries()]
+    .filter(([, types]) => types.length > 1)
+    .filter(([label, types]) => {
+      const allowed = ALLOWED_LABEL_COLLISIONS[label];
+      return !allowed || [...types].sort().join() !== [...allowed.types].sort().join();
+    })
+    .map(([label, types]) => `${label}: ${types.join(" + ")}`);
+
+  expect(collisions, `widgets sharing a label: ${collisions.join("; ")}`).toEqual([]);
+});
+
 // Widgets expected to render `null` for structural reasons (no user-supplied
 // text/command, or a feature that is off). Derived from the expectation table
 // itself, rather than hardcoded, so a fourth legitimately-declining widget

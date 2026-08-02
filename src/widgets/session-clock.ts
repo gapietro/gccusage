@@ -8,7 +8,14 @@ export const sessionClockWidget: Widget = {
     if (!context.sessionStartTime) return null;
 
     const elapsed = Date.now() - context.sessionStartTime;
-    const label = config.label ?? "";
+    // Labelled "Session:" because session-timer renders a different quantity in
+    // the same shape (#61). sessionStartTime is the transcript's first
+    // timestamp, so this spans the whole logical session and survives
+    // --resume; session-timer's cost.total_duration_ms is Date.now() minus the
+    // CLI *process* start time (verified against the 2.1.220 binary), which
+    // resets on restart. Two bare durations were indistinguishable; the labels
+    // are what tell them apart. `label: ""` still opts out.
+    const label = config.label ?? "Session:";
     const text = label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed);
     return { text, fg: config.fg, bg: config.bg };
   },

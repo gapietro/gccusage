@@ -2391,7 +2391,7 @@ const tokensOutputWidget = { render(context, config) {
 //#region src/widgets/tokens-cached.ts
 const tokensCachedWidget = { render(context, config) {
 	const cached = context.metrics.session.cacheCreationTokens + context.metrics.session.cacheReadTokens;
-	const label = config.label ?? "Cache:";
+	const label = config.label ?? "Cached:";
 	const text = `${label} ${formatTokens(cached)}`;
 	return {
 		text,
@@ -2405,11 +2405,7 @@ const tokensCachedWidget = { render(context, config) {
 const perModelBreakdownWidget = { render(context, config) {
 	if (context.costByModel.size === 0) return null;
 	const parts = [];
-	for (const [model, cost] of context.costByModel) {
-		const name = formatModelName(model);
-		const short = name.split(" ").map((w) => w[0]).join("");
-		parts.push(`${short}:${formatDollars(cost)}`);
-	}
+	for (const [model, cost] of context.costByModel) parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
 	const text = parts.join(" ");
 	return {
 		text,
@@ -2423,7 +2419,7 @@ const perModelBreakdownWidget = { render(context, config) {
 const sessionClockWidget = { render(context, config) {
 	if (!context.sessionStartTime) return null;
 	const elapsed = Date.now() - context.sessionStartTime;
-	const label = config.label ?? "";
+	const label = config.label ?? "Session:";
 	const text = label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed);
 	return {
 		text,
@@ -2570,7 +2566,7 @@ const cacheHitRateWidget = { render(context, config) {
 	const total = reads + creates;
 	if (total === 0) return null;
 	const hitRate = Math.round(reads / total * 100);
-	const label = config.label ?? "Cache:";
+	const label = config.label ?? "Hit:";
 	const text = `${label} ${hitRate}%`;
 	return {
 		text,
@@ -2624,7 +2620,7 @@ const vimModeWidget = { render(context, config) {
 const apiLatencyWidget = { render(context, config) {
 	const apiMs = context.stdin.cost?.total_api_duration_ms;
 	if (apiMs == null || apiMs === 0) return null;
-	const label = config.label ?? "API:";
+	const label = config.label ?? "API total:";
 	const text = `${label} ${formatDuration(apiMs)}`;
 	return {
 		text,
@@ -2666,7 +2662,7 @@ const tokenBreakdownWidget = { render(context, config) {
 const sessionTimerWidget = { render(context, config) {
 	const durationMs = context.stdin.cost?.total_duration_ms;
 	if (!durationMs || durationMs < 1e3) return null;
-	const label = config.label ?? "";
+	const label = config.label ?? "Up:";
 	const text = label ? `${label} ${formatDuration(durationMs)}` : formatDuration(durationMs);
 	return {
 		text,

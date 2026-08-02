@@ -8,7 +8,11 @@ export const apiLatencyWidget: Widget = {
     const apiMs = context.stdin.cost?.total_api_duration_ms;
     if (apiMs == null || apiMs === 0) return null;
 
-    const label = config.label ?? "API:";
+    // total_api_duration_ms is cumulative across every request in the session,
+    // not any one request's latency — "API: 35m 5s" read as a request that had
+    // been hanging for half an hour (#62). The registry key stays `api-latency`
+    // so existing layouts keep working.
+    const label = config.label ?? "API total:";
     const text = `${label} ${formatDuration(apiMs)}`;
     return { text, fg: config.fg, bg: config.bg };
   },

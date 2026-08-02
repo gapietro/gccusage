@@ -8,7 +8,8 @@ export const sessionTimerWidget: Widget = {
     const durationMs = context.stdin.cost?.total_duration_ms;
     if (!durationMs || durationMs < 1000) return null;
 
-    const label = config.label ?? "";
+    // "Up:" — this is process uptime, not session age. See session-clock.ts (#61).
+    const label = config.label ?? "Up:";
     const text = label ? `${label} ${formatDuration(durationMs)}` : formatDuration(durationMs);
     return { text, fg: config.fg, bg: config.bg };
   },
