@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { checkCache, writeCache } from "../cache/cache-manager.js";
+import { computeCacheKey } from "../cache/cache-key.js";
 import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
@@ -69,34 +70,34 @@ describe("statusline cache validation", () => {
   const HOUR = 3_600_000;
 
   it("serves a well-formed entry", () => {
-    writeCache("bar-output", "s1", 1.25, 120);
-    expect(checkCache(HOUR, "s1", 1.25, 120)).toBe("bar-output");
+    writeCache("bar-output", "k1");
+    expect(checkCache(HOUR, "k1")).toBe("bar-output");
   });
 
   it("discards an entry whose output is not a string", () => {
     write(
       "statusline-cache.json",
-      JSON.stringify({ output: 42, timestamp: Date.now(), sessionId: "s1", costUsd: 1.25, terminalWidth: 120 }),
+      JSON.stringify({ output: 42, timestamp: Date.now(), key: "k1" }),
     );
-    expect(checkCache(HOUR, "s1", 1.25, 120)).toBeNull();
+    expect(checkCache(HOUR, "k1")).toBeNull();
   });
 
   it("discards an entry whose timestamp is a string", () => {
     write(
       "statusline-cache.json",
-      JSON.stringify({ output: "x", timestamp: String(Date.now()), sessionId: "s1", costUsd: 1.25, terminalWidth: 120 }),
+      JSON.stringify({ output: "x", timestamp: String(Date.now()), key: "k1" }),
     );
-    expect(checkCache(HOUR, "s1", 1.25, 120)).toBeNull();
+    expect(checkCache(HOUR, "k1")).toBeNull();
   });
 
   it("discards a bare null document", () => {
     write("statusline-cache.json", "null");
-    expect(checkCache(HOUR, "s1", 1.25, 120)).toBeNull();
+    expect(checkCache(HOUR, "k1")).toBeNull();
   });
 
   it("discards a torn file", () => {
     write("statusline-cache.json", '{"output": "x", "timest');
-    expect(checkCache(HOUR, "s1", 1.25, 120)).toBeNull();
+    expect(checkCache(HOUR, "k1")).toBeNull();
   });
 });
 
@@ -363,27 +364,24 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // same throw into an empty bar and exit 0 in production.
     write("turn-count.json", "null");
 
-    // Every exact-match gate in checkCache (sessionId, costUsd,
-    // terminalWidth) must clear so only the schema can reject this entry —
-    // otherwise a mismatched gate rejects it for a reason unrelated to
+    // The key gate in checkCache must clear so only the schema can reject
+    // this entry — otherwise the gate rejects it for a reason unrelated to
     // validation and this leg proves nothing (the daily-shard fixture below
-    // had exactly that problem before its updatedAt was added). sessionId
-    // and costUsd mirror stdin exactly; terminalWidth is read from the real
-    // getTerminalWidth() so it matches whatever this test process actually
-    // resolves (undefined under vitest: no TTY, no COLUMNS) instead of a
-    // guessed number. `output` and `timestamp` are the wrong-typed fields: a
-    // validated reader rejects this envelope outright; the old unchecked
-    // cast lets `Date.now() - "soon"` (NaN) through the TTL check — NaN
-    // comparisons are always false, so it reads as "not expired" — and
-    // serves `output: 42` verbatim in place of the real bar.
+    // had exactly that problem before its updatedAt was added). The key is
+    // built from this test's own stdin and the real getTerminalWidth(), so
+    // it matches whatever this process resolves (undefined under vitest: no
+    // TTY, no COLUMNS) instead of a guessed number. `output` and `timestamp`
+    // are the wrong-typed fields: a validated reader rejects this envelope
+    // outright; the old unchecked cast lets `Date.now() - "soon"` (NaN)
+    // through the TTL check — NaN comparisons are always false, so it reads
+    // as "not expired" — and serves `output: 42` verbatim in place of the
+    // real bar.
     write(
       "statusline-cache.json",
       JSON.stringify({
         output: 42,
         timestamp: "soon",
-        sessionId: "hostile",
-        costUsd: 1.5,
-        terminalWidth: getTerminalWidth(),
+        key: computeCacheKey(stdin, getTerminalWidth()),
       }),
     );
 

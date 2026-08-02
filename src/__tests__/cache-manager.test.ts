@@ -11,6 +11,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-cache-"));
   originalXdg = process.env["XDG_CACHE_HOME"];
   process.env["XDG_CACHE_HOME"] = tmpDir;
+  fs.mkdirSync(path.join(tmpDir, "gccusage"), { recursive: true });
 });
 
 afterEach(() => {
@@ -19,68 +20,48 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("checkCache session matching", () => {
-  it("returns cached output for the same session", () => {
-    writeCache("output-a", "session-a");
-    expect(checkCache(60000, "session-a")).toBe("output-a");
+// Which inputs belong in the key is computeCacheKey's contract, tested in
+// cache-key.test.ts. Here the entry either matches the key it was written
+// under or it does not.
+describe("checkCache key matching", () => {
+  it("returns cached output for the key it was written under", () => {
+    writeCache("output-a", "key-a");
+    expect(checkCache(60000, "key-a")).toBe("output-a");
   });
 
-  it("misses when the requested session differs", () => {
-    writeCache("output-a", "session-a");
-    expect(checkCache(60000, "session-b")).toBeNull();
+  it("misses when the requested key differs", () => {
+    writeCache("output-a", "key-a");
+    expect(checkCache(60000, "key-b")).toBeNull();
   });
 
-  it("misses when the cache entry has no session but one is requested", () => {
-    writeCache("output-a", undefined);
-    expect(checkCache(60000, "session-a")).toBeNull();
+  it("misses once the entry is older than the TTL", () => {
+    writeCache("output-a", "key-a");
+
+    const cachePath = path.join(tmpDir, "gccusage", "statusline-cache.json");
+    const entry = JSON.parse(fs.readFileSync(cachePath, "utf-8")) as Record<string, unknown>;
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({ ...entry, timestamp: Date.now() - 61000 }),
+    );
+
+    expect(checkCache(60000, "key-a")).toBeNull();
+    expect(checkCache(120000, "key-a")).toBe("output-a");
   });
 
-  it("misses when the cache entry has a session but none is requested", () => {
-    writeCache("output-a", "session-a");
-    expect(checkCache(60000, undefined)).toBeNull();
-  });
-});
+  it("misses on an entry written by the previous key format", () => {
+    // (sessionId, costUsd, terminalWidth) with no `key` — served stale for
+    // every input outside that triple (#96), so it must not be honoured.
+    fs.writeFileSync(
+      path.join(tmpDir, "gccusage", "statusline-cache.json"),
+      JSON.stringify({
+        output: "stale-bar",
+        timestamp: Date.now(),
+        sessionId: "session-a",
+        costUsd: 1.25,
+        terminalWidth: 120,
+      }),
+    );
 
-describe("checkCache cost matching", () => {
-  it("returns cached output when the cost is unchanged", () => {
-    writeCache("output-a", "session-a", 1.25);
-    expect(checkCache(60000, "session-a", 1.25)).toBe("output-a");
-  });
-
-  it("misses when the requested cost differs from the cached cost", () => {
-    writeCache("output-a", "session-a", 1.25);
-    expect(checkCache(60000, "session-a", 2.5)).toBeNull();
-  });
-
-  it("misses when the cache entry has no cost but one is requested", () => {
-    writeCache("output-a", "session-a", undefined);
-    expect(checkCache(60000, "session-a", 1.25)).toBeNull();
-  });
-
-  it("misses when the cache entry has a cost but none is requested", () => {
-    writeCache("output-a", "session-a", 1.25);
-    expect(checkCache(60000, "session-a", undefined)).toBeNull();
-  });
-});
-
-describe("checkCache terminal width matching", () => {
-  it("misses when the terminal width differs but session and cost match", () => {
-    writeCache("output-a", "session-a", 1.25, 200);
-    expect(checkCache(60000, "session-a", 1.25, 60)).toBeNull();
-  });
-
-  it("returns cached output when the terminal width is unchanged", () => {
-    writeCache("output-a", "session-a", 1.25, 200);
-    expect(checkCache(60000, "session-a", 1.25, 200)).toBe("output-a");
-  });
-
-  it("returns cached output when both the write and lookup have an unknown width", () => {
-    writeCache("output-a", "session-a", 1.25, undefined);
-    expect(checkCache(60000, "session-a", 1.25, undefined)).toBe("output-a");
-  });
-
-  it("misses when the cache entry has an unknown width but a known width is requested", () => {
-    writeCache("output-a", "session-a", 1.25, undefined);
-    expect(checkCache(60000, "session-a", 1.25, 80)).toBeNull();
+    expect(checkCache(60000, "key-a")).toBeNull();
   });
 });
