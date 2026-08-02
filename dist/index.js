@@ -1897,10 +1897,15 @@ function migrateLegacyStore(now) {
 	} catch {
 		return;
 	}
+	let data = null;
 	try {
-		const data = JSON.parse(raw);
-		const date = typeof data.date === "string" ? data.date : dateStr(now);
-		for (const s of data.sessions ?? []) {
+		const parsed = JSON.parse(raw);
+		if (parsed && typeof parsed === "object") data = parsed;
+	} catch {}
+	const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+	const date = typeof data?.date === "string" ? data.date : dateStr(now);
+	try {
+		for (const s of sessions) {
 			if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
 			const target = shardPath(s.sessionId);
 			if (fs$2.existsSync(target)) continue;
@@ -1914,7 +1919,9 @@ function migrateLegacyStore(now) {
 			if (s.source === "stdin" || s.source === "calculated") entry.source = s.source;
 			writeJsonAtomic(target, entry);
 		}
-	} catch {}
+	} catch {
+		return;
+	}
 	try {
 		fs$2.unlinkSync(legacyPath);
 	} catch {}

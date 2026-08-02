@@ -71,10 +71,19 @@ function migrateLegacyStore(now: Date): void {
     return; // No legacy store — the common case.
   }
 
+  let data: { date?: unknown; sessions?: unknown } | null = null;
   try {
-    const data = JSON.parse(raw) as { date?: unknown; sessions?: LegacyEntry[] };
-    const date = typeof data.date === "string" ? data.date : dateStr(now);
-    for (const s of data.sessions ?? []) {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") data = parsed;
+  } catch {
+    // Unparseable: nothing to carry forward, and retrying cannot help.
+  }
+
+  const sessions: LegacyEntry[] = Array.isArray(data?.sessions) ? data.sessions : [];
+  const date = typeof data?.date === "string" ? data.date : dateStr(now);
+
+  try {
+    for (const s of sessions) {
       if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
       const target = shardPath(s.sessionId);
       // A shard already written by the new code is newer than the legacy file.
@@ -90,7 +99,11 @@ function migrateLegacyStore(now: Date): void {
       writeJsonAtomic(target, entry);
     }
   } catch {
-    // Unparseable legacy store: nothing to carry forward.
+    // A shard write failed (disk full, permissions). Sessions after the failure
+    // exist only in the legacy file, so keep it and retry on the next render —
+    // deleting it here would drop their spend for the rest of the day. Already
+    // migrated sessions are skipped by the existsSync check above.
+    return;
   }
 
   try {

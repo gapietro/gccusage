@@ -235,6 +235,60 @@ describe("trackDailyCost", () => {
     expect(fs.existsSync(path.join(cacheDir, "daily-costs.json"))).toBe(false);
   });
 
+  it("keeps the legacy store when a shard write fails mid-migration", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        date: "2026-07-29",
+        sessions: [
+          { sessionId: "a", costUsd: 5.0, baselineUsd: 0, updatedAt: now.getTime() },
+          { sessionId: "b", costUsd: 2.0, baselineUsd: 0, updatedAt: now.getTime() },
+        ],
+      }),
+    );
+    // A plain file where the shard directory belongs makes every shard write
+    // fail with ENOTDIR — a stand-in for a full disk or a permissions error.
+    fs.writeFileSync(shardDir(), "not a directory");
+
+    trackDailyCost(undefined, 0, "stdin", now);
+
+    // Both sessions still exist only in the legacy store, so it must survive to
+    // be retried — deleting it here would drop their spend for the rest of the
+    // day, which is the loss the migration exists to prevent.
+    expect(fs.existsSync(legacyPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(legacyPath, "utf-8")).sessions).toHaveLength(2);
+  });
+
+  it("discards an unparseable legacy store instead of retrying it forever", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(legacyPath, "{ truncated");
+
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const total = trackDailyCost("a", 1.0, "stdin", now);
+
+    expect(total).toBeCloseTo(1.0);
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("discards a legacy store whose sessions are not an array", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(legacyPath, JSON.stringify({ date: "2026-07-29", sessions: {} }));
+
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const total = trackDailyCost("a", 1.0, "stdin", now);
+
+    expect(total).toBeCloseTo(1.0);
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
   it("ignores an unparseable session file instead of losing the rest of the day", () => {
     const now = new Date(2026, 6, 29, 10, 0, 0);
     trackDailyCost("good", 4.0, "stdin", now);
