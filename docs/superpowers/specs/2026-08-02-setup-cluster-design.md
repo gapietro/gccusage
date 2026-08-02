@@ -242,9 +242,21 @@ already used by the `today` tests in `src/__tests__/cli.test.ts`:
 papers over what a real spawn catches:
 
 - `node dist/index.js setup` with a tmpdir `HOME` containing `null` exits 1 with
-  non-empty stderr.
-- Statusline mode still exits 0 on a forced error. This guards the over-correction —
-  scoping the CLI error path must not touch the graceful-degradation path.
+  non-empty stderr. Before the fix this exits 0 silently, so the test fails on the
+  old code — it is the regression test for #88's second half.
+- `node dist/index.js setup` on the success path still exits 0.
+
+The design originally also called for "statusline mode still exits 0 on a forced
+error", to guard against over-correcting the scope. **That test cannot be written
+honestly and is dropped.** Every I/O path the render pipeline touches is now
+individually defended — `readJsonValidated` swallows read and parse failures,
+`writeCache` and each branch of `daily-cost-tracker` carry their own try/catch — so
+no reachable sabotage (a file where `XDG_CACHE_HOME` should be, an unreadable HOME,
+malformed stdin) actually produces a throw for the outer handler to catch. A test
+asserting exit 0 there would pass against every possible implementation, including a
+broken one. Scoping is instead guaranteed structurally: the new try/catch is added
+*inside* the `args.length > 0` branch and `main().catch(() => process.exit(0))` is
+left byte-for-byte unmodified, which a reviewer can verify from the diff.
 
 **Deliberately not tested, and why.** #89's literal acceptance criterion — that the
 settings file is never *observed* in a partial state — is not testable from inside
