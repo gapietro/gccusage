@@ -2688,17 +2688,13 @@ function getStdinBurnRate(stdin) {
 }
 async function buildRenderContext(stdin, settings) {
 	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-	const todayFiles = findTodayJsonlFiles();
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(sessionEntries);
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
 	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
 	const costByModel = session.costs;
 	const calculatedSessionCost = calculateTotalCost(costByModel);
-	const today = calculateCostByModel(aggregateTokens(todayEntries).byModel, pricing);
-	const calculatedTodayCost = calculateTotalCost(today.costs);
 	const stdinCost = stdin.cost?.total_cost_usd;
 	let sessionCostUsd;
 	let sessionCostSource;
@@ -2709,9 +2705,10 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostUsd = stdinCost;
 		sessionCostSource = "stdin";
 	}
-	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
+	const today = settings.costSource === "calculated" ? calculateCostByModel(aggregateTokens(filterTodayEntries(findTodayJsonlFiles().flatMap(parseJsonlFile))).byModel, pricing) : null;
+	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-	const todayCostUncertain = settings.costSource === "calculated" && today.unpriced.length > 0;
+	const todayCostUncertain = today !== null && today.unpriced.length > 0;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
