@@ -3,15 +3,32 @@ import * as path from "node:path";
 
 /**
  * A path segment naming a specific Node version — the thing that makes an
- * interpreter path expire. Homebrew's Cellar, nvm, nodenv, fnm and volta all
+ * interpreter path expire. Homebrew's Cellar, nvm, nodenv and volta all
  * encode the version this way, so one pattern covers every layout that has
  * the problem. Homebrew's per-major symlink (`opt/node@22/bin/node`) is
  * deliberately not matched: brew re-points it on upgrade, so it is stable.
+ * fnm's install tree does encode a version the same way, but its live PATH
+ * entry does not — that layout is rejected separately, by
+ * `isSessionScoped` below.
  */
 const VERSION_SEGMENT = /\/(v?\d+\.\d+\.\d+[^/]*)/;
 
 export function versionSegment(p: string): string | null {
   return VERSION_SEGMENT.exec(p)?.[1] ?? null;
+}
+
+/**
+ * fnm puts the *active* Node's bin directory on PATH via
+ * `$FNM_MULTISHELL_PATH/bin`, a directory named after the shell session
+ * (e.g. `~/.local/state/fnm_multishells/38561_1712345678901/bin`, or `/tmp`
+ * on older fnm). It carries no version segment, so `versionSegment` alone
+ * would call it stable — but it does not survive a reboot, let alone a Node
+ * upgrade. That is worse than the `execPath` + warning fallback, which at
+ * least lasts until the version is actually removed. Reject it explicitly so
+ * resolution falls through to that fallback instead.
+ */
+function isSessionScoped(p: string): boolean {
+  return p.includes("fnm_multishells");
 }
 
 export interface NodePathProbe {
@@ -68,6 +85,14 @@ export function resolveStableNodePath(
   // than any ranking we invent, and every candidate resolving to `target` is
   // equally correct.
   for (const dir of probe.pathEntries) {
+    // A relative PATH entry (".", "bin", from a malformed or minimal PATH)
+    // would produce a candidate like "node" or "bin/node" — written verbatim
+    // into statusLine.command, that degrades to PATH-dependent resolution or
+    // resolves against Claude Code's own working directory. Neither is what
+    // this whole design exists to avoid.
+    if (!path.isAbsolute(dir)) continue;
+    if (isSessionScoped(dir)) continue;
+
     const candidate = path.join(dir, "node");
     if (versionSegment(candidate) !== null) continue;
 

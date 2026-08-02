@@ -629,7 +629,7 @@ Expected: PASS — the two pre-existing `gccusage today` tests, the two `shellQu
 
 Temporarily delete the `Array.isArray(parsed)` clause from the shape check and re-run. Expected: the `"an array root"` case FAILS. Revert.
 
-Then temporarily move the `writeFileAtomic(\`${settingsPath}.bak\`, ...)` line above the `readExistingSettings` call. Expected: the refusal cases FAIL on the `.bak` assertion. Revert.
+Then temporarily move the `writeFileAtomic(\`${settingsPath}.bak\`, ...)` line above the `readExistingSettings` call (not literally executable as written — `existing.raw` is referenced before `existing` is defined; do the equivalent by reordering to back up before validating, e.g. read the raw file and write the `.bak` first, then validate/parse it). Expected: the refusal cases FAIL on the `.bak` assertion. Revert.
 
 - [ ] **Step 6: Run the whole suite, typecheck, commit**
 
@@ -719,7 +719,7 @@ describe.skipIf(!distExists)("gccusage setup exit code", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `npm run build && npx vitest run src/__tests__/cli-exit-code.test.ts`
-Expected: the first test FAILS with `expected 0 to be 1` — Task 3 made `runSetup` throw, but `src/index.ts` still converts that into exit 0. The second test passes already; that is correct, it is the guard against over-correcting.
+Expected: the first test FAILS with `expected 0 to be 1` — Task 3 made `runSetup` throw, but `src/index.ts` still converts that into exit 0. The second test passes already; that is not a guard against over-correcting (wrapping all of `main()` in the same try/catch would still pass it unchanged). What it actually covers is the only real-spawn coverage of the setup success path against the shipped bundle: it fails on a load crash, on bundling-only breakage that unit tests against source cannot see, or if the exit(1) path became unconditional and started firing on success too.
 
 Note the `npm run build` — this test reads `dist/index.js`, so the bundle must be current for the test to mean anything.
 

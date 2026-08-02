@@ -16,7 +16,11 @@ async function main(): Promise<void> {
       await runCli(args);
     } catch (err) {
       console.error(`gccusage: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
+      // Not process.exit(1): stderr to a pipe is asynchronous on macOS, so an
+      // immediate exit can terminate the process before the write drains and
+      // truncate the message. Setting exitCode and letting main() return
+      // naturally lets Node flush stdio before it exits with the same status.
+      process.exitCode = 1;
     }
     return;
   }

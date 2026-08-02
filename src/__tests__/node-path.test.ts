@@ -31,6 +31,7 @@ describe("versionSegment", () => {
     ["/Users/x/.nvm/versions/node/v22.1.0/bin/node", "v22.1.0"],
     ["/Users/x/.nodenv/versions/22.1.0/bin/node", "22.1.0"],
     ["/Users/x/.volta/tools/image/node/22.1.0/bin/node", "22.1.0"],
+    ["/Users/x/.fnm/node-versions/v22.1.0/installation/bin/node", "v22.1.0"],
   ])("finds the expiring segment in %s", (input, expected) => {
     expect(versionSegment(input)).toBe(expected);
   });
@@ -102,6 +103,50 @@ describe("resolveStableNodePath", () => {
     // against, so guessing at a replacement would be worse than saying so.
     const result = resolveStableNodePath(
       probe(CELLAR, { "/opt/homebrew/bin/node": CELLAR }, ["/opt/homebrew/bin"]),
+    );
+
+    expect(result.path).toBe(CELLAR);
+    expect(result.warning).toContain("26.5.0_1");
+  });
+
+  // The fnm regression: $FNM_MULTISHELL_PATH/bin carries no version segment,
+  // so it looks stable to versionSegment() alone, but it is scoped to the
+  // shell session that ran `setup` and does not survive a reboot — worse
+  // than the execPath+warning fallback, which at least survives until the
+  // Node version itself is removed.
+  it("rejects an fnm multishell PATH entry (~/.local/state form) and falls back to execPath with a warning", () => {
+    const FNM = "/Users/x/.local/state/fnm_multishells/38561_1712345678901/bin/node";
+
+    const result = resolveStableNodePath(
+      probe(CELLAR, { [CELLAR]: CELLAR, [FNM]: CELLAR }, [
+        "/Users/x/.local/state/fnm_multishells/38561_1712345678901/bin",
+      ]),
+    );
+
+    expect(result.path).toBe(CELLAR);
+    expect(result.warning).toContain("26.5.0_1");
+  });
+
+  it("rejects an fnm multishell PATH entry (/tmp form) and falls back to execPath with a warning", () => {
+    const FNM = "/tmp/fnm_multishells/38561_1712345678901/bin/node";
+
+    const result = resolveStableNodePath(
+      probe(CELLAR, { [CELLAR]: CELLAR, [FNM]: CELLAR }, [
+        "/tmp/fnm_multishells/38561_1712345678901/bin",
+      ]),
+    );
+
+    expect(result.path).toBe(CELLAR);
+    expect(result.warning).toContain("26.5.0_1");
+  });
+
+  // #2: a relative PATH entry ("." from a malformed PATH, "bin" from a
+  // minimal one) must never be selected — "node" degrades to PATH-dependent
+  // resolution and "bin/node" resolves against Claude Code's own cwd, not
+  // the directory it was found in.
+  it("ignores a relative PATH entry even when it resolves to the running binary", () => {
+    const result = resolveStableNodePath(
+      probe(CELLAR, { [CELLAR]: CELLAR, "bin/node": CELLAR, "node": CELLAR }, ["bin", "."]),
     );
 
     expect(result.path).toBe(CELLAR);

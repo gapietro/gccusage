@@ -4149,14 +4149,30 @@ async function runStatusline(stdin, settings) {
 //#region src/utils/node-path.ts
 /**
 * A path segment naming a specific Node version — the thing that makes an
-* interpreter path expire. Homebrew's Cellar, nvm, nodenv, fnm and volta all
+* interpreter path expire. Homebrew's Cellar, nvm, nodenv and volta all
 * encode the version this way, so one pattern covers every layout that has
 * the problem. Homebrew's per-major symlink (`opt/node@22/bin/node`) is
 * deliberately not matched: brew re-points it on upgrade, so it is stable.
+* fnm's install tree does encode a version the same way, but its live PATH
+* entry does not — that layout is rejected separately, by
+* `isSessionScoped` below.
 */
 const VERSION_SEGMENT = /\/(v?\d+\.\d+\.\d+[^/]*)/;
 function versionSegment(p) {
 	return VERSION_SEGMENT.exec(p)?.[1] ?? null;
+}
+/**
+* fnm puts the *active* Node's bin directory on PATH via
+* `$FNM_MULTISHELL_PATH/bin`, a directory named after the shell session
+* (e.g. `~/.local/state/fnm_multishells/38561_1712345678901/bin`, or `/tmp`
+* on older fnm). It carries no version segment, so `versionSegment` alone
+* would call it stable — but it does not survive a reboot, let alone a Node
+* upgrade. That is worse than the `execPath` + warning fallback, which at
+* least lasts until the version is actually removed. Reject it explicitly so
+* resolution falls through to that fallback instead.
+*/
+function isSessionScoped(p) {
+	return p.includes("fnm_multishells");
 }
 function defaultProbe() {
 	return {
@@ -4191,6 +4207,8 @@ function resolveStableNodePath(probe = defaultProbe()) {
 		};
 	}
 	for (const dir of probe.pathEntries) {
+		if (!path.isAbsolute(dir)) continue;
+		if (isSessionScoped(dir)) continue;
 		const candidate = path.join(dir, "node");
 		if (versionSegment(candidate) !== null) continue;
 		let resolved;
@@ -4349,7 +4367,7 @@ async function main() {
 			await runCli(args);
 		} catch (err) {
 			console.error(`gccusage: ${err instanceof Error ? err.message : String(err)}`);
-			process.exit(1);
+			process.exitCode = 1;
 		}
 		return;
 	}
