@@ -32,10 +32,9 @@ jobs:
       # version-specific is most of the diagnosis.
       fail-fast: false
       matrix:
-        # 22 is the oldest version the toolchain actually supports: scripts/
-        # are .ts files run directly by Node, which needs native type
-        # stripping. package.json still advertises engines.node >=18, which is
-        # untested here and tracked separately.
+        # 22 is the floor the whole project claims: package.json engines,
+        # devEngines and tsdown's target all say 22, and scripts/ are .ts
+        # files Node runs directly, needing native type stripping (22.18+).
         node: ["22", "24"]
     name: test (node ${{ matrix.node }})
     steps:
