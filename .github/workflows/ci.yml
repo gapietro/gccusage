@@ -1,0 +1,83 @@
+name: ci
+
+# Runs the suite that was previously advisory, and enforces this project's
+# hardest-won invariant: dist/index.js is rebuilt and staged in the same commit
+# as any src/ change. `gccusage setup` points statusLine.command at that file,
+# so a src-only commit leaves everyone who upgrades via `git pull` running the
+# old code. That has already shipped once (PR #38 landed three commits without
+# the bundle, and the fix reached nobody until final review).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# This workflow only reads. build-badge.yml needs contents: write because it
+# commits; nothing here does.
+permissions:
+  contents: read
+
+# Superseding a run is correct here and would NOT be in build-badge.yml. That
+# workflow reads a shared, mutating value (the branch tip) and explains at
+# length why serialising it by queue loses counts. CI reads only the commit it
+# was triggered for, so an obsoleted run has nothing to preserve.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel 24 because 22 failed; knowing whether a break is
+      # version-specific is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        # 22 is the oldest version the toolchain actually supports: scripts/
+        # are .ts files run directly by Node, which needs native type
+        # stripping. package.json still advertises engines.node >=18, which is
+        # untested here and tracked separately.
+        node: ["22", "24"]
+    name: test (node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # Note that this also runs `prepare`, i.e. `npm run build`. The suite
+      # depends on that: statusline-width.test.ts execs dist/index.js as a real
+      # child process to catch what vitest's resolver would paper over.
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run typecheck:scripts
+
+      - run: npm test
+
+  bundle-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      # Idempotent — `prepare` already built during `npm ci`. Kept explicit so
+      # the ordering is legible: the diff below is only meaningful *after* an
+      # install, never before, because npm has already rewritten the file by
+      # then.
+      - run: npm run build
+
+      - name: Committed bundle matches a fresh build
+        run: |
+          if ! git diff --exit-code -- dist/index.js; then
+            echo "::error file=dist/index.js::dist/index.js is stale. Run 'npm run build' and 'git add -f dist/index.js'."
+            exit 1
+          fi
