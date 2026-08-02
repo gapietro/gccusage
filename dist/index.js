@@ -2384,9 +2384,24 @@ function findPricing(model, table) {
 	const stripped = model.replace(/^claude\//, "");
 	if (table[stripped]) return table[stripped];
 	let best = null;
+	let bestIsForward = false;
 	for (const key of Object.keys(table)) {
-		if (!key.includes(model) && !model.includes(key)) continue;
-		if (best === null || key.length > best.length || key.length === best.length && key < best) best = key;
+		const forward = model.includes(key);
+		const reverse = !forward && key.includes(model);
+		if (!forward && !reverse) continue;
+		if (best === null) {
+			best = key;
+			bestIsForward = forward;
+			continue;
+		}
+		if (forward !== bestIsForward) {
+			if (forward) {
+				best = key;
+				bestIsForward = true;
+			}
+			continue;
+		}
+		if (key.length > best.length || key.length === best.length && key < best) best = key;
 	}
 	return best === null ? null : table[best];
 }
