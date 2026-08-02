@@ -240,8 +240,26 @@ describe("pricing cache validation", () => {
 
   // The anchor is a fetch-time check, not a read-time one: a price legitimately
   // cached before the snapshot was regenerated must still load.
+  //
+  // This fixture must sit OUTSIDE anchorToSnapshot's [1/10, 10] deviation band
+  // around FALLBACK_PRICING's "claude-haiku-4-5" entry (inputCostPerToken
+  // 1e-6), not inside it: an in-band value passes through anchorToSnapshot
+  // unchanged (src/data/pricing-validation.ts, "if within deviation, pass
+  // through"), so the test would go on passing even if the anchor were
+  // mistakenly wired into the read path. ANCHOR_OUTLIER is ~20x the snapshot
+  // on every field — the anchor would drop it, this test would not — while
+  // staying far under MAX_COST_PER_TOKEN (1e-3) so it still clears
+  // sanitisePricingTable's bounds check on its own. Do not "simplify" these
+  // back toward SANE.
+  const ANCHOR_OUTLIER = {
+    inputCostPerToken: 20e-6,
+    outputCostPerToken: 100e-6,
+    cacheCreationCostPerToken: 25e-6,
+    cacheReadCostPerToken: 2e-6,
+  };
+
   it("does not re-anchor cached entries against the snapshot", () => {
-    writePricing({ "claude-haiku-4-5": SANE });
-    expect(loadPricingCacheEntry()!.data["claude-haiku-4-5"]).toEqual(SANE);
+    writePricing({ "claude-haiku-4-5": ANCHOR_OUTLIER });
+    expect(loadPricingCacheEntry()!.data["claude-haiku-4-5"]).toEqual(ANCHOR_OUTLIER);
   });
 });
