@@ -2,7 +2,7 @@
 
 <!-- badges:start -->
 ![version](https://img.shields.io/badge/version-0.2.0-blue)
-![build](https://img.shields.io/badge/build-0801.2-brightgreen)
+![build](https://img.shields.io/badge/build-0802.1-brightgreen)
 <!-- badges:end -->
 
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
