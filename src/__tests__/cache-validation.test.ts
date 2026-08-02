@@ -186,5 +186,10 @@ describe("daily cost shard validation", () => {
     const total = trackDailyCost("mine", 1, "stdin", NOW);
     expect(Number.isNaN(total)).toBe(false);
     expect(total).toBeCloseTo(3);
+
+    // Assert on what migration itself wrote to disk, not just the end-to-end
+    // total: the malformed entry must never be migrated to a shard at all,
+    // not merely excluded later by a second, independent validation pass.
+    expect(fs.existsSync(path.join(tmpDir, "gccusage", "daily", "bad.json"))).toBe(false);
   });
 });
