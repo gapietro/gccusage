@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import * as fs$9 from "node:fs";
-import * as fs$8 from "node:fs";
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
@@ -1424,10 +1422,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$9.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$9.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1496,12 +1494,12 @@ function getCacheDir() {
 	return path$8.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$8.existsSync(dir)) fs$8.mkdirSync(dir, { recursive: true });
+	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$8.existsSync(dir)) return [];
+	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$8.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1509,12 +1507,12 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$8.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$8.statSync(fullPath);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
 			files.push(...jsonlFiles.filter((f) => path$8.basename(f, ".jsonl") === sessionId));
@@ -1524,18 +1522,18 @@ function findSessionJsonlFiles(sessionId) {
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$8.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$8.statSync(fullPath);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$8.statSync(f);
+				const fstat = fs$6.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1546,9 +1544,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$7.existsSync(filePath)) return [];
+	if (!fs$5.existsSync(filePath)) return [];
 	try {
-		const content = fs$7.readFileSync(filePath, "utf-8");
+		const content = fs$5.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1712,15 +1710,42 @@ function writeJsonAtomic(filePath, data) {
 	ensureDir(dir);
 	const serialised = JSON.stringify(data);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$6.writeFileSync(tmpPath, serialised, "utf-8");
+	fs$4.writeFileSync(tmpPath, serialised, "utf-8");
 	try {
-		fs$6.renameSync(tmpPath, filePath);
+		fs$4.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$6.unlinkSync(tmpPath);
+			fs$4.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
+}
+/**
+* Read a JSON file and validate it, or get nothing. Every cache file in this
+* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
+* checks nothing at runtime — while config got full valibot validation. The
+* caches are the files that can actually be corrupted, by a torn write or by
+* hand (#92).
+*
+* Returns null for a missing file, an unreadable one, malformed JSON, or a
+* document that does not match `schema`. Callers treat null as "rebuild from
+* scratch", which is the posture they already had for a missing file.
+*/
+function readJsonValidated(filePath, schema) {
+	let raw;
+	try {
+		raw = fs$4.readFileSync(filePath, "utf-8");
+	} catch {
+		return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const result = safeParse(schema, parsed);
+	return result.success ? result.output : null;
 }
 
 //#endregion
@@ -1731,11 +1756,11 @@ function getBlockCachePath() {
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
 	try {
-		if (!fs$5.existsSync(cachePath)) return null;
-		const raw = fs$5.readFileSync(cachePath, "utf-8");
+		if (!fs$3.existsSync(cachePath)) return null;
+		const raw = fs$3.readFileSync(cachePath, "utf-8");
 		const data = JSON.parse(raw);
 		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
-			fs$5.unlinkSync(cachePath);
+			fs$3.unlinkSync(cachePath);
 			return null;
 		}
 		return data;
@@ -1794,8 +1819,8 @@ function getCachePath$1() {
 function loadPricingCacheEntry() {
 	const cachePath = getCachePath$1();
 	try {
-		if (!fs$4.existsSync(cachePath)) return null;
-		const raw = fs$4.readFileSync(cachePath, "utf-8");
+		if (!fs$2.existsSync(cachePath)) return null;
+		const raw = fs$2.readFileSync(cachePath, "utf-8");
 		const cache = JSON.parse(raw);
 		if (typeof cache?.timestamp !== "number" || !cache.data) return null;
 		return {
@@ -2179,7 +2204,7 @@ function stampPath() {
 }
 function attemptedRecently() {
 	try {
-		const raw = fs$3.readFileSync(stampPath(), "utf-8");
+		const raw = fs$1.readFileSync(stampPath(), "utf-8");
 		const stamp = JSON.parse(raw);
 		if (typeof stamp?.timestamp !== "number") return false;
 		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
@@ -2347,7 +2372,7 @@ function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
 	let raw;
 	try {
-		raw = fs$2.readFileSync(legacyPath, "utf-8");
+		raw = fs.readFileSync(legacyPath, "utf-8");
 	} catch {
 		return;
 	}
@@ -2362,7 +2387,7 @@ function migrateLegacyStore(now) {
 		for (const s of sessions) {
 			if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
 			const target = shardPath(s.sessionId);
-			if (fs$2.existsSync(target)) continue;
+			if (fs.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
 				date,
@@ -2377,7 +2402,7 @@ function migrateLegacyStore(now) {
 		return;
 	}
 	try {
-		fs$2.unlinkSync(legacyPath);
+		fs.unlinkSync(legacyPath);
 	} catch {}
 }
 /**
@@ -2389,7 +2414,7 @@ function readEntries(now) {
 	migrateLegacyStore(now);
 	let files;
 	try {
-		files = fs$2.readdirSync(getShardDir());
+		files = fs.readdirSync(getShardDir());
 	} catch {
 		return [];
 	}
@@ -2399,14 +2424,14 @@ function readEntries(now) {
 		const fullPath = path$3.join(getShardDir(), file);
 		let entry;
 		try {
-			entry = JSON.parse(fs$2.readFileSync(fullPath, "utf-8"));
+			entry = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
 		} catch {
 			continue;
 		}
 		if (typeof entry?.sessionId !== "string" || typeof entry.costUsd !== "number") continue;
 		if (now.getTime() - (entry.updatedAt ?? 0) >= STALE_SESSION_MS) {
 			try {
-				fs$2.unlinkSync(fullPath);
+				fs.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
@@ -2460,6 +2485,10 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 
 //#endregion
 //#region src/data/turn-tracker.ts
+const TurnDataSchema = object({
+	sessionId: string(),
+	count: number()
+});
 function getTurnPath() {
 	return path$2.join(getCacheDir(), "turn-count.json");
 }
@@ -2470,14 +2499,10 @@ function getTurnPath() {
 function trackTurn(sessionId) {
 	if (!sessionId) return 0;
 	const filePath = getTurnPath();
-	let data = {
+	let data = readJsonValidated(filePath, TurnDataSchema) ?? {
 		sessionId: "",
 		count: 0
 	};
-	try {
-		const raw = fs$1.readFileSync(filePath, "utf-8");
-		data = JSON.parse(raw);
-	} catch {}
 	if (data.sessionId !== sessionId) data = {
 		sessionId,
 		count: 0
@@ -3908,23 +3933,24 @@ function isSeparatorOutput(output) {
 
 //#endregion
 //#region src/cache/cache-manager.ts
+const CacheEntrySchema = object({
+	output: string(),
+	timestamp: number(),
+	sessionId: optional(string()),
+	costUsd: optional(number()),
+	terminalWidth: optional(number())
+});
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
 function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
-	const cachePath = getCachePath();
-	try {
-		if (!fs.existsSync(cachePath)) return null;
-		const raw = fs.readFileSync(cachePath, "utf-8");
-		const entry = JSON.parse(raw);
-		if (entry.sessionId !== sessionId) return null;
-		if (entry.costUsd !== costUsd) return null;
-		if (entry.terminalWidth !== terminalWidth) return null;
-		if (Date.now() - entry.timestamp > ttlMs) return null;
-		return entry.output;
-	} catch {
-		return null;
-	}
+	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
+	if (!entry) return null;
+	if (entry.sessionId !== sessionId) return null;
+	if (entry.costUsd !== costUsd) return null;
+	if (entry.terminalWidth !== terminalWidth) return null;
+	if (Date.now() - entry.timestamp > ttlMs) return null;
+	return entry.output;
 }
 function writeCache(output, sessionId, costUsd, terminalWidth) {
 	const cachePath = getCachePath();

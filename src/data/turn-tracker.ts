@@ -1,12 +1,20 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
+import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
 
 interface TurnData {
   sessionId: string;
   count: number;
 }
+
+// `JSON.parse("null")` succeeds and yields null, which the old `as TurnData`
+// cast then dereferenced outside the try block — throwing, and blanking the
+// entire statusline over a four-byte cache file (#92).
+const TurnDataSchema = v.object({
+  sessionId: v.string(),
+  count: v.number(),
+});
 
 function getTurnPath(): string {
   return path.join(getCacheDir(), "turn-count.json");
@@ -20,14 +28,10 @@ export function trackTurn(sessionId: string | undefined): number {
   if (!sessionId) return 0;
 
   const filePath = getTurnPath();
-  let data: TurnData = { sessionId: "", count: 0 };
-
-  try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    data = JSON.parse(raw) as TurnData;
-  } catch {
-    // File doesn't exist or is invalid
-  }
+  let data: TurnData = readJsonValidated(filePath, TurnDataSchema) ?? {
+    sessionId: "",
+    count: 0,
+  };
 
   // Reset if different session
   if (data.sessionId !== sessionId) {
