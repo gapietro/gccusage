@@ -301,9 +301,19 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     write("statusline-cache.json", JSON.stringify({ output: 42, timestamp: "soon" }));
     write("pricing.json", JSON.stringify({ timestamp: "soon", data: null }));
     fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    // `updatedAt` must be fresh (same clock runStatusline's own `new Date()`
+    // uses) or the shard is pruned as stale before its `costUsd` is ever
+    // read — masking the sabotage this fixture exists to catch. `date` must
+    // match today for the same reason: a shard filed under yesterday never
+    // reaches the total. `costUsd` must be a wrong-typed value that does NOT
+    // coerce under `-` (unlike "9.99", which silently becomes the number
+    // 9.99) — "not-a-number" reaches `Math.max(0, e.costUsd - e.baselineUsd)`
+    // as `NaN` exactly when `ShardSchema.costUsd` fails to reject it.
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     fs.writeFileSync(
       path.join(tmpDir, "gccusage", "daily", "ghost.json"),
-      JSON.stringify({ sessionId: "ghost", date: "2026-08-02", costUsd: "9.99" }),
+      JSON.stringify({ sessionId: "ghost", date: today, costUsd: "not-a-number", updatedAt: now.getTime() }),
     );
 
     const output = await runStatusline(stdin, DEFAULT_SETTINGS);
