@@ -5,7 +5,8 @@ import { findSessionJsonlFiles, findTodayJsonlFiles } from "../utils/paths.js";
 import { parseJsonlFile, filterTodayEntries } from "./jsonl-reader.js";
 import { aggregateTokens, getFirstTimestamp } from "./token-aggregator.js";
 import { detectBlock } from "./block-tracker.js";
-import { fetchPricing } from "./pricing-fetcher.js";
+import { getPricingForRender } from "./pricing-fetcher.js";
+import { maybeSpawnPricingRefresh } from "./pricing-refresh.js";
 import {
   calculateCostByModel,
   calculateTotalCost,
@@ -43,8 +44,10 @@ export async function buildRenderContext(
   // Aggregate tokens
   const metrics = aggregateTokens(sessionEntries, todayEntries);
 
-  // Get pricing
-  const pricing = await fetchPricing(settings.cache?.pricingTtlMs ?? 86400000);
+  // Get pricing — cache-or-fallback only. Refreshing happens in a detached
+  // child so the bar never waits on the network (#84).
+  const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 86400000);
+  maybeSpawnPricingRefresh(stale);
 
   // Calculate costs
   const session = calculateCostByModel(metrics.byModel, pricing);

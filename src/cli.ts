@@ -1,7 +1,7 @@
 import { findTodayJsonlFiles, findSessionJsonlFiles } from "./utils/paths.js";
 import { parseJsonlFile, filterTodayEntries } from "./data/jsonl-reader.js";
 import { aggregateTokens } from "./data/token-aggregator.js";
-import { fetchPricing } from "./data/pricing-fetcher.js";
+import { fetchPricing, refreshPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -21,6 +21,12 @@ export async function runCli(args: string[]): Promise<void> {
       break;
     case "help":
       printHelp();
+      break;
+    // Internal: what the detached refresher child runs. Undocumented in help
+    // because it is an implementation detail of the render path, not a
+    // command anyone needs to type.
+    case "refresh-pricing":
+      await refreshPricing();
       break;
     default:
       console.error(`Unknown command: ${command}`);

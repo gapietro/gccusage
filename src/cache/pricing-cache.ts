@@ -13,19 +13,35 @@ function getCachePath(): string {
   return path.join(getCacheDir(), "pricing.json");
 }
 
-export function loadPricingCache(ttlMs: number): PricingTable | null {
+export interface PricingCacheEntry {
+  data: PricingTable;
+  ageMs: number;
+}
+
+/**
+ * Loads the cache regardless of age and reports how old it is, leaving the
+ * age policy to the caller. The render path and the CLI want different
+ * answers from the same file: the render path serves a stale table (and
+ * refreshes out of band) rather than block, while an age ceiling decides when
+ * the table is too old to price from at all.
+ */
+export function loadPricingCacheEntry(): PricingCacheEntry | null {
   const cachePath = getCachePath();
   try {
     if (!fs.existsSync(cachePath)) return null;
     const raw = fs.readFileSync(cachePath, "utf-8");
     const cache = JSON.parse(raw) as PricingCacheFile;
-    if (Date.now() - cache.timestamp < ttlMs) {
-      return cache.data;
-    }
+    if (typeof cache?.timestamp !== "number" || !cache.data) return null;
+    return { data: cache.data, ageMs: Date.now() - cache.timestamp };
   } catch {
-    // ignore
+    return null;
   }
-  return null;
+}
+
+export function loadPricingCache(ttlMs: number): PricingTable | null {
+  const entry = loadPricingCacheEntry();
+  if (!entry) return null;
+  return entry.ageMs < ttlMs ? entry.data : null;
 }
 
 export function savePricingCache(data: PricingTable): void {
