@@ -2670,13 +2670,14 @@ function deriveContextUsage(stdin) {
 		const exact = cw.current_usage ? sumTokens(cw.current_usage) : void 0;
 		if (cw.remaining_percentage != null) return withTokens((100 - cw.remaining_percentage) / 100, windowSize, exact);
 		if (cw.used_percentage != null) return withTokens(cw.used_percentage / 100, windowSize, exact);
-		if (exact !== void 0 && windowSize && windowSize > 0) return withTokens(exact / windowSize, windowSize, exact);
+		if (exact !== void 0 && exact > 0 && windowSize && windowSize > 0) return withTokens(exact / windowSize, windowSize, exact);
 		return null;
 	}
 	if (typeof cw === "number" && cw > 0) {
 		const usage = stdin.token_usage;
 		if (!usage) return null;
 		const exact = sumTokens(usage);
+		if (exact <= 0) return null;
 		return withTokens(exact / cw, cw, exact);
 	}
 	return null;

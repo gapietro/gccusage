@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { deriveContextUsage } from "../utils/context-usage.js";
+import { parseStatusJson } from "../data/stdin-reader.js";
 
 describe("deriveContextUsage", () => {
   it("prefers remaining_percentage", () => {
@@ -292,5 +293,86 @@ describe("deriveContextUsage", () => {
       },
     });
     expect(usage!.usedTokens).toBe(160_000);
+  });
+});
+
+/**
+ * A zero token sum means "no usable breakdown", not "the window is empty".
+ *
+ * `current_usage`'s four counts default to 0 when absent or wrong-typed, so a
+ * `current_usage` that carries no usable numbers sums to 0. The third branch
+ * of deriveContextUsage used to accept that as a ratio and render a confident
+ * `0% ▶ ~167.0k left`. Caught in review of #83: making bad fields survive
+ * created a second route into it, but an empty `current_usage: {}` with no
+ * percentages reached it with no wrong types at all.
+ */
+describe("deriveContextUsage with an unusable token breakdown", () => {
+  it("declines rather than reporting 0% when current_usage sums to zero", () => {
+    // Through the real parser: the four counts are defaulted to 0, so this is
+    // exactly the object deriveContextUsage receives for `current_usage: {}`.
+    const { stdin } = parseStatusJson(
+      JSON.stringify({ context_window: { context_window_size: 200_000, current_usage: {} } }),
+    );
+
+    expect(deriveContextUsage(stdin)).toBeNull();
+  });
+
+  it("declines when every token count is present but zero", () => {
+    const usage = deriveContextUsage({
+      context_window: {
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+
+    expect(usage).toBeNull();
+  });
+
+  it("still reports 0% when used_percentage is explicitly zero", () => {
+    // The genuine empty-window case must survive the fix above: a real 0 is
+    // data, an absent percentage plus a zero sum is not.
+    const usage = deriveContextUsage({
+      context_window: { context_window_size: 200_000, used_percentage: 0 },
+    });
+
+    expect(usage?.ratio).toBe(0);
+  });
+
+  it("still reports 0% when remaining_percentage is explicitly 100", () => {
+    const usage = deriveContextUsage({
+      context_window: { context_window_size: 200_000, remaining_percentage: 100 },
+    });
+
+    expect(usage?.ratio).toBe(0);
+  });
+
+  it("still derives from a non-zero breakdown when no percentage is given", () => {
+    const usage = deriveContextUsage({
+      context_window: {
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 50_000,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    });
+
+    expect(usage?.ratio).toBe(0.25);
+    expect(usage?.usedTokens).toBe(50_000);
+  });
+
+  it("declines for the legacy flat format when token_usage sums to zero", () => {
+    const { stdin } = parseStatusJson(
+      JSON.stringify({ context_window: 200_000, token_usage: {} }),
+    );
+
+    expect(deriveContextUsage(stdin)).toBeNull();
   });
 });
