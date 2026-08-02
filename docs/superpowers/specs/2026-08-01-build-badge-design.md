@@ -79,13 +79,28 @@ and wired as `npm run badge`.
 
 - `on: push: branches: [main]`
 - `permissions: contents: write`
-- `concurrency: { group: build-badge, cancel-in-progress: false }` — two pushes
-  landing together must not both read the same count and write the same number.
-  Never cancel in progress: a cancelled run drops a push from the count.
+- `actions/checkout@v4` with `ref: main` and `fetch-depth: 0` — the job must
+  count from the branch tip other runs have already stamped, not from the
+  commit that triggered it.
 - `actions/setup-node@v4` pinned to Node 24, since the script is a `.ts` file
   Node must strip types from.
-- Runs the script; commits and pushes only when the files changed, with message
-  `chore: build 0801.4 [skip ci]`.
+- A retry loop, up to 5 attempts: fetch, `reset --hard origin/main`, run the
+  script, commit, push. Resetting *first* is what makes a retry correct rather
+  than merely repeated — a rejected push means another badge commit landed, so
+  the count this attempt computed is stale and must be discarded, not rebased
+  forward. Commit message `chore: build 0801.4 [skip ci]`.
+
+**No `concurrency` group.** It reads as the right tool for "two runs must not
+share a count", but it cannot be: a run reads the repository at checkout, and
+serialising *execution* does not refresh a snapshot. Worse, GitHub cancels a
+run that is already pending when a newer one queues behind an in-progress run —
+`cancel-in-progress: false` only protects runs that have started — so a burst of
+pushes loses counts to the mechanism meant to protect them. Correctness comes
+from the retry loop, and a rejected push serialises the runs instead of a queue.
+
+Both failure modes were reproduced against real git repositories before the fix
+and after it: two interleaved human pushes moved the count by 1 under the
+snapshot-plus-concurrency design, and by 2 under this one.
 
 ## Loop guard
 
