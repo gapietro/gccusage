@@ -94,7 +94,17 @@ export function deriveContextUsage(stdin: StatusJson): ContextUsage | null {
     if (cw.used_percentage != null) {
       return withTokens(cw.used_percentage / 100, windowSize, exact);
     }
-    if (exact !== undefined && windowSize && windowSize > 0) {
+    // `exact > 0`, not merely present. The four counts default to 0 when
+    // absent or wrong-typed, so a `current_usage` carrying no usable numbers
+    // sums to 0 — which is "no breakdown", not "the window is empty". Without
+    // this the bar rendered a confident `0% ▶ ~167.0k left` off an empty
+    // object. `withTokens` already applies the same `exact > 0` test when
+    // deciding whether to trust the breakdown; this extends it to deciding
+    // whether there is any usable data at all.
+    //
+    // A genuine zero still renders: `used_percentage: 0` is handled above,
+    // where 0 is data rather than an absence.
+    if (exact !== undefined && exact > 0 && windowSize && windowSize > 0) {
       return withTokens(exact / windowSize, windowSize, exact);
     }
     return null;
@@ -105,6 +115,9 @@ export function deriveContextUsage(stdin: StatusJson): ContextUsage | null {
     const usage = stdin.token_usage;
     if (!usage) return null;
     const exact = sumTokens(usage);
+    // Same reasoning as above: this format has no percentage to fall back on,
+    // so a zero sum is the absence of data, not an empty window.
+    if (exact <= 0) return null;
     return withTokens(exact / cw, cw, exact);
   }
 

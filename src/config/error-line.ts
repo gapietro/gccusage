@@ -25,3 +25,15 @@ function shortenPath(filePath: string): string {
 export function formatConfigError(error: string, configPath: string): string {
   return `${BOLD_RED}⚠ gccusage config${RESET}  ${shortenPath(configPath)} — ${error}`;
 }
+
+/**
+ * The same treatment for a payload that could not be read at all (#83).
+ *
+ * Unlike a config error this is not the user's to fix — it means Claude Code
+ * sent something unusable — but showing it still beats the alternative, which
+ * was a `$0.00` bar indistinguishable from a genuinely free session. Bad
+ * individual fields never reach here; the schema absorbs those.
+ */
+export function formatStdinError(error: string): string {
+  return `${BOLD_RED}⚠ gccusage${RESET}  ${error}`;
+}
