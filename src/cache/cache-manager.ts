@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getCacheDir, ensureDir } from "../utils/paths.js";
+import { getCacheDir } from "../utils/paths.js";
+import { writeJsonAtomic } from "../utils/atomic-json.js";
 
 interface CacheEntry {
   output: string;
@@ -57,7 +58,6 @@ export function writeCache(
 ): void {
   const cachePath = getCachePath();
   try {
-    ensureDir(path.dirname(cachePath));
     const entry: CacheEntry = {
       output,
       timestamp: Date.now(),
@@ -65,7 +65,7 @@ export function writeCache(
       costUsd,
       terminalWidth,
     };
-    fs.writeFileSync(cachePath, JSON.stringify(entry));
+    writeJsonAtomic(cachePath, entry);
   } catch {
     // ignore
   }

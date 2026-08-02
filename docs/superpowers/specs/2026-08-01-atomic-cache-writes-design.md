@@ -142,10 +142,13 @@ widget should not be running at all; that is out of scope here.)
 
 ## Testing
 
-- `src/__tests__/atomic-json.test.ts` — replaces an existing file's contents; leaves no
-  `.tmp` sibling behind afterwards; and, when serialisation throws (a circular object),
-  leaves both the previous target contents and the directory untouched. The tmp name
-  is asserted to include the pid, since a fixed name is the failure this prevents.
+- `src/__tests__/atomic-json.test.ts` — writes readable JSON; replaces the whole of a
+  longer existing file; creates a missing parent directory; leaves no `.tmp` sibling on
+  success; and removes the temp file and rethrows when the rename fails (a directory at
+  the target path), the one path that can leak one. The unique-tmp-name property is
+  deliberately *not* asserted here: no single-process test can distinguish a unique name
+  from a fixed one, since the failure needs two processes interleaving between write and
+  rename. The spawn harness below covers it.
 - `src/__tests__/daily-cost-tracker.test.ts` — extended for: shard layout, migration
   from a legacy `daily-costs.json`, per-shard rollover, 48h pruning, the traversal
   guard, and the design's core property — interleaving session A's read-mutate-write
@@ -155,17 +158,25 @@ widget should not be running at all; that is out of scope here.)
   path.
 - `src/__tests__/pipeline.test.ts` — its `daily-costs.json` path helper moves to the
   shard directory.
-- `scripts/concurrency-harness.ts` — the audit's own reproduction: N concurrent spawns
-  of the shipped `dist/index.js` over R rounds against an isolated `XDG_CACHE_HOME`,
-  asserting the exact expected total per round. It spawns the bundle rather than
-  importing `src/` because `scripts/` cannot import `src/` (the `.js`-specifier trap).
-  Any new test root must be added to `vitest.config.ts`'s `include` or it is never
-  collected.
+- `scripts/concurrency-harness.ts` (`npm run harness:concurrency`) — the audit's own
+  reproduction: N concurrent spawns of the shipped `dist/index.js` over R rounds against
+  an isolated `XDG_CACHE_HOME`, asserting the exact expected total per round. It spawns
+  the bundle rather than importing `src/` because `scripts/` cannot import `src/` (the
+  `.js`-specifier trap).
+
+  **The per-session cost must grow each round.** The first version of the harness sent a
+  fixed $10 and reported 8/8 ok against the *unfixed* bundle — the statusline cache keys
+  on (session, cost, width), so every round after the first was a cache hit that never
+  reached the tracker. It measured nothing and printed success. With the cost stepping
+  per round the same unfixed bundle fails 7/8, one round retaining 2 of 12 sessions.
 
 ### Acceptance
 
 12 sessions × 8 rounds passes 8/8, and again at N=50, with the harness output quoted
 in the PR.
+
+Measured on this branch: the pre-fix bundle (`main` at d341c27) loses updates in 7 of 8
+rounds at N=12; the fixed bundle is 0/8 at N=12 and 0/8 at N=50.
 
 ## Rollout
 

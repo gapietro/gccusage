@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getCacheDir, ensureDir } from "../utils/paths.js";
+import { getCacheDir } from "../utils/paths.js";
+import { writeJsonAtomic } from "../utils/atomic-json.js";
 import type { PricingTable } from "../types/pricing.js";
 
 interface PricingCacheFile {
@@ -30,9 +31,8 @@ export function loadPricingCache(ttlMs: number): PricingTable | null {
 export function savePricingCache(data: PricingTable): void {
   const cachePath = getCachePath();
   try {
-    ensureDir(path.dirname(cachePath));
     const cache: PricingCacheFile = { timestamp: Date.now(), data };
-    fs.writeFileSync(cachePath, JSON.stringify(cache));
+    writeJsonAtomic(cachePath, cache);
   } catch {
     // ignore
   }

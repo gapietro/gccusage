@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getCacheDir, ensureDir } from "../utils/paths.js";
+import { getCacheDir } from "../utils/paths.js";
+import { writeJsonAtomic } from "../utils/atomic-json.js";
 
 interface TurnData {
   sessionId: string;
@@ -35,8 +36,10 @@ export function trackTurn(sessionId: string | undefined): number {
 
   data.count++;
 
-  ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, JSON.stringify(data), "utf-8");
+  // Atomic replacement, but deliberately no lock: the counter already resets
+  // whenever the session id changes, so an increment lost between two
+  // concurrent sessions is indistinguishable from that designed behaviour.
+  writeJsonAtomic(filePath, data);
 
   return data.count;
 }
