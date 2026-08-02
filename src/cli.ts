@@ -34,11 +34,11 @@ async function reportToday(): Promise<void> {
   const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
   const metrics = aggregateTokens(entries, entries);
   const pricing = await fetchPricing(86400000);
-  const costByModel = calculateCostByModel(metrics.byModel, pricing);
+  const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
   const totalCost = calculateTotalCost(costByModel);
 
   console.log("=== Today's Usage ===\n");
-  console.log(`Total Cost: ${formatDollars(totalCost)}`);
+  console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
   console.log(
     `Total Tokens: ${formatTokens(metrics.today.inputTokens + metrics.today.outputTokens)}`,
   );
@@ -55,6 +55,13 @@ async function reportToday(): Promise<void> {
         `  ${formatModelName(model)}: ${formatDollars(cost)} (${formatTokens(total)} tokens)`,
       );
     }
+  }
+
+  // Without this the usage of an unpriced model is simply absent from the
+  // total, and the report looks complete (#82).
+  if (unpriced.length > 0) {
+    console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
+    console.log("Run `npm run pricing` to refresh the offline table.");
   }
 
   console.log(`\nSessions analyzed: ${files.length} files`);

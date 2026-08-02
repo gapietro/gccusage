@@ -20,6 +20,11 @@ export function contextFromFixture(fx: RealPayloadFixture, homeDir: string): Ren
     sessionCostUsd: fx.derived.sessionCostUsd,
     todayCostUsd: fx.derived.todayCostUsd,
     costByModel: new Map(fx.derived.costByModel),
+    // Every captured payload priced cleanly, so the marked-uncertain rendering
+    // is pinned in widgets.test.ts rather than here.
+    unpricedModels: [],
+    sessionCostUncertain: false,
+    todayCostUncertain: false,
     sessionStartTime: fx.derived.sessionStartTime,
     terminalWidth: 200,
     alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },

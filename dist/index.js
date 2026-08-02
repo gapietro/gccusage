@@ -1716,27 +1716,167 @@ function savePricingCache(data) {
 }
 
 //#endregion
-//#region src/data/pricing-fetcher.ts
+//#region src/data/fallback-pricing.ts
+/**
+* Offline snapshot of the LiteLLM pricing feed, parsed by the same
+* `parseLitellmPricing` the online path uses. Merged UNDER every table
+* `fetchPricing` returns, so a model the feed has dropped still prices.
+*/
 const FALLBACK_PRICING = {
+	"claude-haiku-4-5-20251001": {
+		"inputCostPerToken": 1e-6,
+		"outputCostPerToken": 5e-6,
+		"cacheCreationCostPerToken": 125e-8,
+		"cacheReadCostPerToken": 1e-7
+	},
+	"claude-haiku-4-5": {
+		"inputCostPerToken": 1e-6,
+		"outputCostPerToken": 5e-6,
+		"cacheCreationCostPerToken": 125e-8,
+		"cacheReadCostPerToken": 1e-7
+	},
+	"claude-3-7-sonnet-20250219": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-3-haiku-20240307": {
+		"inputCostPerToken": 25e-8,
+		"outputCostPerToken": 125e-8,
+		"cacheCreationCostPerToken": 3e-7,
+		"cacheReadCostPerToken": 3e-8
+	},
+	"claude-3-opus-20240229": {
+		"inputCostPerToken": 15e-6,
+		"outputCostPerToken": 75e-6,
+		"cacheCreationCostPerToken": 1875e-8,
+		"cacheReadCostPerToken": 15e-7
+	},
+	"claude-4-opus-20250514": {
+		"inputCostPerToken": 15e-6,
+		"outputCostPerToken": 75e-6,
+		"cacheCreationCostPerToken": 1875e-8,
+		"cacheReadCostPerToken": 15e-7
+	},
+	"claude-4-sonnet-20250514": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-sonnet-4-5": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-sonnet-4-5-20250929": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-sonnet-5": {
+		"inputCostPerToken": 2e-6,
+		"outputCostPerToken": 1e-5,
+		"cacheCreationCostPerToken": 25e-7,
+		"cacheReadCostPerToken": 2e-7
+	},
+	"claude-sonnet-4-6": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-sonnet-4-5-20250929-v1:0": {
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
+	},
+	"claude-opus-4-1": {
+		"inputCostPerToken": 15e-6,
+		"outputCostPerToken": 75e-6,
+		"cacheCreationCostPerToken": 1875e-8,
+		"cacheReadCostPerToken": 15e-7
+	},
+	"claude-opus-4-1-20250805": {
+		"inputCostPerToken": 15e-6,
+		"outputCostPerToken": 75e-6,
+		"cacheCreationCostPerToken": 1875e-8,
+		"cacheReadCostPerToken": 15e-7
+	},
 	"claude-opus-4-20250514": {
-		inputCostPerToken: 15 / 1e6,
-		outputCostPerToken: 75 / 1e6,
-		cacheCreationCostPerToken: 18.75 / 1e6,
-		cacheReadCostPerToken: 1.5 / 1e6
+		"inputCostPerToken": 15e-6,
+		"outputCostPerToken": 75e-6,
+		"cacheCreationCostPerToken": 1875e-8,
+		"cacheReadCostPerToken": 15e-7
+	},
+	"claude-opus-4-5-20251101": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-5": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-6": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-6-20260205": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-7": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-7-20260416": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-fable-5": {
+		"inputCostPerToken": 1e-5,
+		"outputCostPerToken": 5e-5,
+		"cacheCreationCostPerToken": 125e-7,
+		"cacheReadCostPerToken": 1e-6
+	},
+	"claude-opus-5": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
+	},
+	"claude-opus-4-8": {
+		"inputCostPerToken": 5e-6,
+		"outputCostPerToken": 25e-6,
+		"cacheCreationCostPerToken": 625e-8,
+		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-sonnet-4-20250514": {
-		inputCostPerToken: 3 / 1e6,
-		outputCostPerToken: 15 / 1e6,
-		cacheCreationCostPerToken: 3.75 / 1e6,
-		cacheReadCostPerToken: .3 / 1e6
-	},
-	"claude-haiku-3.5-20241001": {
-		inputCostPerToken: .8 / 1e6,
-		outputCostPerToken: 4 / 1e6,
-		cacheCreationCostPerToken: 1 / 1e6,
-		cacheReadCostPerToken: .08 / 1e6
+		"inputCostPerToken": 3e-6,
+		"outputCostPerToken": 15e-6,
+		"cacheCreationCostPerToken": 375e-8,
+		"cacheReadCostPerToken": 3e-7
 	}
 };
+
+//#endregion
+//#region src/data/pricing-fetcher.ts
 const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 function parseLitellmPricing(data) {
 	const table = {};
@@ -1758,9 +1898,20 @@ function parseLitellmPricing(data) {
 	}
 	return table;
 }
+/**
+* The offline snapshot is merged UNDER every table this returns, never
+* returned on its own path only. It used to be merged on the fetch-success
+* path alone: the cache stored the un-merged fetch and the cache-hit path
+* returned it raw, so the fallback stopped contributing anything from the
+* second run onward (#93). Live prices always win — a stale snapshot must
+* never override the feed.
+*/
 async function fetchPricing(ttlMs) {
 	const cached = loadPricingCache(ttlMs);
-	if (cached) return cached;
+	if (cached) return {
+		...FALLBACK_PRICING,
+		...cached
+	};
 	try {
 		const response = await fetch(LITELLM_URL, { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
@@ -1775,7 +1926,7 @@ async function fetchPricing(ttlMs) {
 			}
 		}
 	} catch {}
-	return FALLBACK_PRICING;
+	return { ...FALLBACK_PRICING };
 }
 
 //#endregion
@@ -1783,13 +1934,27 @@ async function fetchPricing(ttlMs) {
 function calculateCost(metrics, pricing) {
 	return metrics.inputTokens * pricing.inputCostPerToken + metrics.outputTokens * pricing.outputCostPerToken + metrics.cacheCreationTokens * pricing.cacheCreationCostPerToken + metrics.cacheReadTokens * pricing.cacheReadCostPerToken;
 }
+/**
+* Returns the skipped models alongside the costs rather than a bare Map. The
+* silent skip is what let a stale offline pricing table render a confident
+* `$0.00` for a real session (#82): the caller could not tell a free session
+* from an unpriced one, because both arrived as an empty Map.
+*/
 function calculateCostByModel(byModel, pricing) {
 	const costs = new Map();
+	const unpriced = [];
 	for (const [model, metrics] of byModel) {
 		const modelPricing = findPricing(model, pricing);
 		if (modelPricing) costs.set(model, calculateCost(metrics, modelPricing));
+		else if (hasTokens(metrics)) unpriced.push(model);
 	}
-	return costs;
+	return {
+		costs,
+		unpriced
+	};
+}
+function hasTokens(metrics) {
+	return metrics.inputTokens > 0 || metrics.outputTokens > 0 || metrics.cacheCreationTokens > 0 || metrics.cacheReadTokens > 0;
 }
 function calculateTotalCost(costByModel) {
 	let total = 0;
@@ -2054,10 +2219,11 @@ async function buildRenderContext(stdin, settings) {
 	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(sessionEntries, todayEntries);
 	const pricing = await fetchPricing(settings.cache?.pricingTtlMs ?? 864e5);
-	const costByModel = calculateCostByModel(metrics.byModel, pricing);
+	const session = calculateCostByModel(metrics.byModel, pricing);
+	const costByModel = session.costs;
 	const calculatedSessionCost = calculateTotalCost(costByModel);
-	const todayCostByModel = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
-	const calculatedTodayCost = calculateTotalCost(todayCostByModel);
+	const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
+	const calculatedTodayCost = calculateTotalCost(today.costs);
 	const stdinCost = stdin.cost?.total_cost_usd;
 	let sessionCostUsd;
 	let sessionCostSource;
@@ -2069,6 +2235,8 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostSource = "stdin";
 	}
 	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
+	const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
+	const todayCostUncertain = settings.costSource === "calculated" && today.unpriced.length > 0;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -2083,6 +2251,9 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostUsd,
 		todayCostUsd,
 		costByModel,
+		unpricedModels: session.unpriced,
+		sessionCostUncertain,
+		todayCostUncertain,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth(),
 		turnCount: trackTurn(stdin.session_id),
@@ -2202,7 +2373,8 @@ function alertBg(cost, warn, danger, configBg) {
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
-	const text = label ? `${label} ${formatDollars(cost)}` : formatDollars(cost);
+	const amount = formatDollars(cost) + (context.sessionCostUncertain ? "?" : "");
+	const text = label ? `${label} ${amount}` : amount;
 	const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
 		text,
@@ -2216,7 +2388,7 @@ const sessionCostWidget = { render(context, config) {
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
-	const text = `${label} ${formatDollars(cost)}`;
+	const text = `${label} ${formatDollars(cost)}${context.todayCostUncertain ? "?" : ""}`;
 	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,
@@ -2533,9 +2705,10 @@ const tokensCachedWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/per-model-breakdown.ts
 const perModelBreakdownWidget = { render(context, config) {
-	if (context.costByModel.size === 0) return null;
+	if (context.costByModel.size === 0 && context.unpricedModels.length === 0) return null;
 	const parts = [];
 	for (const [model, cost] of context.costByModel) parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
+	for (const model of context.unpricedModels) parts.push(`${formatModelName(model)}:$?`);
 	const text = parts.join(" ");
 	return {
 		text,
@@ -3515,10 +3688,10 @@ async function reportToday() {
 	const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(entries, entries);
 	const pricing = await fetchPricing(864e5);
-	const costByModel = calculateCostByModel(metrics.byModel, pricing);
+	const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
 	const totalCost = calculateTotalCost(costByModel);
 	console.log("=== Today's Usage ===\n");
-	console.log(`Total Cost: ${formatDollars(totalCost)}`);
+	console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
 	console.log(`Total Tokens: ${formatTokens(metrics.today.inputTokens + metrics.today.outputTokens)}`);
 	console.log();
 	if (costByModel.size > 0) {
@@ -3528,6 +3701,10 @@ async function reportToday() {
 			const total = tokens ? tokens.inputTokens + tokens.outputTokens : 0;
 			console.log(`  ${formatModelName(model)}: ${formatDollars(cost)} (${formatTokens(total)} tokens)`);
 		}
+	}
+	if (unpriced.length > 0) {
+		console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
+		console.log("Run `npm run pricing` to refresh the offline table.");
 	}
 	console.log(`\nSessions analyzed: ${files.length} files`);
 }

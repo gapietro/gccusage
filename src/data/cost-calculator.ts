@@ -11,18 +11,49 @@ export function calculateCost(metrics: TokenMetrics, pricing: ModelPricing): num
   );
 }
 
+export interface CostByModel {
+  costs: Map<string, number>;
+  /**
+   * Models that carried tokens but had no price. Their usage is missing from
+   * `costs`, so any total derived from it understates the truth.
+   */
+  unpriced: string[];
+}
+
+/**
+ * Returns the skipped models alongside the costs rather than a bare Map. The
+ * silent skip is what let a stale offline pricing table render a confident
+ * `$0.00` for a real session (#82): the caller could not tell a free session
+ * from an unpriced one, because both arrived as an empty Map.
+ */
 export function calculateCostByModel(
   byModel: Map<string, TokenMetrics>,
   pricing: PricingTable,
-): Map<string, number> {
+): CostByModel {
   const costs = new Map<string, number>();
+  const unpriced: string[] = [];
+
   for (const [model, metrics] of byModel) {
     const modelPricing = findPricing(model, pricing);
     if (modelPricing) {
       costs.set(model, calculateCost(metrics, modelPricing));
+    } else if (hasTokens(metrics)) {
+      // A model with no tokens loses nothing by going unpriced, and flagging
+      // it would mark the bar uncertain on renders where nothing is missing.
+      unpriced.push(model);
     }
   }
-  return costs;
+
+  return { costs, unpriced };
+}
+
+function hasTokens(metrics: TokenMetrics): boolean {
+  return (
+    metrics.inputTokens > 0 ||
+    metrics.outputTokens > 0 ||
+    metrics.cacheCreationTokens > 0 ||
+    metrics.cacheReadTokens > 0
+  );
 }
 
 export function calculateTotalCost(costByModel: Map<string, number>): number {

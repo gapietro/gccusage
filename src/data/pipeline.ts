@@ -47,13 +47,11 @@ export async function buildRenderContext(
   const pricing = await fetchPricing(settings.cache?.pricingTtlMs ?? 86400000);
 
   // Calculate costs
-  const costByModel = calculateCostByModel(metrics.byModel, pricing);
+  const session = calculateCostByModel(metrics.byModel, pricing);
+  const costByModel = session.costs;
   const calculatedSessionCost = calculateTotalCost(costByModel);
-  const todayCostByModel = calculateCostByModel(
-    aggregateTokens(todayEntries, []).byModel,
-    pricing,
-  );
-  const calculatedTodayCost = calculateTotalCost(todayCostByModel);
+  const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
+  const calculatedTodayCost = calculateTotalCost(today.costs);
 
   // Determine cost source (cost.total_cost_usd works for both formats)
   const stdinCost = stdin.cost?.total_cost_usd;
@@ -79,6 +77,13 @@ export async function buildRenderContext(
     settings.costSource === "calculated"
       ? calculatedTodayCost
       : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
+
+  // A missing price can only understate a figure the pricing table produced.
+  // The stdin cost and the daily store are unaffected, so marking them would
+  // be a false alarm — and a bar that cries uncertain on every render is a
+  // bar nobody reads.
+  const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
+  const todayCostUncertain = settings.costSource === "calculated" && today.unpriced.length > 0;
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
@@ -108,6 +113,9 @@ export async function buildRenderContext(
     sessionCostUsd,
     todayCostUsd,
     costByModel,
+    unpricedModels: session.unpriced,
+    sessionCostUncertain,
+    todayCostUncertain,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
     turnCount: trackTurn(stdin.session_id),

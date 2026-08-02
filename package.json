@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "schema": "UPDATE_CONFIG_SCHEMA=1 vitest run src/__tests__/config-schema.test.ts",
+    "pricing": "UPDATE_FALLBACK_PRICING=1 vitest run src/__tests__/fallback-pricing.test.ts",
     "badge": "node scripts/build-badge.ts",
     "harness:concurrency": "node scripts/concurrency-harness.ts"
   },

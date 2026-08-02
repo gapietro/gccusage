@@ -294,3 +294,78 @@ describe("burn rate cost source", () => {
     expect(context.burnRate!.costPerHour).toBeCloseTo(999, 6);
   });
 });
+
+// A transcript from a model the pricing table has never heard of — what a
+// session looks like the day a new model ships, or on any offline render
+// before #82 was fixed.
+function writeUnpricedTranscript(sessionId: string): void {
+  const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date().toISOString(),
+      sessionId,
+      message: {
+        model: "claude-unpriced-9",
+        usage: { input_tokens: 1_000_000, output_tokens: 0 },
+      },
+    }) + "\n",
+  );
+}
+
+describe("unpriced models", () => {
+  it("marks a calculated session cost uncertain", async () => {
+    writeUnpricedTranscript("session-unpriced");
+
+    const context = await buildRenderContext(
+      { session_id: "session-unpriced" },
+      settingsWith("calculated"),
+    );
+
+    expect(context.unpricedModels).toEqual(["claude-unpriced-9"]);
+    expect(context.sessionCostUncertain).toBe(true);
+    expect(context.todayCostUncertain).toBe(true);
+  });
+
+  it("leaves a fully priced calculated session certain", async () => {
+    const context = await buildRenderContext(
+      { session_id: "session-a" },
+      settingsWith("calculated"),
+    );
+
+    expect(context.unpricedModels).toEqual([]);
+    expect(context.sessionCostUncertain).toBe(false);
+    expect(context.todayCostUncertain).toBe(false);
+  });
+
+  it("leaves a stdin-sourced cost certain even when a model is unpriced", async () => {
+    // The displayed figure came from cost.total_cost_usd, not the pricing
+    // table, so a missing price cannot have understated it. Marking it would
+    // be a false alarm.
+    writeUnpricedTranscript("session-unpriced-stdin");
+
+    const context = await buildRenderContext(
+      { session_id: "session-unpriced-stdin", cost: { total_cost_usd: 4.2 } },
+      settingsWith("stdin"),
+    );
+
+    expect(context.sessionCostUsd).toBe(4.2);
+    expect(context.sessionCostUncertain).toBe(false);
+    expect(context.todayCostUncertain).toBe(false);
+    // Still reported, because per-model-breakdown renders from the table.
+    expect(context.unpricedModels).toEqual(["claude-unpriced-9"]);
+  });
+
+  it("marks auto mode uncertain when stdin carries no cost to fall back on", async () => {
+    writeUnpricedTranscript("session-unpriced-auto");
+
+    const context = await buildRenderContext(
+      { session_id: "session-unpriced-auto" },
+      settingsWith("auto"),
+    );
+
+    expect(context.sessionCostUncertain).toBe(true);
+  });
+});

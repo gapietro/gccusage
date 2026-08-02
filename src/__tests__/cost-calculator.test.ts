@@ -73,8 +73,41 @@ describe("calculateCostByModel", () => {
     };
 
     const result = calculateCostByModel(byModel, pricing);
-    expect(result.size).toBe(1);
-    expect(result.get("claude-sonnet-4-20250514")).toBeGreaterThan(0);
+    expect(result.costs.size).toBe(1);
+    expect(result.costs.get("claude-sonnet-4-20250514")).toBeGreaterThan(0);
+    expect(result.unpriced).toEqual([]);
+  });
+
+  // A model with no price used to be dropped in silence, so its tokens
+  // contributed 0 to a sum that still rendered as a confident dollar figure
+  // (#82). The skip is now reported so the caller can mark the total.
+  it("reports a model it could not price", () => {
+    const byModel = new Map<string, TokenMetrics>();
+    byModel.set("claude-brand-new-9", {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+
+    const result = calculateCostByModel(byModel, {});
+
+    expect(result.costs.size).toBe(0);
+    expect(result.unpriced).toEqual(["claude-brand-new-9"]);
+  });
+
+  it("does not report an unpriced model that used no tokens", () => {
+    const byModel = new Map<string, TokenMetrics>();
+    byModel.set("claude-brand-new-9", {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+
+    // Nothing was lost, so nothing should be flagged — a bar marked uncertain
+    // on every render is a bar nobody reads.
+    expect(calculateCostByModel(byModel, {}).unpriced).toEqual([]);
   });
 });
 

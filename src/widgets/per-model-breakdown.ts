@@ -5,7 +5,7 @@ import { formatDollars, formatModelName } from "../utils/format.js";
 
 export const perModelBreakdownWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
-    if (context.costByModel.size === 0) return null;
+    if (context.costByModel.size === 0 && context.unpricedModels.length === 0) return null;
 
     const parts: string[] = [];
     for (const [model, cost] of context.costByModel) {
@@ -15,6 +15,13 @@ export const perModelBreakdownWidget: Widget = {
       // labelled identically in the one widget whose entire job is telling
       // models apart (#63). Nothing is shortened now, so nothing can collide.
       parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
+    }
+
+    // A model with no pricing entry used to be dropped outright, so the one
+    // widget whose job is naming which models ran stayed silent about it
+    // (#82). It is named with an unknown cost instead.
+    for (const model of context.unpricedModels) {
+      parts.push(`${formatModelName(model)}:$?`);
     }
 
     const text = parts.join(" ");

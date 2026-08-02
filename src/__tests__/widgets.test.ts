@@ -39,6 +39,9 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     sessionCostUsd: 0,
     todayCostUsd: 0,
     costByModel: new Map(),
+    unpricedModels: [],
+    sessionCostUncertain: false,
+    todayCostUncertain: false,
     sessionStartTime: null,
     terminalWidth: 120,
     alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
@@ -76,6 +79,33 @@ describe("sessionCostWidget", () => {
       { type: "session-cost" },
     );
     expect(result!.text).toBe("$2.45");
+  });
+
+  // A total that silently omits an unpriced model's usage is the failure #82
+  // reports: offline, every model went unpriced and the bar rendered a
+  // confident "$0.00" no user could distinguish from a free session.
+  it("marks a total that omits unpriced usage", () => {
+    const result = sessionCostWidget.render(
+      makeContext({ sessionCostUsd: 2.45, sessionCostUncertain: true }),
+      { type: "session-cost" },
+    );
+    expect(result!.text).toBe("$2.45?");
+  });
+
+  it("marks a zero total that omits unpriced usage", () => {
+    const result = sessionCostWidget.render(
+      makeContext({ sessionCostUsd: 0, sessionCostUncertain: true }),
+      { type: "session-cost" },
+    );
+    expect(result!.text).toBe("$0.00?");
+  });
+
+  it("keeps the marker after a configured label", () => {
+    const result = sessionCostWidget.render(
+      makeContext({ sessionCostUsd: 2.45, sessionCostUncertain: true }),
+      { type: "session-cost", label: "Cost:" },
+    );
+    expect(result!.text).toBe("Cost: $2.45?");
   });
 });
 
@@ -233,6 +263,24 @@ describe("todaySpendWidget", () => {
   it("renders today's spend", () => {
     const result = todaySpendWidget.render(
       makeContext({ todayCostUsd: 18.72 }),
+      { type: "today-spend" },
+    );
+    expect(result!.text).toBe("Today: $18.72");
+  });
+
+  it("marks a total that omits unpriced usage", () => {
+    const result = todaySpendWidget.render(
+      makeContext({ todayCostUsd: 18.72, todayCostUncertain: true }),
+      { type: "today-spend" },
+    );
+    expect(result!.text).toBe("Today: $18.72?");
+  });
+
+  it("is unmarked when only the session total is uncertain", () => {
+    // The two totals can come from different sources — a calculated session
+    // beside a daily store fed from stdin — so one flag must not leak.
+    const result = todaySpendWidget.render(
+      makeContext({ todayCostUsd: 18.72, sessionCostUncertain: true }),
       { type: "today-spend" },
     );
     expect(result!.text).toBe("Today: $18.72");
@@ -697,6 +745,29 @@ describe("perModelBreakdownWidget", () => {
 
   it("declines when no per-model cost is known", () => {
     expect(perModelBreakdownWidget.render(context({}), { type: "per-model" })).toBeNull();
+  });
+
+  // This widget renders straight off the pricing table, so an unpriced model
+  // vanished from the one display whose entire job is naming which models ran.
+  it("names a model it could not price", () => {
+    const out = perModelBreakdownWidget.render(
+      makeContext({
+        costByModel: new Map([["claude-opus-5", 22.52]]),
+        unpricedModels: ["claude-fable-5"],
+      }),
+      { type: "per-model" },
+    );
+    expect(out?.text).toBe("Opus 5:$22.52 Fable 5:$?");
+  });
+
+  it("renders when every model went unpriced", () => {
+    // costByModel is empty here, which used to mean "decline" — so an
+    // all-unpriced render showed nothing at all rather than showing why.
+    const out = perModelBreakdownWidget.render(
+      makeContext({ costByModel: new Map(), unpricedModels: ["claude-fable-5"] }),
+      { type: "per-model" },
+    );
+    expect(out?.text).toBe("Fable 5:$?");
   });
 });
 
