@@ -227,6 +227,15 @@ Both widgets turn amber 20,000 tokens before that point — Claude Code's own
 internal warning level — and red 5,000 tokens before it, so the two segments
 change together.
 
+Those bands widen when the token count they are measuring is itself coarse.
+Claude Code rounds `used_percentage` to a whole number, so on a payload with no
+exact `current_usage` breakdown the count moves in steps of one percent of the
+window — 10,000 tokens at 1M, twice the width of the 5,000-token red band. A
+band narrower than its own input's step can never be landed in, so each band is
+held to at least one step wide, with amber kept at least one step above red.
+With an exact breakdown the step is a single token and the bands are exactly
+20,000 and 5,000 as above.
+
 The rule is derived from Claude Code 2.1.220 rather than reported by it, so it
 can drift when Claude Code changes. Two Claude Code settings also change the
 answer and are invisible to a statusline command, so the prediction will be
