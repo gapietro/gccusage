@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -6,6 +6,26 @@ import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
+import { runStatusline } from "../statusline.js";
+import { DEFAULT_SETTINGS } from "../config/defaults.js";
+
+// Pricing normally comes from the network. Pin it so the render is
+// deterministic; every other boundary (transcripts, the daily store, the
+// caches under test) runs for real against the temp HOME/cache.
+const PINNED_PRICING = {
+  "claude-opus-4-5": {
+    inputCostPerToken: 1 / 1_000_000,
+    outputCostPerToken: 0,
+    cacheCreationCostPerToken: 0,
+    cacheReadCostPerToken: 0,
+  },
+};
+
+vi.mock("../data/pricing-fetcher.js", () => ({
+  fetchPricing: vi.fn(async () => PINNED_PRICING),
+  // stale: false on purpose — true would spawn a real detached refresher.
+  getPricingForRender: vi.fn(() => ({ pricing: PINNED_PRICING, stale: false })),
+}));
 
 /**
  * Every cache file used to be read with `JSON.parse(raw) as SomeType`, a cast
@@ -16,17 +36,22 @@ import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
 
 let tmpDir: string;
 let originalXdg: string | undefined;
+let originalHome: string | undefined;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-cachevalid-"));
   originalXdg = process.env["XDG_CACHE_HOME"];
   process.env["XDG_CACHE_HOME"] = tmpDir;
+  originalHome = process.env["HOME"];
+  process.env["HOME"] = tmpDir;
   fs.mkdirSync(path.join(tmpDir, "gccusage"), { recursive: true });
 });
 
 afterEach(() => {
   if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
   else process.env["XDG_CACHE_HOME"] = originalXdg;
+  if (originalHome === undefined) delete process.env["HOME"];
+  else process.env["HOME"] = originalHome;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -261,5 +286,34 @@ describe("pricing cache validation", () => {
   it("does not re-anchor cached entries against the snapshot", () => {
     writePricing({ "claude-haiku-4-5": ANCHOR_OUTLIER });
     expect(loadPricingCacheEntry()!.data["claude-haiku-4-5"]).toEqual(ANCHOR_OUTLIER);
+  });
+});
+
+describe("no NaN survives a hostile cache directory (#92)", () => {
+  it("renders a correct bar with every cache file corrupted", async () => {
+    const stdin = {
+      session_id: "hostile",
+      model: { id: "claude-opus-4-5", display_name: "Opus" },
+      cost: { total_cost_usd: 1.5 },
+    };
+
+    write("turn-count.json", "null");
+    write("statusline-cache.json", JSON.stringify({ output: 42, timestamp: "soon" }));
+    write("pricing.json", JSON.stringify({ timestamp: "soon", data: null }));
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "gccusage", "daily", "ghost.json"),
+      JSON.stringify({ sessionId: "ghost", date: "2026-08-02", costUsd: "9.99" }),
+    );
+
+    const output = await runStatusline(stdin, DEFAULT_SETTINGS);
+
+    expect(output).not.toContain("NaN");
+    expect(output).not.toContain("undefined");
+    expect(output).not.toContain("Infinity");
+    // The real session cost still renders — degrading is not the same as
+    // rendering nothing, which is what the null turn-count used to do.
+    expect(output).toContain("$1.50");
+    expect(output.length).toBeGreaterThan(0);
   });
 });
