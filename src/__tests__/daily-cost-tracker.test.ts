@@ -19,6 +19,10 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+function shardDir(): string {
+  return path.join(tmpDir, "gccusage", "daily");
+}
+
 describe("trackDailyCost", () => {
   it("sums multiple sessions for the same day", () => {
     const now = new Date(2026, 6, 29, 10, 0, 0);
@@ -135,6 +139,163 @@ describe("trackDailyCost", () => {
     // Legacy entry has no source; a lower cost keeps restart semantics
     const total = trackDailyCost("old", 1.0, "stdin", now);
     expect(total).toBeCloseTo(6.0);
+  });
+
+  it("keeps each session in its own file", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-a", 2.5, "stdin", now);
+    trackDailyCost("session-b", 1.5, "stdin", now);
+
+    expect(fs.readdirSync(shardDir()).sort()).toEqual(["session-a.json", "session-b.json"]);
+  });
+
+  it("does not touch another session's file when recording a session", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-b", 1.5, "stdin", now);
+    const before = fs.readFileSync(path.join(shardDir(), "session-b.json"), "utf-8");
+
+    trackDailyCost("session-a", 2.5, "stdin", now);
+
+    const after = fs.readFileSync(path.join(shardDir(), "session-b.json"), "utf-8");
+    expect(after).toBe(before);
+  });
+
+  it("does not lose a session that was recorded from a stale view of the store", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    // Two renders that both read the store before either writes: with a
+    // single shared file the second write erases the first session's entry.
+    const storeBeforeEither = fs.existsSync(shardDir())
+      ? fs.readdirSync(shardDir())
+      : [];
+    expect(storeBeforeEither).toEqual([]);
+
+    trackDailyCost("session-a", 4.0, "stdin", now);
+    const total = trackDailyCost("session-b", 6.0, "stdin", now);
+
+    expect(total).toBeCloseTo(10.0);
+    expect(fs.readdirSync(shardDir()).sort()).toEqual(["session-a.json", "session-b.json"]);
+  });
+
+  it("keeps a session id with path separators inside the cache directory", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const total = trackDailyCost("../../evil", 3.0, "stdin", now);
+
+    expect(total).toBeCloseTo(3.0);
+    expect(fs.existsSync(path.join(tmpDir, "evil"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "evil.json"))).toBe(false);
+    const shards = fs.readdirSync(shardDir());
+    expect(shards).toHaveLength(1);
+    expect(shards[0]).toMatch(/^[a-f0-9]{16}\.json$/);
+  });
+
+  it("deletes the file of a session untouched for 48h", () => {
+    const twoDaysAgo = new Date(2026, 6, 26, 10, 0, 0);
+    trackDailyCost("stale", 9.0, "stdin", twoDaysAgo);
+
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("fresh", 1.0, "stdin", now);
+
+    expect(fs.readdirSync(shardDir())).toEqual(["fresh.json"]);
+  });
+
+  it("counts nothing from a session whose file is from an earlier day", () => {
+    const yesterday = new Date(2026, 6, 28, 23, 0, 0);
+    trackDailyCost("session-a", 5.0, "stdin", yesterday);
+    const yesterdayShard = fs.readFileSync(path.join(shardDir(), "session-a.json"), "utf-8");
+
+    const today = new Date(2026, 6, 29, 1, 0, 0);
+    const total = trackDailyCost("session-b", 2.0, "stdin", today);
+
+    expect(total).toBeCloseTo(2.0);
+    // The reader must not rewrite another session's shard to re-baseline it.
+    expect(fs.readFileSync(path.join(shardDir(), "session-a.json"), "utf-8")).toBe(
+      yesterdayShard,
+    );
+  });
+
+  it("migrates a legacy single-file store into per-session files", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    fs.writeFileSync(
+      path.join(cacheDir, "daily-costs.json"),
+      JSON.stringify({
+        date: "2026-07-29",
+        sessions: [
+          { sessionId: "a", costUsd: 5.0, baselineUsd: 1.0, source: "stdin", updatedAt: now.getTime() },
+          { sessionId: "b", costUsd: 2.0, baselineUsd: 0, source: "stdin", updatedAt: now.getTime() },
+        ],
+      }),
+    );
+
+    const total = trackDailyCost("c", 3.0, "stdin", now);
+
+    expect(total).toBeCloseTo(9.0); // (5-1) + 2 + 3
+    expect(fs.readdirSync(shardDir()).sort()).toEqual(["a.json", "b.json", "c.json"]);
+    expect(fs.existsSync(path.join(cacheDir, "daily-costs.json"))).toBe(false);
+  });
+
+  it("keeps the legacy store when a shard write fails mid-migration", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        date: "2026-07-29",
+        sessions: [
+          { sessionId: "a", costUsd: 5.0, baselineUsd: 0, updatedAt: now.getTime() },
+          { sessionId: "b", costUsd: 2.0, baselineUsd: 0, updatedAt: now.getTime() },
+        ],
+      }),
+    );
+    // A plain file where the shard directory belongs makes every shard write
+    // fail with ENOTDIR — a stand-in for a full disk or a permissions error.
+    fs.writeFileSync(shardDir(), "not a directory");
+
+    trackDailyCost(undefined, 0, "stdin", now);
+
+    // Both sessions still exist only in the legacy store, so it must survive to
+    // be retried — deleting it here would drop their spend for the rest of the
+    // day, which is the loss the migration exists to prevent.
+    expect(fs.existsSync(legacyPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(legacyPath, "utf-8")).sessions).toHaveLength(2);
+  });
+
+  it("discards an unparseable legacy store instead of retrying it forever", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(legacyPath, "{ truncated");
+
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const total = trackDailyCost("a", 1.0, "stdin", now);
+
+    expect(total).toBeCloseTo(1.0);
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("discards a legacy store whose sessions are not an array", () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const legacyPath = path.join(cacheDir, "daily-costs.json");
+    fs.writeFileSync(legacyPath, JSON.stringify({ date: "2026-07-29", sessions: {} }));
+
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const total = trackDailyCost("a", 1.0, "stdin", now);
+
+    expect(total).toBeCloseTo(1.0);
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("ignores an unparseable session file instead of losing the rest of the day", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("good", 4.0, "stdin", now);
+    fs.writeFileSync(path.join(shardDir(), "corrupt.json"), "{ truncated");
+
+    const total = trackDailyCost("other", 1.0, "stdin", now);
+    expect(total).toBeCloseTo(5.0);
   });
 
   it("treats an old-format file without baselines as baseline 0", () => {

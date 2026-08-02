@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getCacheDir, ensureDir } from "../utils/paths.js";
+import { getCacheDir } from "../utils/paths.js";
+import { writeJsonAtomic } from "../utils/atomic-json.js";
 import { BLOCK_DURATION_MS } from "../types/block-metrics.js";
 
 interface BlockCacheData {
@@ -33,8 +34,7 @@ export function loadBlockCache(): BlockCacheData | null {
 export function saveBlockCache(data: BlockCacheData): void {
   const cachePath = getBlockCachePath();
   try {
-    ensureDir(path.dirname(cachePath));
-    fs.writeFileSync(cachePath, JSON.stringify(data));
+    writeJsonAtomic(cachePath, data);
   } catch {
     // ignore
   }

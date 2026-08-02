@@ -8,8 +8,8 @@
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
 
 ```
- Opus 4.6 ▶ $14.21 ▶ [========--] 82% (200.0k) ▶ ~3.0k left ▶ $4.20/hr ▶
- main ▶ +2 ~5 -1 ▶ +307 -43 ▶ Today: $14.50 ▶
+ Opus 5 ▶ $23.53 ▶ [===-------] 27% (1.00M) ▶ ~697.0k left ▶ $13.27/hr ▶
+ gccusage ▶ main ▶ +2 ~5 -1 ▶ +649 -66 ▶ Today: $23.53 ▶
 ```
 
 ## Prerequisites
@@ -43,6 +43,15 @@ gccusage today
 ```
 
 Works standalone — no need to be inside Claude Code.
+
+### Commands
+
+| Command | What it does |
+|---------|--------------|
+| `gccusage` | Statusline mode — reads the status JSON on stdin and writes one bar |
+| `gccusage setup` | Point Claude Code's `statusLine` at this install |
+| `gccusage today` | Print today's usage report, broken down by model |
+| `gccusage help` | Usage summary |
 
 ### Alternative: global install from GitHub
 
@@ -81,6 +90,27 @@ Claude Code pipes JSON status data via stdin on each render. gccusage parses it 
 ## Configuration
 
 Create `~/.config/gccusage/settings.json` to customize. You only need to specify the keys you want to override — everything else uses defaults.
+
+Every setting, with its default:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `lines` | array | 2-line layout | Widget layout, one entry per rendered line |
+| `lines[].widgets` | array | — | The widgets on that line, in order |
+| `lines[].flex` | `left` \| `right` \| `center` \| `space-between` | `left` | How the line fills the terminal width |
+| `powerline.enabled` | boolean | `true` | Powerline segments with `▶` separators; `false` renders plain colored text |
+| `powerline.theme` | string | `default` | `default`, `ocean`, `forest`, `sunset`, `minimal` |
+| `powerline.separator` | string | `▶` | Separator between differently-colored segments |
+| `powerline.separatorThin` | string | `│` | Separator used when neighbouring backgrounds are too close to tell apart |
+| `compact.mode` | `auto` \| `always` \| `never` | `auto` | Collapse both lines into one |
+| `compact.threshold` | number | `80` | Terminal width below which `auto` collapses |
+| `alerts.sessionWarn` | number | `5` | Session cost (USD) that turns `session-cost` amber |
+| `alerts.sessionDanger` | number | `15` | Session cost (USD) that turns it red |
+| `alerts.dailyWarn` | number | `10` | Daily cost (USD) that turns `today-spend` amber |
+| `alerts.dailyDanger` | number | `25` | Daily cost (USD) that turns it red |
+| `cache.statuslineTtlMs` | number | `5000` | How long a rendered bar is reused between renders |
+| `cache.pricingTtlMs` | number | `86400000` | How long fetched model pricing is reused (24h) |
+| `costSource` | `auto` \| `stdin` \| `calculated` | `auto` | Where the session cost comes from — see below |
 
 ### Editor autocomplete
 
@@ -126,6 +156,34 @@ which happens when, say, context usage and the compact countdown both cross thei
 warning thresholds — the wide glyph would not read against them, so `separatorThin`
 is drawn in the previous segment's text color instead.
 
+### Plain (non-powerline) mode
+
+```json
+{
+  "powerline": { "enabled": false }
+}
+```
+
+Segments are rendered as plain colored text with no separator glyphs between
+them. Nothing is inserted for you, so a layout that reads well in powerline
+mode will run together in plain mode — put explicit `separator` widgets where
+you want the breaks:
+
+```json
+{
+  "lines": [
+    {
+      "widgets": [
+        { "type": "model" },
+        { "type": "separator", "separator": " | " },
+        { "type": "session-cost" }
+      ]
+    }
+  ],
+  "powerline": { "enabled": false }
+}
+```
+
 ### Custom layout
 
 ```json
@@ -143,6 +201,10 @@ is drawn in the previous segment's text color instead.
 }
 ```
 
+`lines` replaces the default layout wholesale rather than merging with it, so
+list every widget you want. `flex` controls how the line uses leftover width:
+`left` (default), `right`, `center`, or `space-between`.
+
 ### Cost alert thresholds
 
 ```json
@@ -156,13 +218,33 @@ is drawn in the previous segment's text color instead.
 }
 ```
 
+### Cost source
+
+```json
+{
+  "costSource": "auto"
+}
+```
+
+- `auto` (default) — use the session cost Claude Code reports in `cost.total_cost_usd`,
+  and fall back to computing it from the transcript when that field is absent.
+- `stdin` — same as `auto`; the same fallback applies, since a missing field leaves
+  nothing to read.
+- `calculated` — always price the transcript yourself, from token counts and
+  fetched model pricing, ignoring what Claude Code reports.
+
+The burn rate always follows the same source as the session total, so the bar
+never shows a stdin-priced rate beside a transcript-priced total.
+
 ### Compact mode
 
 Collapses both lines into a single line when the terminal is narrower than
 `threshold` columns (default 80), keeping segments in `priority` order —
-lower numbers survive. The terminal width comes from the `COLUMNS` variable
-Claude Code sets when it runs the statusline; if it is unavailable, `auto`
-never collapses the bar.
+lower numbers survive. Width comes from the live terminal when stdout is a
+TTY, otherwise from the `COLUMNS` variable that Claude Code injects when it
+runs the statusline (it reads its own TTY and passes the value down, so it
+tracks resizes). If neither is available the width is unknown, and `auto`
+never collapses the bar rather than guessing.
 
 ```json
 {
@@ -187,6 +269,16 @@ before.
 
 ## Widgets
 
+The default layout uses eleven of these: `model`, `session-cost`,
+`context-percent`, `compact-countdown` and `burn-rate` on the first line,
+`project`, `git-branch`, `git-changes`, `lines-changed`, `today-spend` and
+`vim-mode` on the second. The rest ship ready to use but render only if you
+put them in a [custom layout](#custom-layout).
+
+A widget renders nothing at all when its data is missing — no branch outside a
+git repo, no `vim-mode` unless vim mode is on — and the bar closes up around it
+rather than showing a blank segment.
+
 | Widget | Description |
 |--------|-------------|
 | `model` | Current Claude model name and version |
@@ -195,21 +287,21 @@ before.
 | `context-percent` | Context window usage with progress bar |
 | `burn-rate` | Session spend rate in USD/hour |
 | `cache-hit-rate` | Prompt cache hit percentage (`Hit: 99%`) |
-| `token-breakdown` | Input vs output token counts |
+| `token-breakdown` | Session input and output counts in one segment (`In:396 Out:137.8k`) |
 | `compact-countdown` | Tokens remaining before auto-compact ([see note](#about-the-auto-compact-countdown)) |
 | `git-branch` | Current git branch |
 | `git-changes` | Staged/unstaged file counts |
 | `lines-changed` | Lines added/removed in session |
 | `api-latency` | Cumulative API wait time across the whole session (`API total: 8m 26s`) — not a single request's latency |
 | `session-timer` | Time since the Claude Code process started (`Up: 1hr 46m`); resets when the session is resumed |
-| `turn-counter` | Conversation turn count |
-| `block-timer` | Time since last block event |
+| `turn-counter` | Conversation turn count (`#9`) |
+| `block-timer` | Time elapsed in the current 5-hour usage block (`Block: 2hr 13m`) |
 | `vim-mode` | Current vim mode (NORMAL/INSERT) |
 | `custom-command` | Run a shell command and display output |
 | `custom-text` | Static text |
 | `separator` | Pipe separator (non-powerline mode) |
-| `tokens-input` | Input token count |
-| `tokens-output` | Output token count |
+| `tokens-input` | Session input token count, uncached input only (`In: 396`) |
+| `tokens-output` | Session output token count (`Out: 137.8k`) |
 | `tokens-cached` | Cached token count (`Cached: 5.24M`) |
 | `per-model` | Cost breakdown by model (`Sonnet 4.5:$3.40`) |
 | `session-clock` | Time since the session began (`Session: 2hr 13m`); measured from the transcript, so it survives a resume |
@@ -262,6 +354,21 @@ Every widget supports:
 | `label` | string | Custom label prefix |
 | `priority` | number | Compact mode priority (lower = kept first) |
 
+Some options apply only to particular widgets:
+
+| Option | Widgets | Description |
+|--------|---------|-------------|
+| `text` | `custom-text` | The literal text to display; the widget renders nothing without it |
+| `command` | `custom-command` | Shell command to run; the widget renders nothing without it |
+| `separator` | `separator` | Separator string (default `" \| "`) |
+| `icon` | `model`, `git-branch` | Prefix glyph; empty by default, since the usual choices need a Nerd Font |
+| `maxWidth` | `custom-command` | Cache TTL in milliseconds, despite the name — see below |
+
+Two rough edges worth knowing before you meet them: `maxWidth` is read by
+`custom-command` as its cache TTL rather than as a width, and `format` is
+accepted by the config schema but no widget reads it, so setting it does
+nothing.
+
 `fg`/`bg` accept a hex color (`"#ff0000"` or the 3-digit `"#f00"`) or one of
 these named colors: `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`,
 `white`, `black`, `gray` (and `grey`), `orange`, `pink`.
@@ -293,7 +400,8 @@ silently falling back to defaults. It looks like this:
 }
 ```
 
-Commands are cached for 30s by default with a 2s execution timeout.
+Commands are cached for 30s by default with a 2s execution timeout. Set
+`maxWidth` to change the cache TTL in milliseconds.
 
 ## Troubleshooting
 
@@ -314,11 +422,24 @@ Commands are cached for 30s by default with a 2s execution timeout.
 ## Development
 
 ```bash
-npm run test          # Run tests
-npm run test:watch    # Watch mode
-npm run build         # Build dist/index.js
-npm run typecheck     # Type check
+npm test                   # Run the test suite
+npm run test:watch         # Watch mode
+npm run build              # Build dist/index.js
+npm run typecheck          # Type check src/
+npm run typecheck:scripts  # Type check scripts/
+npm run schema             # Regenerate config-schema.json from the code
+npm run dev                # Run from source (requires Bun)
 ```
+
+`dist/index.js` is committed, not built on clone: `gccusage setup` points
+Claude Code straight at that file, so anyone upgrading with `git pull` runs it
+without ever building. Rebuild and stage it in the same commit as any `src/`
+change, or the change reaches nobody.
+
+The tool itself runs on Node 18+. The files under `scripts/` are TypeScript run
+directly by Node, so those need 23.6+ (or a 22.x with type stripping
+backported); the tests that spawn them skip themselves on older versions rather
+than failing.
 
 ## Uninstall
 

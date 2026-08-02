@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs$8 from "node:fs";
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
@@ -8,6 +9,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as path$8 from "node:path";
 import * as path$7 from "node:path";
 import * as path$6 from "node:path";
 import * as path$5 from "node:path";
@@ -21,6 +23,7 @@ import process$1 from "node:process";
 import * as os$1 from "node:os";
 import os, { homedir } from "node:os";
 import tty from "node:tty";
+import * as crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -1296,11 +1299,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$7.join(xdg, "gccusage");
-	return path$7.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$8.join(xdg, "gccusage");
+	return path$8.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$7.join(getConfigDir(), "settings.json");
+	return path$8.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1342,10 +1345,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$8.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$8.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1384,31 +1387,31 @@ function formatConfigError(error, configPath) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$6.isAbsolute(home)) return home;
+	if (path$7.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$6.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$7.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$6.join(getHomeDir(), ".claude");
+	return path$7.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$6.join(getClaudeDataDir(), "projects");
+	return path$7.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$6.join(xdg, "gccusage");
-	return path$6.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$7.join(xdg, "gccusage");
+	return path$7.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
+	if (!fs$7.existsSync(dir)) fs$7.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$6.existsSync(dir)) return [];
+	if (!fs$7.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$6.join(dir, f));
+		return fs$7.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$7.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1416,33 +1419,33 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$7.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$6.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+		for (const projectDir of fs$7.readdirSync(projectsDir)) {
+			const fullPath = path$7.join(projectsDir, projectDir);
+			const stat = fs$7.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$6.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$7.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$7.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$6.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+		for (const projectDir of fs$7.readdirSync(projectsDir)) {
+			const fullPath = path$7.join(projectsDir, projectDir);
+			const stat = fs$7.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$6.statSync(f);
+				const fstat = fs$7.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1453,9 +1456,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$5.existsSync(filePath)) return [];
+	if (!fs$6.existsSync(filePath)) return [];
 	try {
-		const content = fs$5.readFileSync(filePath, "utf-8");
+		const content = fs$6.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1604,6 +1607,33 @@ function getFirstTimestamp(entries) {
 const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 
 //#endregion
+//#region src/utils/atomic-json.ts
+let counter = 0;
+/**
+* Write JSON to `filePath` so that readers see either the previous contents
+* or the new ones, never a partial file: serialise into a uniquely named
+* sibling, then rename it over the target. Same directory means same
+* filesystem, which is what makes the rename atomic.
+*
+* Throws on failure; callers keep whatever error posture they already have.
+*/
+function writeJsonAtomic(filePath, data) {
+	const dir = path$6.dirname(filePath);
+	ensureDir(dir);
+	const serialised = JSON.stringify(data);
+	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
+	fs$5.writeFileSync(tmpPath, serialised, "utf-8");
+	try {
+		fs$5.renameSync(tmpPath, filePath);
+	} catch (err) {
+		try {
+			fs$5.unlinkSync(tmpPath);
+		} catch {}
+		throw err;
+	}
+}
+
+//#endregion
 //#region src/cache/block-cache.ts
 function getBlockCachePath() {
 	return path$5.join(getCacheDir(), "blocks", "current.json");
@@ -1626,8 +1656,7 @@ function loadBlockCache() {
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();
 	try {
-		ensureDir(path$5.dirname(cachePath));
-		fs$4.writeFileSync(cachePath, JSON.stringify(data));
+		writeJsonAtomic(cachePath, data);
 	} catch {}
 }
 
@@ -1678,12 +1707,11 @@ function loadPricingCache(ttlMs) {
 function savePricingCache(data) {
 	const cachePath = getCachePath$1();
 	try {
-		ensureDir(path$4.dirname(cachePath));
 		const cache = {
 			timestamp: Date.now(),
 			data
 		};
-		fs$3.writeFileSync(cachePath, JSON.stringify(cache));
+		writeJsonAtomic(cachePath, cache);
 	} catch {}
 }
 
@@ -1832,8 +1860,22 @@ function visibleLength(str) {
 
 //#endregion
 //#region src/data/daily-cost-tracker.ts
-function getDailyCostPath() {
+const STALE_SESSION_MS = 48 * 3600 * 1e3;
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+function getShardDir() {
+	return path$3.join(getCacheDir(), "daily");
+}
+function getLegacyPath() {
 	return path$3.join(getCacheDir(), "daily-costs.json");
+}
+/**
+* One file per session, so a render only ever writes its own session's data.
+* Concurrent sessions therefore cannot clobber each other's entries — there
+* is no shared read-modify-write left to lose an update.
+*/
+function shardPath(sessionId) {
+	const key = SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+	return path$3.join(getShardDir(), `${key}.json`);
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -1841,66 +1883,124 @@ function dateStr(d) {
 	const day = String(d.getDate()).padStart(2, "0");
 	return `${y}-${m}-${day}`;
 }
-const STALE_SESSION_MS = 48 * 3600 * 1e3;
-function readDailyCostFile(now) {
-	const filePath = getDailyCostPath();
-	const today = dateStr(now);
+/**
+* Split a pre-shard `daily-costs.json` into per-session files, then remove it.
+* Without this, today's total would reset to zero once on upgrade. Two
+* processes migrating at the same time write identical shards, so it is safe
+* to run unsynchronised.
+*/
+function migrateLegacyStore(now) {
+	const legacyPath = getLegacyPath();
+	let raw;
 	try {
-		const raw = fs$2.readFileSync(filePath, "utf-8");
-		const data = JSON.parse(raw);
-		const sessions = (data.sessions ?? []).map((s) => ({
-			...s,
-			baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0
-		}));
-		if (data.date !== today) return {
-			date: today,
-			sessions: sessions.filter((s) => now.getTime() - s.updatedAt < STALE_SESSION_MS).map((s) => ({
-				...s,
-				baselineUsd: s.costUsd
-			}))
-		};
-		return {
-			date: today,
-			sessions
-		};
+		raw = fs$2.readFileSync(legacyPath, "utf-8");
 	} catch {
-		return {
-			date: today,
-			sessions: []
-		};
+		return;
 	}
+	let data = null;
+	try {
+		const parsed = JSON.parse(raw);
+		if (parsed && typeof parsed === "object") data = parsed;
+	} catch {}
+	const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+	const date = typeof data?.date === "string" ? data.date : dateStr(now);
+	try {
+		for (const s of sessions) {
+			if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
+			const target = shardPath(s.sessionId);
+			if (fs$2.existsSync(target)) continue;
+			const entry = {
+				sessionId: s.sessionId,
+				date,
+				costUsd: s.costUsd,
+				baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0,
+				updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : now.getTime()
+			};
+			if (s.source === "stdin" || s.source === "calculated") entry.source = s.source;
+			writeJsonAtomic(target, entry);
+		}
+	} catch {
+		return;
+	}
+	try {
+		fs$2.unlinkSync(legacyPath);
+	} catch {}
 }
-function writeDailyCostFile(data) {
-	const filePath = getDailyCostPath();
-	ensureDir(path$3.dirname(filePath));
-	fs$2.writeFileSync(filePath, JSON.stringify(data), "utf-8");
+/**
+* Every live session's entry. Shards untouched for 48h are pruned in passing;
+* entries from an earlier day are returned as they are, and re-baseline
+* lazily when their own session next writes.
+*/
+function readEntries(now) {
+	migrateLegacyStore(now);
+	let files;
+	try {
+		files = fs$2.readdirSync(getShardDir());
+	} catch {
+		return [];
+	}
+	const entries = [];
+	for (const file of files) {
+		if (!file.endsWith(".json")) continue;
+		const fullPath = path$3.join(getShardDir(), file);
+		let entry;
+		try {
+			entry = JSON.parse(fs$2.readFileSync(fullPath, "utf-8"));
+		} catch {
+			continue;
+		}
+		if (typeof entry?.sessionId !== "string" || typeof entry.costUsd !== "number") continue;
+		if (now.getTime() - (entry.updatedAt ?? 0) >= STALE_SESSION_MS) {
+			try {
+				fs$2.unlinkSync(fullPath);
+			} catch {}
+			continue;
+		}
+		entries.push({
+			...entry,
+			baselineUsd: typeof entry.baselineUsd === "number" ? entry.baselineUsd : 0
+		});
+	}
+	return entries;
 }
 /**
 * Record the current session's cumulative cost and return today's total
 * across all sessions (spend since local midnight only).
 */
 function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
-	const data = readDailyCostFile(now);
+	const today = dateStr(now);
+	const entries = readEntries(now);
 	if (sessionId) {
-		const existing = data.sessions.find((s) => s.sessionId === sessionId);
-		if (existing) {
-			const accruedToday = Math.max(0, existing.costUsd - existing.baselineUsd);
-			if (existing.source !== void 0 && existing.source !== source) existing.baselineUsd = costUsd - accruedToday;
-			else if (costUsd < existing.costUsd) existing.baselineUsd = -accruedToday;
-			existing.costUsd = costUsd;
-			existing.source = source;
-			existing.updatedAt = now.getTime();
-		} else data.sessions.push({
-			sessionId,
-			costUsd,
-			baselineUsd: 0,
-			source,
-			updatedAt: now.getTime()
-		});
-		writeDailyCostFile(data);
+		let entry = entries.find((e) => e.sessionId === sessionId);
+		if (entry) {
+			if (entry.date !== today) {
+				entry.baselineUsd = entry.costUsd;
+				entry.date = today;
+			}
+			const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
+			if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
+			else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
+			entry.costUsd = costUsd;
+			entry.source = source;
+			entry.updatedAt = now.getTime();
+		} else {
+			entry = {
+				sessionId,
+				date: today,
+				costUsd,
+				baselineUsd: 0,
+				source,
+				updatedAt: now.getTime()
+			};
+			entries.push(entry);
+		}
+		writeJsonAtomic(shardPath(sessionId), entry);
 	}
 	let total = 0;
-	for (const s of data.sessions) total += Math.max(0, s.costUsd - s.baselineUsd);
+	for (const e of entries) {
+		if (e.date !== today) continue;
+		total += Math.max(0, e.costUsd - e.baselineUsd);
+	}
 	return total;
 }
 
@@ -1929,8 +2029,7 @@ function trackTurn(sessionId) {
 		count: 0
 	};
 	data.count++;
-	ensureDir(path$2.dirname(filePath));
-	fs$1.writeFileSync(filePath, JSON.stringify(data), "utf-8");
+	writeJsonAtomic(filePath, data);
 	return data.count;
 }
 
@@ -3366,7 +3465,6 @@ function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
 function writeCache(output, sessionId, costUsd, terminalWidth) {
 	const cachePath = getCachePath();
 	try {
-		ensureDir(path.dirname(cachePath));
 		const entry = {
 			output,
 			timestamp: Date.now(),
@@ -3374,7 +3472,7 @@ function writeCache(output, sessionId, costUsd, terminalWidth) {
 			costUsd,
 			terminalWidth
 		};
-		fs.writeFileSync(cachePath, JSON.stringify(entry));
+		writeJsonAtomic(cachePath, entry);
 	} catch {}
 }
 

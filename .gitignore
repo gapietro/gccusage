@@ -1,7 +1,24 @@
 node_modules/
-dist/
 *.tsbuildinfo
 .cache/
+coverage/
 
-# Worktrees created by Claude Code (EnterWorktree)
+# Build output. dist/index.js is deliberately committed: `gccusage setup`
+# points Claude Code's statusLine.command at it, so anyone upgrading with
+# `git pull` runs this file directly and never builds. It must be rebuilt and
+# staged in the same commit as any src/ change, which is why it is un-ignored
+# here rather than force-added — `git status` has to show it as dirty.
+dist/*
+!dist/index.js
+
+# Local Claude Code state, per-machine and not shareable.
+.claude/settings.local.json
 .claude/worktrees/
+.superpowers/
+
+# OS and editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

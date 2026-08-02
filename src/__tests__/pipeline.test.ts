@@ -28,12 +28,16 @@ let originalXdg: string | undefined;
 // One transcript entry worth exactly $1.00 of calculated cost.
 const CALCULATED_COST = 1.0;
 
-function dailyCostPath(): string {
-  return path.join(tmpDir, "gccusage", "daily-costs.json");
+function shardDir(): string {
+  return path.join(tmpDir, "gccusage", "daily");
 }
 
-function readStore(): unknown {
-  return JSON.parse(fs.readFileSync(dailyCostPath(), "utf-8"));
+function shardPath(sessionId: string): string {
+  return path.join(shardDir(), `${sessionId}.json`);
+}
+
+function readShard(sessionId: string): unknown {
+  return JSON.parse(fs.readFileSync(shardPath(sessionId), "utf-8"));
 }
 
 // The tracker keys its file on the local date, not UTC.
@@ -146,31 +150,28 @@ describe("buildRenderContext today cost", () => {
 
     await buildRenderContext(stdin, settingsWith("calculated"));
 
-    expect(fs.existsSync(dailyCostPath())).toBe(false);
+    expect(fs.existsSync(shardDir())).toBe(false);
   });
 
   it("leaves an existing daily cost store untouched in calculated mode", async () => {
-    fs.mkdirSync(path.dirname(dailyCostPath()), { recursive: true });
+    fs.mkdirSync(shardDir(), { recursive: true });
     const seeded = {
+      sessionId: "session-b",
       date: localToday(),
-      sessions: [
-        {
-          sessionId: "session-b",
-          costUsd: 4.0,
-          baselineUsd: 0,
-          source: "stdin",
-          updatedAt: Date.now(),
-        },
-      ],
+      costUsd: 4.0,
+      baselineUsd: 0,
+      source: "stdin",
+      updatedAt: Date.now(),
     };
-    fs.writeFileSync(dailyCostPath(), JSON.stringify(seeded));
+    fs.writeFileSync(shardPath("session-b"), JSON.stringify(seeded));
 
     await buildRenderContext(
       { session_id: "session-a", cost: { total_cost_usd: 7.0 } },
       settingsWith("calculated"),
     );
 
-    expect(readStore()).toEqual(seeded);
+    expect(readShard("session-b")).toEqual(seeded);
+    expect(fs.readdirSync(shardDir())).toEqual(["session-b.json"]);
   });
 
   it("tracks stdin cost in the daily store when stdin costs are used", async () => {
@@ -180,8 +181,10 @@ describe("buildRenderContext today cost", () => {
     );
 
     expect(context.todayCostUsd).toBeCloseTo(3.0);
-    expect(readStore()).toMatchObject({
-      sessions: [{ sessionId: "session-a", costUsd: 3.0, source: "stdin" }],
+    expect(readShard("session-a")).toMatchObject({
+      sessionId: "session-a",
+      costUsd: 3.0,
+      source: "stdin",
     });
   });
 
@@ -192,10 +195,10 @@ describe("buildRenderContext today cost", () => {
     );
 
     expect(context.todayCostUsd).toBeCloseTo(CALCULATED_COST);
-    expect(readStore()).toMatchObject({
-      sessions: [
-        { sessionId: "session-a", costUsd: CALCULATED_COST, source: "calculated" },
-      ],
+    expect(readShard("session-a")).toMatchObject({
+      sessionId: "session-a",
+      costUsd: CALCULATED_COST,
+      source: "calculated",
     });
   });
 });
