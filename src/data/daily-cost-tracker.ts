@@ -15,6 +15,14 @@ const CostSourceSchema = v.picklist(["stdin", "calculated"]);
  * written before `baselineUsd` existed reads as 0, and one with no `updatedAt`
  * reads as 0 and is therefore pruned as stale, which is what the old
  * `entry.updatedAt ?? 0` did.
+ *
+ * `v.object` strips unknown keys, and the parsed result is later written back
+ * verbatim (see `writeJsonAtomic(shardPath(...), entry)` below). A future
+ * version's extra field therefore survives a round-trip through a newer
+ * binary but is silently dropped by an older one reading the same shard. No
+ * impact today — every writer emits exactly these six fields — but adding a
+ * seventh here without updating every reader will lose it quietly rather than
+ * loudly.
  */
 const ShardSchema = v.object({
   sessionId: v.string(),

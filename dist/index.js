@@ -2133,9 +2133,10 @@ function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
 	return out;
 }
 /**
-* A zero in the snapshot means the feed stated zero — `parseLitellmPricing`
-* derives its defaults from the input cost and never produces one. There is no
-* ratio to take, so only zero matches.
+* A zero can only come from the feed stating one; there is no ratio to take.
+* `isSaneModelPricing` permits a zero `cacheCreation`/`cacheRead`/`output`
+* cost, so this branch is reachable — it is not dead code guarding against
+* something `parseLitellmPricing` rules out.
 */
 function withinDeviation(fetched, known) {
 	if (known === 0) return fetched === 0;
@@ -2453,6 +2454,14 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 * written before `baselineUsd` existed reads as 0, and one with no `updatedAt`
 * reads as 0 and is therefore pruned as stale, which is what the old
 * `entry.updatedAt ?? 0` did.
+*
+* `v.object` strips unknown keys, and the parsed result is later written back
+* verbatim (see `writeJsonAtomic(shardPath(...), entry)` below). A future
+* version's extra field therefore survives a round-trip through a newer
+* binary but is silently dropped by an older one reading the same shard. No
+* impact today — every writer emits exactly these six fields — but adding a
+* seventh here without updating every reader will lose it quietly rather than
+* loudly.
 */
 const ShardSchema = object({
 	sessionId: string(),

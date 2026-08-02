@@ -75,8 +75,10 @@ export function findPricing(model: string, table: PricingTable): ModelPricing | 
   // Fuzzy match, longest key wins, lexicographic on ties. First-match-wins
   // made the result a function of the upstream table's key ordering (#91):
   // a bare "claude-opus-4" alias appearing before "claude-opus-4-5-20251101"
-  // priced a 4.5 session at 4.x rates. Length is the proxy for specificity —
-  // the dated key is always the longer one.
+  // priced a 4.5 session at 4.x rates. This makes the result deterministic
+  // regardless of key ordering, using length as an approximation of
+  // specificity — it is not a guarantee that the longest match is the
+  // correct one.
   let best: string | null = null;
   for (const key of Object.keys(table)) {
     if (!key.includes(model) && !model.includes(key)) continue;

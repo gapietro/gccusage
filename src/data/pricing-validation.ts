@@ -86,9 +86,10 @@ export function anchorToSnapshot(
 }
 
 /**
- * A zero in the snapshot means the feed stated zero — `parseLitellmPricing`
- * derives its defaults from the input cost and never produces one. There is no
- * ratio to take, so only zero matches.
+ * A zero can only come from the feed stating one; there is no ratio to take.
+ * `isSaneModelPricing` permits a zero `cacheCreation`/`cacheRead`/`output`
+ * cost, so this branch is reachable — it is not dead code guarding against
+ * something `parseLitellmPricing` rules out.
  */
 function withinDeviation(fetched: number, known: number): boolean {
   if (known === 0) return fetched === 0;
