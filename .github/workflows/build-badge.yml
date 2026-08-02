@@ -1,9 +1,22 @@
 name: build badge
 
-# Stamps README.md with MMDD.<pushes to main today>. The commit this job makes
-# is itself a push, so it carries [skip ci] — GitHub honours that natively for
-# push events and the run is never queued. The `if` below is the belt to that
-# brace. Consequence, and the intended one: the count measures human pushes.
+# Stamps README.md with MMDD.<pushes to main today>.
+#
+# The commit this job makes is itself a push to main, so it looks recursive.
+# It is not: a push authenticated with GITHUB_TOKEN does not create a workflow
+# run, which is GitHub's own recursion guard and needs nothing from us. The
+# `if` below is the belt to that brace, keyed on the actor.
+#
+# This deliberately does NOT use "[skip ci]" in the bot's commit message. That
+# was the first design and it was wrong in a way worth recording: GitHub's
+# native skip matches the phrase anywhere in a commit message, including prose,
+# so the merge commit that introduced this workflow — which merely *described*
+# the mechanism — skipped its own first run and stamped nothing. A guard that
+# any commit message can trip by talking about it is not a guard.
+#
+# One consequence survives and cannot be fixed here: a human commit whose
+# message contains the literal phrase is skipped by GitHub before this workflow
+# is consulted, and that push goes uncounted.
 on:
   push:
     branches: [main]
@@ -24,7 +37,7 @@ permissions:
 
 jobs:
   stamp:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       # Full history, and the branch rather than the triggering commit: this
@@ -64,7 +77,7 @@ jobs:
 
             build=$(node -p "require('./.github/build-number.json').build")
             git add README.md .github/build-number.json
-            git commit -m "chore: build ${build} [skip ci]"
+            git commit -m "chore: build ${build}"
 
             if git push; then
               echo "stamped ${build} on attempt ${attempt}"
