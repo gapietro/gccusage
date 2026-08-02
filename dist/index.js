@@ -226,6 +226,31 @@ function getFallback(schema, dataset, config$1) {
 	return typeof schema.fallback === "function" ? schema.fallback(dataset, config$1) : schema.fallback;
 }
 /**
+* Returns a fallback value as output if the input does not match the schema.
+*
+* @param schema The schema to catch.
+* @param fallback The fallback value.
+*
+* @returns The passed schema.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function fallback(schema, fallback$1) {
+	return {
+		...schema,
+		fallback: fallback$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const outputDataset = schema["~run"](dataset, config$1);
+			return outputDataset.issues ? {
+				typed: true,
+				value: /* @__PURE__ */ getFallback(this, outputDataset, config$1)
+			} : outputDataset;
+		}
+	};
+}
+/**
 * Returns the default value of the schema.
 *
 * @param schema The schema to get it from.
@@ -589,48 +614,69 @@ function safeParse(schema, input, config$1) {
 
 //#endregion
 //#region src/types/status-json.ts
+/**
+* Every field in this payload is optional AND independently recoverable.
+*
+* Claude Code owns this format and evolves it. Parsed as one unit, a single
+* field whose type changed upstream threw, `parseStatusJson` returned null,
+* and the bar rendered a confident `$0.00` — with every other field discarded
+* (#83). `v.fallback` localises that: a field that fails validation becomes
+* undefined and its siblings survive.
+*
+* Applied at every level on purpose, not just to the top-level blocks. A
+* string `used_percentage` should cost the percentage, not the whole
+* `context_window` — which also carries the window size and the data behind
+* the compaction countdown.
+*/
+function lenient(schema) {
+	return fallback(optional(schema), void 0);
+}
+/** Same, for the fields that carry a numeric default rather than undefined. */
+function lenientWithDefault(schema, value) {
+	return fallback(optional(schema, value), value);
+}
 const ModelSchema = union([string(), object({
-	id: optional(string()),
-	display_name: optional(string())
+	id: lenient(string()),
+	display_name: lenient(string())
 })]);
 const CostSchema = object({
-	total_cost_usd: optional(number()),
-	total_duration_ms: optional(number()),
-	total_api_duration_ms: optional(number()),
-	total_lines_added: optional(number()),
-	total_lines_removed: optional(number())
+	total_cost_usd: lenient(number()),
+	total_duration_ms: lenient(number()),
+	total_api_duration_ms: lenient(number()),
+	total_lines_added: lenient(number()),
+	total_lines_removed: lenient(number())
 });
 const CurrentUsageSchema = object({
-	input_tokens: optional(number(), 0),
-	output_tokens: optional(number(), 0),
-	cache_creation_input_tokens: optional(number(), 0),
-	cache_read_input_tokens: optional(number(), 0)
+	input_tokens: lenientWithDefault(number(), 0),
+	output_tokens: lenientWithDefault(number(), 0),
+	cache_creation_input_tokens: lenientWithDefault(number(), 0),
+	cache_read_input_tokens: lenientWithDefault(number(), 0)
 });
 const ContextWindowSchema = union([number(), object({
-	context_window_size: optional(number()),
-	used_percentage: optional(nullable(number())),
-	remaining_percentage: optional(nullable(number())),
-	total_input_tokens: optional(number()),
-	total_output_tokens: optional(number()),
-	current_usage: optional(nullable(CurrentUsageSchema))
+	context_window_size: lenient(number()),
+	used_percentage: lenient(nullable(number())),
+	remaining_percentage: lenient(nullable(number())),
+	total_input_tokens: lenient(number()),
+	total_output_tokens: lenient(number()),
+	current_usage: lenient(nullable(CurrentUsageSchema))
 })]);
 const TokenUsageSchema = object({
-	input_tokens: optional(number(), 0),
-	output_tokens: optional(number(), 0),
-	cache_creation_input_tokens: optional(number(), 0),
-	cache_read_input_tokens: optional(number(), 0)
+	input_tokens: lenientWithDefault(number(), 0),
+	output_tokens: lenientWithDefault(number(), 0),
+	cache_creation_input_tokens: lenientWithDefault(number(), 0),
+	cache_read_input_tokens: lenientWithDefault(number(), 0)
 });
-const VimSchema = object({ mode: optional(string()) });
-const WorkspaceSchema = object({ project_dir: optional(string()) });
+const VimSchema = object({ mode: lenient(string()) });
+const WorkspaceSchema = object({ project_dir: lenient(string()) });
 const StatusJsonSchema = object({
-	model: optional(ModelSchema),
-	cost: optional(CostSchema),
-	context_window: optional(ContextWindowSchema),
-	token_usage: optional(TokenUsageSchema),
-	vim: optional(VimSchema),
-	cwd: optional(string()),
-	workspace: optional(WorkspaceSchema),
-	session_id: optional(string())
+	model: lenient(ModelSchema),
+	cost: lenient(CostSchema),
+	context_window: lenient(ContextWindowSchema),
+	token_usage: lenient(TokenUsageSchema),
+	vim: lenient(VimSchema),
+	cwd: lenient(string()),
+	workspace: lenient(WorkspaceSchema),
+	session_id: lenient(string())
 });
 
 //#endregion
@@ -654,14 +700,45 @@ function readStdin() {
 		process.stdin.resume();
 	});
 }
+/**
+* Individual bad fields are absorbed by the schema (see status-json.ts), so
+* an error here means the payload was not a usable object at all. That is
+* worth showing rather than swallowing: the old behaviour rendered a
+* confident `$0.00` bar from `{}`, which reads as real data (#83).
+*
+* Empty input is NOT an error — it is the ordinary case for a TTY or a
+* read that timed out, and flagging it would put a red line in front of
+* everyone who runs the binary by hand.
+*/
 function parseStatusJson(raw) {
-	if (!raw.trim()) return null;
+	if (!raw.trim()) return { stdin: {} };
+	let data;
 	try {
-		const data = JSON.parse(raw);
-		return parse(StatusJsonSchema, data);
-	} catch {
-		return null;
+		data = JSON.parse(raw);
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : "could not be parsed";
+		return {
+			stdin: {},
+			error: `stdin is not valid JSON — ${detail}`
+		};
 	}
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return {
+		stdin: {},
+		error: `stdin is ${describe(data)}, expected a JSON object`
+	};
+	try {
+		return { stdin: parse(StatusJsonSchema, data) };
+	} catch {
+		return {
+			stdin: {},
+			error: "stdin did not match the expected shape"
+		};
+	}
+}
+function describe(data) {
+	if (data === null) return "null";
+	if (Array.isArray(data)) return "an array";
+	return `a ${typeof data}`;
 }
 
 //#endregion
@@ -1383,6 +1460,17 @@ function shortenPath(filePath) {
 */
 function formatConfigError(error, configPath) {
 	return `${BOLD_RED}⚠ gccusage config${RESET}  ${shortenPath(configPath)} — ${error}`;
+}
+/**
+* The same treatment for a payload that could not be read at all (#83).
+*
+* Unlike a config error this is not the user's to fix — it means Claude Code
+* sent something unusable — but showing it still beats the alternative, which
+* was a `$0.00` bar indistinguishable from a genuinely free session. Bad
+* individual fields never reach here; the schema absorbs those.
+*/
+function formatStdinError(error) {
+	return `${BOLD_RED}⚠ gccusage${RESET}  ${error}`;
 }
 
 //#endregion
@@ -3901,7 +3989,11 @@ async function main() {
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
 	if (!isTTY) raw = await readStdin();
-	const stdin = parseStatusJson(raw) ?? {};
+	const { stdin, error: stdinError } = parseStatusJson(raw);
+	if (stdinError) {
+		process.stdout.write(formatStdinError(stdinError));
+		return;
+	}
 	const output = await runStatusline(stdin, settings);
 	process.stdout.write(output);
 }

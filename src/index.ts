@@ -1,6 +1,6 @@
 import { readStdin, parseStatusJson } from "./data/stdin-reader.js";
 import { loadSettings, getConfigPath } from "./config/loader.js";
-import { formatConfigError } from "./config/error-line.js";
+import { formatConfigError, formatStdinError } from "./config/error-line.js";
 import { runStatusline } from "./statusline.js";
 import { runCli } from "./cli.js";
 
@@ -29,7 +29,17 @@ async function main(): Promise<void> {
     raw = await readStdin();
   }
 
-  const stdin = parseStatusJson(raw) ?? {};
+  // A bad FIELD is absorbed by the schema and costs only that field. An error
+  // here means the payload was unusable as a whole, which is reported for the
+  // same reason a config error is: the alternative was a confident $0.00 bar
+  // built from {} (#83). Returning before runStatusline leaves the statusline
+  // cache untouched, matching the config-error path above.
+  const { stdin, error: stdinError } = parseStatusJson(raw);
+  if (stdinError) {
+    process.stdout.write(formatStdinError(stdinError));
+    return;
+  }
+
   const output = await runStatusline(stdin, settings);
   process.stdout.write(output);
 }
