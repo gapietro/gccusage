@@ -236,6 +236,20 @@ list every widget you want. `flex` controls how the line uses leftover width:
 The burn rate always follows the same source as the session total, so the bar
 never shows a stdin-priced rate beside a transcript-priced total.
 
+Model pricing is fetched from the LiteLLM feed and cached for 24h. When the
+fetch fails, an offline snapshot committed at `src/data/fallback-pricing.ts`
+takes over. If a model is missing from both — a model newer than the snapshot,
+seen while offline — its tokens cannot be priced, and any figure computed
+without them is marked with a `?`:
+
+```
+ Opus 4.6 ▶ $0.33? ▶ Today: $4.10? ▶ [===-------] 30% (200.0k)
+```
+
+The `?` means the number is real but incomplete, not that it is zero. Costs
+Claude Code reports itself are never marked, since no missing price can affect
+them. Refresh the snapshot with `npm run pricing`.
+
 ### Compact mode
 
 Collapses both lines into a single line when the terminal is narrower than
@@ -428,6 +442,7 @@ npm run build              # Build dist/index.js
 npm run typecheck          # Type check src/
 npm run typecheck:scripts  # Type check scripts/
 npm run schema             # Regenerate config-schema.json from the code
+npm run pricing            # Refresh the offline pricing snapshot from LiteLLM
 npm run dev                # Run from source (requires Bun)
 ```
 

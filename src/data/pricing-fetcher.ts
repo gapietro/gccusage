@@ -1,32 +1,11 @@
 import type { PricingTable, ModelPricing } from "../types/pricing.js";
 import { loadPricingCache, savePricingCache } from "../cache/pricing-cache.js";
+import { FALLBACK_PRICING } from "./fallback-pricing.js";
 
-// Offline fallback pricing (updated at build time / hardcoded)
-const FALLBACK_PRICING: PricingTable = {
-  "claude-opus-4-20250514": {
-    inputCostPerToken: 15 / 1_000_000,
-    outputCostPerToken: 75 / 1_000_000,
-    cacheCreationCostPerToken: 18.75 / 1_000_000,
-    cacheReadCostPerToken: 1.5 / 1_000_000,
-  },
-  "claude-sonnet-4-20250514": {
-    inputCostPerToken: 3 / 1_000_000,
-    outputCostPerToken: 15 / 1_000_000,
-    cacheCreationCostPerToken: 3.75 / 1_000_000,
-    cacheReadCostPerToken: 0.3 / 1_000_000,
-  },
-  "claude-haiku-3.5-20241001": {
-    inputCostPerToken: 0.8 / 1_000_000,
-    outputCostPerToken: 4 / 1_000_000,
-    cacheCreationCostPerToken: 1 / 1_000_000,
-    cacheReadCostPerToken: 0.08 / 1_000_000,
-  },
-};
-
-const LITELLM_URL =
+export const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
-function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
+export function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
   const table: PricingTable = {};
 
   for (const [key, value] of Object.entries(data)) {
@@ -59,10 +38,18 @@ function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
   return table;
 }
 
+/**
+ * The offline snapshot is merged UNDER every table this returns, never
+ * returned on its own path only. It used to be merged on the fetch-success
+ * path alone: the cache stored the un-merged fetch and the cache-hit path
+ * returned it raw, so the fallback stopped contributing anything from the
+ * second run onward (#93). Live prices always win — a stale snapshot must
+ * never override the feed.
+ */
 export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
   // Try cache first
   const cached = loadPricingCache(ttlMs);
-  if (cached) return cached;
+  if (cached) return { ...FALLBACK_PRICING, ...cached };
 
   // Try fetching from LiteLLM
   try {
@@ -79,5 +66,5 @@ export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
     // network error, use fallback
   }
 
-  return FALLBACK_PRICING;
+  return { ...FALLBACK_PRICING };
 }
