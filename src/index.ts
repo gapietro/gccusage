@@ -8,7 +8,16 @@ async function main(): Promise<void> {
   // Direct invocation mode (CLI)
   const args = process.argv.slice(2);
   if (args.length > 0) {
-    await runCli(args);
+    // A CLI failure must be visible. The blanket catch below is graceful
+    // degradation for statusline mode — never break the user's prompt — and
+    // applying it here turned `setup` into a command that reported success
+    // having done nothing (#88).
+    try {
+      await runCli(args);
+    } catch (err) {
+      console.error(`gccusage: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
     return;
   }
 

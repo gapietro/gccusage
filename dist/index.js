@@ -4345,7 +4345,12 @@ Config: ~/.config/gccusage/settings.json`);
 async function main() {
 	const args = process.argv.slice(2);
 	if (args.length > 0) {
-		await runCli(args);
+		try {
+			await runCli(args);
+		} catch (err) {
+			console.error(`gccusage: ${err instanceof Error ? err.message : String(err)}`);
+			process.exit(1);
+		}
 		return;
 	}
 	const { settings, error } = loadSettings();
