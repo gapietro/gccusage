@@ -14,7 +14,10 @@ export const cacheHitRateWidget: Widget = {
     if (total === 0) return null;
 
     const hitRate = Math.round((reads / total) * 100);
-    const label = config.label ?? "Cache:";
+    // "Hit:", not "Cache:" — tokens-cached renders an absolute cached-token
+    // count under its own label, and both reading "Cache:" made two adjacent
+    // segments indistinguishable (#60).
+    const label = config.label ?? "Hit:";
     const text = `${label} ${hitRate}%`;
     return { text, fg: config.fg, bg: config.bg };
   },

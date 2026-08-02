@@ -3,7 +3,7 @@
  * fixtures.
  *
  * `text` is the EXACT string observed against `opus5-1m-mid`. Asserting exact
- * text rather than "non-empty or null" is deliberate: every one of the 25
+ * text rather than "non-empty or null" is deliberate: every one of the 26
  * widgets returns a plausible non-empty string against a real payload, so a
  * smoke test passes on all of them and catches nothing (#47).
  *
@@ -38,7 +38,11 @@ export interface WidgetExpectation {
    * produces this known-wrong value (not an argument that it is correct).
    */
   why: string;
-  /** Issue number tracking confirmed-wrong output. */
+  /**
+   * Issue number tracking confirmed-wrong output. No entry carries one right
+   * now — #58 and #60–#63 were the last, and all are fixed. The field stays
+   * because it is the mechanism for the next defect this harness surfaces.
+   */
   knownWrong?: number;
 }
 
@@ -53,9 +57,18 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "git-changes": { text: "+1", why: "scratch repo has one added file" },
   "tokens-input": { text: "In: 396", why: "metrics.session.inputTokens — uncached input only" },
   "tokens-output": { text: "Out: 137.8k", why: "metrics.session.outputTokens, real session total" },
-  "tokens-cached": { text: "Cache: 35.37M", why: "cacheCreation + cacheRead", knownWrong: 60 },
-  "per-model": { text: "O5:$22.52", why: "one model this session", knownWrong: 63 },
-  "session-clock": { text: "2hr 13m", why: "derivedAt - sessionStartTime", knownWrong: 61 },
+  "tokens-cached": {
+    text: "Cached: 35.37M",
+    why: "cacheCreation + cacheRead. Labelled 'Cached:' so it cannot be confused with cache-hit-rate's 'Hit:' percentage — both said 'Cache:' (#60 resolved)",
+  },
+  "per-model": {
+    text: "Opus 5:$22.52",
+    why: "one model this session, name rendered in full. The first-letter-per-word abbreviation was removed rather than repaired: it collapsed 'Sonnet 4.5' and 'Sonnet 4' to the same 'S4' (#63 resolved)",
+  },
+  "session-clock": {
+    text: "Session: 2hr 13m",
+    why: "derivedAt - sessionStartTime, i.e. since the transcript's first entry — the whole logical session, unaffected by --resume. 'Session:' distinguishes it from session-timer's process uptime; both rendered a bare duration before (#61 resolved)",
+  },
   cwd: {
     text: "~/projects/demo-project",
     why: "full path, home abbreviated — correct for cwd's own job. The project identifier moved to the `project` widget, which reads workspace.project_dir (#59 resolved)",
@@ -67,15 +80,24 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "custom-text": { text: null, why: "declines without user-supplied text — correct" },
   "custom-command": { text: null, why: "declines without a configured command — correct" },
   separator: { text: " | ", why: "structural widget, renders its glyph" },
-  "cache-hit-rate": { text: "Cache: 100%", why: "cache_read / (read + creation)", knownWrong: 60 },
+  "cache-hit-rate": {
+    text: "Hit: 100%",
+    why: "cache_read / (read + creation), labelled 'Hit:' to match the widget's own name and stay distinct from tokens-cached's 'Cached:' count (#60 resolved)",
+  },
   "lines-changed": { text: "+649 -66", why: "cost.total_lines_added / removed" },
   "vim-mode": { text: null, why: "declines when vim mode is off — correct" },
-  "api-latency": { text: "API: 35m 5s", why: "cumulative total_api_duration_ms", knownWrong: 62 },
+  "api-latency": {
+    text: "API total: 35m 5s",
+    why: "cumulative total_api_duration_ms across every request in the session. Labelled 'API total:' because 'API: 35m 5s' read as one request hanging for half an hour (#62 resolved); the registry key stays api-latency so existing layouts keep working",
+  },
   "token-breakdown": {
     text: "In:396 Out:137.8k",
     why: "metrics.session totals (#58) — the same source tokens-input and tokens-output read, so all three now agree about one session. Was In:268.8k Out:536 from context_window.total_input/output_tokens, a last-assistant-message snapshot",
   },
-  "session-timer": { text: "1hr 46m", why: "cost.total_duration_ms", knownWrong: 61 },
+  "session-timer": {
+    text: "Up: 1hr 46m",
+    why: "cost.total_duration_ms = Date.now() - the CLI process start time (2.1.220: sMe() over Mt.startTime, which ignores the sessionLogicalStartTime the binary tracks separately), so it resets on --resume. 'Up:' names it as process uptime, distinct from session-clock's 'Session:' (#61 resolved). The 27-minute gap from session-clock on this fixture is a resumed session, not a bug in either",
+  },
   "compact-countdown": { text: "~697.0k left", why: "windowSize - used - 33k reserve" },
   "turn-counter": {
     text: "#9",

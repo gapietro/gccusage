@@ -9,13 +9,12 @@ export const perModelBreakdownWidget: Widget = {
 
     const parts: string[] = [];
     for (const [model, cost] of context.costByModel) {
-      // Short model name: Sonnet 4 -> S4, Opus 4 -> O4
-      const name = formatModelName(model);
-      const short = name
-        .split(" ")
-        .map((w) => w[0])
-        .join("");
-      parts.push(`${short}:${formatDollars(cost)}`);
+      // Model names render in full. The old abbreviation took the first letter
+      // of each space-separated word, which dropped the minor version and
+      // collapsed "Sonnet 4.5" and "Sonnet 4" to the same "S4" — two segments
+      // labelled identically in the one widget whose entire job is telling
+      // models apart (#63). Nothing is shortened now, so nothing can collide.
+      parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
     }
 
     const text = parts.join(" ");

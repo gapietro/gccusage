@@ -13,6 +13,9 @@ import { todaySpendWidget } from "../widgets/today-spend.js";
 import { blockTimerWidget } from "../widgets/block-timer.js";
 import { compactCountdownWidget } from "../widgets/compact-countdown.js";
 import { projectWidget } from "../widgets/project.js";
+import { perModelBreakdownWidget } from "../widgets/per-model-breakdown.js";
+import { sessionClockWidget } from "../widgets/session-clock.js";
+import { sessionTimerWidget } from "../widgets/session-timer.js";
 import { getHomeDir } from "../utils/paths.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
@@ -650,5 +653,72 @@ describe("cwdWidget", () => {
 
   it("declines without a cwd", () => {
     expect(cwdWidget.render(ctx(undefined), { type: "cwd" })).toBeNull();
+  });
+});
+
+describe("perModelBreakdownWidget", () => {
+  const context = (models: Record<string, number>) =>
+    makeContext({ costByModel: new Map(Object.entries(models)) });
+
+  // The exact collision #63 described. The old abbreviation took the first
+  // letter of each space-separated word of formatModelName's output, so the
+  // minor version — which is not its own word — was dropped: "Sonnet 4.5" and
+  // "Sonnet 4" both became "S4", two segments labelled identically in the one
+  // widget whose job is telling models apart. Asserting the two labels differ
+  // rather than just checking the full strings is what pins the defect: a
+  // future re-shortening that collides again fails here.
+  it("keeps two versions of one model family distinct (#63)", () => {
+    const out = perModelBreakdownWidget.render(
+      context({ "claude-sonnet-4-20250514": 1.2, "claude-sonnet-4-5-20250929": 3.4 }),
+      { type: "per-model" },
+    );
+    expect(out?.text).toBe("Sonnet 4:$1.20 Sonnet 4.5:$3.40");
+
+    const labels = [...out!.text.matchAll(/([^:]+):\$[\d.]+/g)].map((m) => m[1]!.trim());
+    expect(labels, "expected one label per model").toHaveLength(2);
+    expect(new Set(labels).size, `labels collided: ${labels.join(", ")}`).toBe(labels.length);
+  });
+
+  it("renders an unrecognised model id verbatim rather than as an initial", () => {
+    // formatModelName returns the raw id when its pattern misses. The old
+    // abbreviation reduced that whole id to one letter.
+    const out = perModelBreakdownWidget.render(context({ "some-custom-model": 0.5 }), {
+      type: "per-model",
+    });
+    expect(out?.text).toBe("some-custom-model:$0.50");
+  });
+
+  it("declines when no per-model cost is known", () => {
+    expect(perModelBreakdownWidget.render(context({}), { type: "per-model" })).toBeNull();
+  });
+});
+
+describe("session duration widgets (#61)", () => {
+  // session-clock measures from the transcript's first entry (survives
+  // --resume); session-timer measures cost.total_duration_ms, which Claude
+  // Code computes from the CLI *process* start time (resets on restart).
+  // Before this, both rendered a bare duration, so the two different
+  // quantities were indistinguishable on the bar.
+  it("labels the two clocks distinctly by default", () => {
+    const now = Date.now();
+    const clock = sessionClockWidget.render(
+      makeContext({ sessionStartTime: now - 3_600_000 }),
+      { type: "session-clock" },
+    );
+    const timer = sessionTimerWidget.render(
+      makeContext({ stdin: { cost: { total_duration_ms: 3_600_000 } } as never }),
+      { type: "session-timer" },
+    );
+
+    expect(clock?.text).toBe("Session: 1hr 0m");
+    expect(timer?.text).toBe("Up: 1hr 0m");
+  });
+
+  it("still allows opting out of the label with an empty string", () => {
+    const out = sessionClockWidget.render(makeContext({ sessionStartTime: Date.now() - 3_600_000 }), {
+      type: "session-clock",
+      label: "",
+    });
+    expect(out?.text).toBe("1hr 0m");
   });
 });
