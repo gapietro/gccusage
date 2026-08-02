@@ -224,7 +224,7 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       settingsWith("calculated"),
     );
 
-    expect(context.metrics.session).toEqual({
+    expect(context.metrics.totals).toEqual({
       inputTokens: EXPECTED_INPUT,
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
@@ -232,8 +232,8 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
     });
 
     // Guard the two wrong rules explicitly.
-    expect(context.metrics.session.outputTokens).not.toBe(5 + 107 + 296 + 12 + 340 + 981);
-    expect(context.metrics.session.outputTokens).not.toBe(5 + 12);
+    expect(context.metrics.totals.outputTokens).not.toBe(5 + 107 + 296 + 12 + 340 + 981);
+    expect(context.metrics.totals.outputTokens).not.toBe(5 + 12);
 
     expect(context.metrics.byModel.get("test-model")).toEqual({
       inputTokens: EXPECTED_INPUT,

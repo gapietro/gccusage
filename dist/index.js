@@ -1763,13 +1763,12 @@ function addUsage(target, entry) {
 	target.cacheCreationTokens += entry.usage.cache_creation_input_tokens ?? 0;
 	target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
 }
-function aggregateTokens(sessionEntries, todayEntries) {
+function aggregateTokens(entries) {
 	const byModel = new Map();
-	const session = emptyMetrics();
-	const today = emptyMetrics();
-	for (const entry of sessionEntries) {
+	const totals = emptyMetrics();
+	for (const entry of entries) {
 		if (!entry.usage) continue;
-		addUsage(session, entry);
+		addUsage(totals, entry);
 		if (entry.model) {
 			let model = byModel.get(entry.model);
 			if (!model) {
@@ -1779,14 +1778,9 @@ function aggregateTokens(sessionEntries, todayEntries) {
 			addUsage(model, entry);
 		}
 	}
-	for (const entry of todayEntries) {
-		if (!entry.usage) continue;
-		addUsage(today, entry);
-	}
 	return {
 		byModel,
-		session,
-		today
+		totals
 	};
 }
 function getFirstTimestamp(entries) {
@@ -2697,13 +2691,13 @@ async function buildRenderContext(stdin, settings) {
 	const todayFiles = findTodayJsonlFiles();
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
 	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
-	const metrics = aggregateTokens(sessionEntries, todayEntries);
+	const metrics = aggregateTokens(sessionEntries);
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
 	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
 	const costByModel = session.costs;
 	const calculatedSessionCost = calculateTotalCost(costByModel);
-	const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
+	const today = calculateCostByModel(aggregateTokens(todayEntries).byModel, pricing);
 	const calculatedTodayCost = calculateTotalCost(today.costs);
 	const stdinCost = stdin.cost?.total_cost_usd;
 	let sessionCostUsd;
@@ -2721,7 +2715,7 @@ async function buildRenderContext(stdin, settings) {
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+	const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
 	const burnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) ?? jsonlBurnRate : jsonlBurnRate;
 	return {
 		stdin,
@@ -3151,7 +3145,7 @@ const gitChangesWidget = { render(context, config) {
 //#region src/widgets/tokens-input.ts
 const tokensInputWidget = { render(context, config) {
 	const label = config.label ?? "In:";
-	const text = `${label} ${formatTokens(context.metrics.session.inputTokens)}`;
+	const text = `${label} ${formatTokens(context.metrics.totals.inputTokens)}`;
 	return {
 		text,
 		fg: config.fg,
@@ -3163,7 +3157,7 @@ const tokensInputWidget = { render(context, config) {
 //#region src/widgets/tokens-output.ts
 const tokensOutputWidget = { render(context, config) {
 	const label = config.label ?? "Out:";
-	const text = `${label} ${formatTokens(context.metrics.session.outputTokens)}`;
+	const text = `${label} ${formatTokens(context.metrics.totals.outputTokens)}`;
 	return {
 		text,
 		fg: config.fg,
@@ -3174,7 +3168,7 @@ const tokensOutputWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/tokens-cached.ts
 const tokensCachedWidget = { render(context, config) {
-	const cached = context.metrics.session.cacheCreationTokens + context.metrics.session.cacheReadTokens;
+	const cached = context.metrics.totals.cacheCreationTokens + context.metrics.totals.cacheReadTokens;
 	const label = config.label ?? "Cached:";
 	const text = `${label} ${formatTokens(cached)}`;
 	return {
@@ -3419,7 +3413,7 @@ const apiLatencyWidget = { render(context, config) {
 /**
 * Session input and output tokens in one segment.
 *
-* Reads `metrics.session`, the JSONL-derived cumulative totals — the same
+* Reads `metrics.totals`, the JSONL-derived cumulative totals — the same
 * source `tokens-input` and `tokens-output` read, so the three agree about
 * one session rather than contradicting each other on the same bar (#58).
 *
@@ -3431,8 +3425,8 @@ const apiLatencyWidget = { render(context, config) {
 * misreading before PR #38.
 */
 const tokenBreakdownWidget = { render(context, config) {
-	const input = context.metrics.session.inputTokens;
-	const output = context.metrics.session.outputTokens;
+	const input = context.metrics.totals.inputTokens;
+	const output = context.metrics.totals.outputTokens;
 	if (input === 0 && output === 0) return null;
 	const text = `In:${formatTokens(input)} Out:${formatTokens(output)}`;
 	return {
@@ -4296,13 +4290,13 @@ async function runCli(args) {
 async function reportToday() {
 	const files = findTodayJsonlFiles();
 	const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
-	const metrics = aggregateTokens(entries, entries);
+	const metrics = aggregateTokens(entries);
 	const pricing = await fetchPricing(864e5);
 	const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
 	const totalCost = calculateTotalCost(costByModel);
 	console.log("=== Today's Usage ===\n");
 	console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
-	console.log(`Total Tokens: ${formatTokens(metrics.today.inputTokens + metrics.today.outputTokens)}`);
+	console.log(`Total Tokens: ${formatTokens(metrics.totals.inputTokens + metrics.totals.outputTokens)}`);
 	console.log();
 	if (costByModel.size > 0) {
 		console.log("By Model:");

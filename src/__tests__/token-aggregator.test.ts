@@ -18,26 +18,33 @@ describe("aggregateTokens", () => {
     },
   ];
 
-  it("aggregates session totals", () => {
-    const result = aggregateTokens(entries, []);
-    expect(result.session.inputTokens).toBe(8000);
-    expect(result.session.outputTokens).toBe(3300);
+  it("aggregates totals across every entry", () => {
+    const result = aggregateTokens(entries);
+    expect(result.totals.inputTokens).toBe(8000);
+    expect(result.totals.outputTokens).toBe(3300);
   });
 
   it("aggregates by model", () => {
-    const result = aggregateTokens(entries, []);
+    const result = aggregateTokens(entries);
     expect(result.byModel.size).toBe(2);
     expect(result.byModel.get("claude-sonnet-4-20250514")?.inputTokens).toBe(3000);
     expect(result.byModel.get("claude-opus-4-20250514")?.inputTokens).toBe(5000);
   });
 
-  it("aggregates today's totals separately", () => {
-    const todayEntries: JsonlEntry[] = [
-      { usage: { input_tokens: 100, output_tokens: 50 } },
-    ];
-    const result = aggregateTokens([], todayEntries);
-    expect(result.today.inputTokens).toBe(100);
-    expect(result.session.inputTokens).toBe(0);
+  // An entry with usage but no `model` counts toward the totals and toward no
+  // model bucket. This asymmetry is why the cache in
+  // `today-aggregate-cache.ts` stores `totals` as well as `byModel`: the
+  // totals cannot be reconstructed by summing the buckets.
+  it("counts model-less usage in totals but not in byModel", () => {
+    const result = aggregateTokens([{ usage: { input_tokens: 100, output_tokens: 50 } }]);
+    expect(result.totals.inputTokens).toBe(100);
+    expect(result.byModel.size).toBe(0);
+  });
+
+  it("returns zeroed totals for no entries", () => {
+    const result = aggregateTokens([]);
+    expect(result.totals.inputTokens).toBe(0);
+    expect(result.byModel.size).toBe(0);
   });
 });
 

@@ -40,7 +40,7 @@ export async function runCli(args: string[]): Promise<void> {
 async function reportToday(): Promise<void> {
   const files = findTodayJsonlFiles();
   const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
-  const metrics = aggregateTokens(entries, entries);
+  const metrics = aggregateTokens(entries);
   const pricing = await fetchPricing(86400000);
   const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
   const totalCost = calculateTotalCost(costByModel);
@@ -48,7 +48,7 @@ async function reportToday(): Promise<void> {
   console.log("=== Today's Usage ===\n");
   console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
   console.log(
-    `Total Tokens: ${formatTokens(metrics.today.inputTokens + metrics.today.outputTokens)}`,
+    `Total Tokens: ${formatTokens(metrics.totals.inputTokens + metrics.totals.outputTokens)}`,
   );
   console.log();
 

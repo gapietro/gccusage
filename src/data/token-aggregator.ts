@@ -13,17 +13,13 @@ function addUsage(target: TokenMetrics, entry: JsonlEntry): void {
   target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
 }
 
-export function aggregateTokens(
-  sessionEntries: JsonlEntry[],
-  todayEntries: JsonlEntry[],
-): AggregatedMetrics {
+export function aggregateTokens(entries: JsonlEntry[]): AggregatedMetrics {
   const byModel = new Map<string, TokenMetrics>();
-  const session = emptyMetrics();
-  const today = emptyMetrics();
+  const totals = emptyMetrics();
 
-  for (const entry of sessionEntries) {
+  for (const entry of entries) {
     if (!entry.usage) continue;
-    addUsage(session, entry);
+    addUsage(totals, entry);
 
     if (entry.model) {
       let model = byModel.get(entry.model);
@@ -35,12 +31,7 @@ export function aggregateTokens(
     }
   }
 
-  for (const entry of todayEntries) {
-    if (!entry.usage) continue;
-    addUsage(today, entry);
-  }
-
-  return { byModel, session, today };
+  return { byModel, totals };
 }
 
 export function getFirstTimestamp(entries: JsonlEntry[]): number | null {

@@ -10,10 +10,13 @@ export function contextFromFixture(fx: RealPayloadFixture, homeDir: string): Ren
   );
   return {
     stdin: v.parse(StatusJsonSchema, stdinRaw),
+    // The fixture recorded `session`; the live type calls it `totals`. The
+    // recorded `today` has no counterpart — the render path no longer computes
+    // it (#94) — so it is deliberately dropped here.
     metrics: {
-      ...fx.derived.metrics,
-      byModel: new Map(fx.derived.metrics.byModel as unknown as [string, unknown][]),
-    } as RenderContext["metrics"],
+      byModel: new Map(fx.derived.metrics.byModel),
+      totals: fx.derived.metrics.session,
+    },
     block: fx.derived.block,
     burnRate: fx.derived.burnRate,
     pricing: {},

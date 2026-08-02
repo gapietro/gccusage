@@ -11,6 +11,5 @@ export interface ModelTokenMetrics extends TokenMetrics {
 
 export interface AggregatedMetrics {
   byModel: Map<string, TokenMetrics>;
-  session: TokenMetrics;
-  today: TokenMetrics;
+  totals: TokenMetrics;
 }

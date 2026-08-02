@@ -6,7 +6,7 @@ import { formatTokens } from "../utils/format.js";
 /**
  * Session input and output tokens in one segment.
  *
- * Reads `metrics.session`, the JSONL-derived cumulative totals — the same
+ * Reads `metrics.totals`, the JSONL-derived cumulative totals — the same
  * source `tokens-input` and `tokens-output` read, so the three agree about
  * one session rather than contradicting each other on the same bar (#58).
  *
@@ -19,8 +19,8 @@ import { formatTokens } from "../utils/format.js";
  */
 export const tokenBreakdownWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
-    const input = context.metrics.session.inputTokens;
-    const output = context.metrics.session.outputTokens;
+    const input = context.metrics.totals.inputTokens;
+    const output = context.metrics.totals.outputTokens;
     // Nothing measured yet (no transcript, or a session that has not billed a
     // turn): a breakdown of zero and zero is noise, so decline as before.
     if (input === 0 && output === 0) return null;

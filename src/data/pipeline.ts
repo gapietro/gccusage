@@ -42,7 +42,7 @@ export async function buildRenderContext(
   const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 
   // Aggregate tokens
-  const metrics = aggregateTokens(sessionEntries, todayEntries);
+  const metrics = aggregateTokens(sessionEntries);
 
   // Get pricing — cache-or-fallback only. Refreshing happens in a detached
   // child so the bar never waits on the network (#84).
@@ -53,7 +53,7 @@ export async function buildRenderContext(
   const session = calculateCostByModel(metrics.byModel, pricing);
   const costByModel = session.costs;
   const calculatedSessionCost = calculateTotalCost(costByModel);
-  const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
+  const today = calculateCostByModel(aggregateTokens(todayEntries).byModel, pricing);
   const calculatedTodayCost = calculateTotalCost(today.costs);
 
   // Determine cost source (cost.total_cost_usd works for both formats)
@@ -103,7 +103,7 @@ export async function buildRenderContext(
   const modelId = typeof stdin.model === "string"
     ? stdin.model
     : stdin.model?.id;
-  const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
   const burnRate =
     sessionCostSource === "stdin" ? (getStdinBurnRate(stdin) ?? jsonlBurnRate) : jsonlBurnRate;
 
