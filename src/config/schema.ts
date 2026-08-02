@@ -27,9 +27,17 @@ const WidgetConfigSchema = v.object({
 
 export type WidgetConfig = v.InferOutput<typeof WidgetConfigSchema>;
 
+// The closed option lists below are exported so the published JSON Schema can
+// be generated from the same arrays valibot validates against, rather than
+// restating them (#75). One array, two consumers: adding an option here
+// reaches both.
+export const FLEX_MODES = ["left", "right", "center", "space-between"] as const;
+export const COMPACT_MODES = ["auto", "always", "never"] as const;
+export const COST_SOURCES = ["auto", "calculated", "stdin"] as const;
+
 const LineConfigSchema = v.object({
   widgets: v.array(WidgetConfigSchema),
-  flex: v.optional(v.picklist(["left", "right", "center", "space-between"]), "left"),
+  flex: v.optional(v.picklist(FLEX_MODES), "left"),
 });
 
 export type LineConfig = v.InferOutput<typeof LineConfigSchema>;
@@ -47,7 +55,7 @@ const CacheConfigSchema = v.object({
 });
 
 const CompactConfigSchema = v.object({
-  mode: v.optional(v.picklist(["auto", "always", "never"]), "auto"),
+  mode: v.optional(v.picklist(COMPACT_MODES), "auto"),
   threshold: v.optional(v.number(), 80),
 });
 
@@ -64,7 +72,7 @@ export const SettingsSchema = v.object({
   compact: v.optional(CompactConfigSchema),
   alerts: v.optional(AlertsConfigSchema),
   cache: v.optional(CacheConfigSchema),
-  costSource: v.optional(v.picklist(["auto", "calculated", "stdin"]), "auto"),
+  costSource: v.optional(v.picklist(COST_SOURCES), "auto"),
 });
 
 /** Raw parsed settings (lines may be missing if user only overrides powerline/cache). */

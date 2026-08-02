@@ -1147,14 +1147,25 @@ const WidgetConfigSchema = object({
 	maxWidth: optional(number()),
 	priority: optional(number())
 });
+const FLEX_MODES = [
+	"left",
+	"right",
+	"center",
+	"space-between"
+];
+const COMPACT_MODES = [
+	"auto",
+	"always",
+	"never"
+];
+const COST_SOURCES = [
+	"auto",
+	"calculated",
+	"stdin"
+];
 const LineConfigSchema = object({
 	widgets: array(WidgetConfigSchema),
-	flex: optional(picklist([
-		"left",
-		"right",
-		"center",
-		"space-between"
-	]), "left")
+	flex: optional(picklist(FLEX_MODES), "left")
 });
 const PowerlineConfigSchema = object({
 	enabled: optional(boolean(), false),
@@ -1167,11 +1178,7 @@ const CacheConfigSchema = object({
 	pricingTtlMs: optional(number(), 864e5)
 });
 const CompactConfigSchema = object({
-	mode: optional(picklist([
-		"auto",
-		"always",
-		"never"
-	]), "auto"),
+	mode: optional(picklist(COMPACT_MODES), "auto"),
 	threshold: optional(number(), 80)
 });
 const AlertsConfigSchema = object({
@@ -1186,11 +1193,7 @@ const SettingsSchema = object({
 	compact: optional(CompactConfigSchema),
 	alerts: optional(AlertsConfigSchema),
 	cache: optional(CacheConfigSchema),
-	costSource: optional(picklist([
-		"auto",
-		"calculated",
-		"stdin"
-	]), "auto")
+	costSource: optional(picklist(COST_SOURCES), "auto")
 });
 
 //#endregion
