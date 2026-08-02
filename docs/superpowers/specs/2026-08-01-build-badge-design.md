@@ -104,11 +104,21 @@ snapshot-plus-concurrency design, and by 2 under this one.
 
 ## Loop guard
 
-The bot's own push carries `[skip ci]`, which GitHub honours natively for push
-events, so it does not trigger another run. The workflow also guards on
-`!contains(github.event.head_commit.message, '[skip ci]')` in case that
-behaviour is ever disabled. Consequence, and it is the intended one: the count
-measures *human* pushes.
+A push authenticated with `GITHUB_TOKEN` does not create a workflow run. That
+is GitHub's own recursion guard, it needs nothing from the workflow, and it is
+what stops the bot's commit from triggering another stamp. The job additionally
+guards on `github.actor != 'github-actions[bot]'`.
+
+The bot's commit message deliberately does **not** carry a skip marker. That
+was the first design and it failed on its own first run: GitHub's native skip
+matches the phrase anywhere in a commit message, prose included, so the merge
+commit that introduced this workflow — which only *described* the mechanism —
+skipped itself and stamped nothing. A guard that any commit message can trip by
+talking about it is not a guard.
+
+One consequence survives and cannot be fixed here: a human commit whose message
+contains the literal phrase is skipped by GitHub before this workflow is
+consulted, and that push goes uncounted.
 
 ## Accepted costs
 
