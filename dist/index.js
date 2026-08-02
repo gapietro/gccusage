@@ -1854,23 +1854,21 @@ function readJsonValidated(filePath, schema) {
 
 //#endregion
 //#region src/cache/block-cache.ts
+const BlockCacheSchema = object({ blockStartTime: number() });
 function getBlockCachePath() {
 	return path$6.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
-	try {
-		if (!fs$2.existsSync(cachePath)) return null;
-		const raw = fs$2.readFileSync(cachePath, "utf-8");
-		const data = JSON.parse(raw);
-		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+	const data = readJsonValidated(cachePath, BlockCacheSchema);
+	if (!data) return null;
+	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+		try {
 			fs$2.unlinkSync(cachePath);
-			return null;
-		}
-		return data;
-	} catch {
+		} catch {}
 		return null;
 	}
+	return data;
 }
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();

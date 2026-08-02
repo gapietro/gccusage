@@ -1,12 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 import { BLOCK_DURATION_MS } from "../types/block-metrics.js";
 
-interface BlockCacheData {
-  blockStartTime: number;
-}
+const BlockCacheSchema = v.object({
+  blockStartTime: v.number(),
+});
+
+type BlockCacheData = v.InferOutput<typeof BlockCacheSchema>;
 
 function getBlockCachePath(): string {
   return path.join(getCacheDir(), "blocks", "current.json");
@@ -14,21 +17,20 @@ function getBlockCachePath(): string {
 
 export function loadBlockCache(): BlockCacheData | null {
   const cachePath = getBlockCachePath();
-  try {
-    if (!fs.existsSync(cachePath)) return null;
-    const raw = fs.readFileSync(cachePath, "utf-8");
-    const data = JSON.parse(raw) as BlockCacheData;
+  const data = readJsonValidated(cachePath, BlockCacheSchema);
+  if (!data) return null;
 
-    // Check if block has expired
-    if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+  // Check if block has expired
+  if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+    try {
       fs.unlinkSync(cachePath);
-      return null;
+    } catch {
+      // Already gone, or a concurrent process beat us to it.
     }
-
-    return data;
-  } catch {
     return null;
   }
+
+  return data;
 }
 
 export function saveBlockCache(data: BlockCacheData): void {

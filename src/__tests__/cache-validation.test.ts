@@ -6,6 +6,7 @@ import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
+import { loadBlockCache } from "../cache/block-cache.js";
 import { runStatusline } from "../statusline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getTerminalWidth } from "../utils/terminal.js";
@@ -319,6 +320,31 @@ describe("pricing cache validation", () => {
   it("does not re-anchor cached entries against the snapshot", () => {
     writePricing({ "claude-haiku-4-5": ANCHOR_OUTLIER });
     expect(loadPricingCacheEntry()!.data["claude-haiku-4-5"]).toEqual(ANCHOR_OUTLIER);
+  });
+});
+
+describe("block cache validation", () => {
+  function writeBlockCache(contents: string): void {
+    const dir = path.join(tmpDir, "gccusage", "blocks");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "current.json"), contents);
+  }
+
+  it("loads a well-formed cache", () => {
+    writeBlockCache(JSON.stringify({ blockStartTime: Date.now() }));
+    expect(loadBlockCache()).not.toBeNull();
+  });
+
+  // The shape that would put NaN into the block-timer widget's arithmetic:
+  // right key, wrong type.
+  it("rebuilds when blockStartTime is not a number", () => {
+    writeBlockCache(JSON.stringify({ blockStartTime: "not-a-number" }));
+    expect(loadBlockCache()).toBeNull();
+  });
+
+  it("rebuilds from a bare null document", () => {
+    writeBlockCache("null");
+    expect(loadBlockCache()).toBeNull();
   });
 });
 
