@@ -70,3 +70,67 @@ describe("runStatusline caching", () => {
     expect(second).not.toBe(first);
   });
 });
+
+// The key used to be (sessionId, costUsd, terminalWidth), so any other input
+// that changed the bar was served stale for up to the TTL (#96). vim.mode is
+// the sharpest case: it ships in the default layout and changes with no
+// accompanying cost change.
+describe("cache key covers the inputs that change the bar (#96)", () => {
+  const base = {
+    session_id: "session-a",
+    cost: { total_cost_usd: 1.25 },
+    vim: { mode: "NORMAL" },
+    workspace: { project_dir: "/tmp/project-one" },
+    context_window: { used_percentage: 40 },
+  };
+
+  it("re-renders when vim.mode changes within the TTL", async () => {
+    const first = await runStatusline(base, DEFAULT_SETTINGS);
+
+    const second = await runStatusline(
+      { ...base, vim: { mode: "INSERT" } },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  it("re-renders when the project directory changes within the TTL", async () => {
+    const first = await runStatusline(base, DEFAULT_SETTINGS);
+
+    const second = await runStatusline(
+      { ...base, workspace: { project_dir: "/tmp/project-two" } },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  it("re-renders when the context percentage changes within the TTL", async () => {
+    const first = await runStatusline(base, DEFAULT_SETTINGS);
+
+    const second = await runStatusline(
+      { ...base, context_window: { used_percentage: 41 } },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  // The counterweight to the three above: the session timers tick on every
+  // spawn, so keying on them would miss every time and re-read the whole
+  // transcript set on each render (#94). Their staleness is the TTL's job.
+  it("serves the cache while only the session timers tick", async () => {
+    const first = await runStatusline(
+      { ...base, cost: { ...base.cost, total_duration_ms: 60000, total_api_duration_ms: 9000 } },
+      DEFAULT_SETTINGS,
+    );
+
+    const second = await runStatusline(
+      { ...base, cost: { ...base.cost, total_duration_ms: 61000, total_api_duration_ms: 9400 } },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(second).toBe(first);
+  });
+});

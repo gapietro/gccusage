@@ -27,6 +27,7 @@ import tty from "node:tty";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as crypto from "node:crypto";
+import { createHash } from "node:crypto";
 
 //#region node_modules/valibot/dist/index.mjs
 let store$4;
@@ -4101,47 +4102,91 @@ function isSeparatorOutput(output) {
 const CacheEntrySchema = object({
 	output: string(),
 	timestamp: number(),
-	sessionId: optional(string()),
-	costUsd: optional(number()),
-	terminalWidth: optional(number())
+	key: string()
 });
 function getCachePath() {
 	return path$1.join(getCacheDir(), "statusline-cache.json");
 }
-function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
+function checkCache(ttlMs, key) {
 	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
 	if (!entry) return null;
-	if (entry.sessionId !== sessionId) return null;
-	if (entry.costUsd !== costUsd) return null;
-	if (entry.terminalWidth !== terminalWidth) return null;
+	if (entry.key !== key) return null;
 	if (Date.now() - entry.timestamp > ttlMs) return null;
 	return entry.output;
 }
-function writeCache(output, sessionId, costUsd, terminalWidth) {
+function writeCache(output, key) {
 	const cachePath = getCachePath();
 	try {
 		const entry = {
 			output,
 			timestamp: Date.now(),
-			sessionId,
-			costUsd,
-			terminalWidth
+			key
 		};
 		writeJsonAtomic(cachePath, entry);
 	} catch {}
 }
 
 //#endregion
+//#region src/cache/cache-key.ts
+/**
+* Fields deliberately excluded from the cache key.
+*
+* Both are wall-clock counters that Claude Code recomputes on every spawn, so
+* keying on them would miss on every render — and each miss re-reads and
+* re-parses the whole transcript set (#94). Bounding their staleness is what
+* the TTL is for: `session-timer` and `api-latency` can lag by up to one TTL,
+* which is invisible on a counter that is already a duration.
+*
+* Nothing else is excluded. The key is built by removing from the payload
+* rather than by listing what to include, so a widget that starts reading a
+* field it did not read before is covered without anyone remembering to
+* extend a tuple — which is how the original key fell behind (#96).
+*/
+const VOLATILE_COST_FIELDS = ["total_duration_ms", "total_api_duration_ms"];
+/**
+* Serialise with object keys in sorted order, so two payloads that differ only
+* in property order hash the same. `JSON.stringify` alone preserves insertion
+* order, and the stdin object's order is whatever the upstream JSON had.
+*/
+function stableStringify(value) {
+	if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+	const entries = Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
+	return `{${entries.join(",")}}`;
+}
+/**
+* The identity of a rendered bar: every stdin input the render can depend on,
+* plus the terminal width the layout was computed against.
+*
+* Not included, deliberately: the git branch and working-tree status, which
+* live on disk rather than in stdin. Reading them would mean spawning git on
+* every invocation, including the cache hits this exists to make cheap; their
+* staleness stays TTL-bounded.
+*/
+function computeCacheKey(stdin, terminalWidth) {
+	const { ...rest } = stdin;
+	if (rest.cost && typeof rest.cost === "object") {
+		const cost = { ...rest.cost };
+		for (const field of VOLATILE_COST_FIELDS) delete cost[field];
+		rest.cost = cost;
+	}
+	const payload = stableStringify({
+		stdin: rest,
+		terminalWidth
+	});
+	return createHash("sha256").update(payload).digest("hex");
+}
+
+//#endregion
 //#region src/statusline.ts
 async function runStatusline(stdin, settings) {
-	const sessionId = stdin.session_id;
-	const stdinCost = stdin.cost?.total_cost_usd;
 	const terminalWidth = getTerminalWidth();
-	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, sessionId, stdinCost, terminalWidth);
+	const key = computeCacheKey(stdin, terminalWidth);
+	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, key);
 	if (cached !== null) return cached;
 	const context = await buildRenderContext(stdin, settings);
 	const output = renderStatusline(context, settings);
-	writeCache(output, sessionId, stdinCost, terminalWidth);
+	writeCache(output, key);
 	return output;
 }
 
