@@ -158,3 +158,58 @@ describe("calculateBurnRate", () => {
     ).toBeNull();
   });
 });
+
+describe("findPricing fuzzy tie-break (#91)", () => {
+  const alias: ModelPricing = {
+    inputCostPerToken: 15 / 1_000_000,
+    outputCostPerToken: 75 / 1_000_000,
+    cacheCreationCostPerToken: 18.75 / 1_000_000,
+    cacheReadCostPerToken: 1.5 / 1_000_000,
+  };
+  const specific: ModelPricing = {
+    inputCostPerToken: 5 / 1_000_000,
+    outputCostPerToken: 25 / 1_000_000,
+    cacheCreationCostPerToken: 6.25 / 1_000_000,
+    cacheReadCostPerToken: 0.5 / 1_000_000,
+  };
+
+  const MODEL = "claude-opus-4-5-20251101-v1:0";
+
+  // Both keys substring-match the model. First-match-wins made the answer a
+  // function of upstream key ordering: one bare alias added to the feed ahead
+  // of the dated key charged a 4.5 session at 4.x rates, a 3x overcharge.
+  it("picks the same price regardless of key insertion order", () => {
+    const aliasFirst: PricingTable = {
+      "claude-opus-4": alias,
+      "claude-opus-4-5-20251101": specific,
+    };
+    const specificFirst: PricingTable = {
+      "claude-opus-4-5-20251101": specific,
+      "claude-opus-4": alias,
+    };
+
+    expect(findPricing(MODEL, aliasFirst)).toEqual(findPricing(MODEL, specificFirst));
+  });
+
+  it("resolves to the more specific key, not the bare alias", () => {
+    const table: PricingTable = {
+      "claude-opus-4": alias,
+      "claude-opus-4-5-20251101": specific,
+    };
+
+    expect(findPricing(MODEL, table)!.inputCostPerToken).toBe(5 / 1_000_000);
+  });
+
+  it("still prefers an exact match over any fuzzy candidate", () => {
+    const table: PricingTable = {
+      "claude-opus-4-5-20251101-v1:0-extra-long-key": alias,
+      [MODEL]: specific,
+    };
+
+    expect(findPricing(MODEL, table)).toBe(specific);
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(findPricing("gpt-4", { "claude-opus-4": alias })).toBeNull();
+  });
+});

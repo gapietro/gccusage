@@ -2250,8 +2250,12 @@ function findPricing(model, table) {
 	if (table[model]) return table[model];
 	const stripped = model.replace(/^claude\//, "");
 	if (table[stripped]) return table[stripped];
-	for (const key of Object.keys(table)) if (key.includes(model) || model.includes(key)) return table[key];
-	return null;
+	let best = null;
+	for (const key of Object.keys(table)) {
+		if (!key.includes(model) && !model.includes(key)) continue;
+		if (best === null || key.length > best.length || key.length === best.length && key < best) best = key;
+	}
+	return best === null ? null : table[best];
 }
 function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionModel) {
 	if (!sessionStartTime) return null;
