@@ -10,21 +10,18 @@ import { ensureDir } from "./paths.js";
 let counter = 0;
 
 /**
- * Write JSON to `filePath` so that readers see either the previous contents
- * or the new ones, never a partial file: serialise into a uniquely named
- * sibling, then rename it over the target. Same directory means same
- * filesystem, which is what makes the rename atomic.
- *
- * Throws on failure; callers keep whatever error posture they already have.
+ * The same atomicity guarantee as `writeJsonAtomic`, for content that is
+ * already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
+ * a file the user reads and edits, so it keeps its 2-space indentation and
+ * trailing newline rather than the compact encoding `writeJsonAtomic` emits.
  */
-export function writeJsonAtomic(filePath: string, data: unknown): void {
+export function writeFileAtomic(filePath: string, contents: string): void {
   const dir = path.dirname(filePath);
   ensureDir(dir);
 
-  const serialised = JSON.stringify(data);
   const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 
-  fs.writeFileSync(tmpPath, serialised, "utf-8");
+  fs.writeFileSync(tmpPath, contents, "utf-8");
   try {
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
@@ -35,6 +32,18 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
     }
     throw err;
   }
+}
+
+/**
+ * Write JSON to `filePath` so that readers see either the previous contents
+ * or the new ones, never a partial file: serialise into a uniquely named
+ * sibling, then rename it over the target. Same directory means same
+ * filesystem, which is what makes the rename atomic.
+ *
+ * Throws on failure; callers keep whatever error posture they already have.
+ */
+export function writeJsonAtomic(filePath: string, data: unknown): void {
+  writeFileAtomic(filePath, JSON.stringify(data));
 }
 
 /**

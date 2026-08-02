@@ -14,7 +14,7 @@ A powerline-style statusline for [Claude Code](https://claude.com/claude-code). 
 
 ## Prerequisites
 
-- **Node.js 18+** — check with `node -v`
+- **Node.js 22+** — check with `node -v`
 - **Claude Code** installed and working
 
 ## Quick Start
@@ -62,7 +62,7 @@ gccusage setup
 
 ### Deploy to another machine
 
-1. Install Node.js 18+ (e.g. `brew install node` on macOS)
+1. Install Node.js 22+ (e.g. `brew install node` on macOS)
 2. Clone the repo: `git clone https://github.com/gapietro/gccusage.git`
 3. `cd gccusage && npm install && npm link`
 4. `gccusage setup`
@@ -70,7 +70,7 @@ gccusage setup
 
 ### What `gccusage setup` does
 
-Adds the following to `~/.claude/settings.json` (creates the file if missing, preserves existing settings):
+Adds the following to `~/.claude/settings.json` (creates the file if missing, preserves existing settings). If the file already exists, it writes a `settings.json.bak` backup of the previous contents before making any changes. If the existing file is not a JSON object (e.g. `null`, a bare string, an array) or is not valid JSON at all, `setup` refuses to touch it, exits with status 1, and leaves it exactly as it was:
 
 ```json
 {
@@ -451,10 +451,10 @@ Claude Code straight at that file, so anyone upgrading with `git pull` runs it
 without ever building. Rebuild and stage it in the same commit as any `src/`
 change, or the change reaches nobody.
 
-The tool itself runs on Node 18+. The files under `scripts/` are TypeScript run
-directly by Node, so those need 23.6+ (or a 22.x with type stripping
-backported); the tests that spawn them skip themselves on older versions rather
-than failing.
+The tool itself and the `scripts/` tooling share one floor: Node 22. The files
+under `scripts/` are TypeScript run directly by Node, so those specifically
+need 22.18+, the release where type stripping runs unflagged; the tests that
+spawn them skip themselves on older versions rather than failing.
 
 ## Uninstall
 

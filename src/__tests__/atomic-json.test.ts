@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as v from "valibot";
-import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
+import { writeJsonAtomic, writeFileAtomic, readJsonValidated } from "../utils/atomic-json.js";
 
 let tmpDir: string;
 
@@ -54,6 +54,40 @@ describe("writeJsonAtomic", () => {
 
     expect(() => writeJsonAtomic(target, { a: 1 })).toThrow();
     expect(siblings(tmpDir)).toEqual(["store.json"]);
+  });
+});
+
+describe("writeFileAtomic", () => {
+  it("writes the exact bytes given, with no JSON encoding", () => {
+    const target = path.join(tmpDir, "settings.json");
+    const contents = '{\n  "model": "opus"\n}\n';
+
+    writeFileAtomic(target, contents);
+
+    expect(fs.readFileSync(target, "utf-8")).toBe(contents);
+  });
+
+  it("creates the parent directory when it does not exist", () => {
+    const target = path.join(tmpDir, "nested", "deeper", "settings.json");
+    writeFileAtomic(target, "hello");
+    expect(fs.readFileSync(target, "utf-8")).toBe("hello");
+  });
+
+  it("leaves no temporary file behind on success", () => {
+    const target = path.join(tmpDir, "settings.json");
+    writeFileAtomic(target, "hello");
+    expect(siblings(tmpDir)).toEqual(["settings.json"]);
+  });
+
+  it("removes the temporary file and rethrows when the rename fails", () => {
+    // A directory at the target path makes renameSync fail after the temp
+    // file has already been written — the one path that can leak a temp file.
+    const target = path.join(tmpDir, "settings.json");
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, "occupant"), "keeps the directory non-empty");
+
+    expect(() => writeFileAtomic(target, "hello")).toThrow();
+    expect(siblings(tmpDir)).toEqual(["settings.json"]);
   });
 });
 

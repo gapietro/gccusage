@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -6,7 +7,8 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
 import * as path$7 from "node:path";
@@ -1480,11 +1482,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$9.join(xdg, "gccusage");
-	return path$9.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$9.join(getConfigDir(), "settings.json");
+	return path$10.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1526,10 +1528,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1579,31 +1581,31 @@ function formatStdinError(error) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$8.isAbsolute(home)) return home;
+	if (path$9.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$8.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$8.join(getHomeDir(), ".claude");
+	return path$9.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$8.join(getClaudeDataDir(), "projects");
+	return path$9.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$8.join(xdg, "gccusage");
-	return path$8.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$9.join(xdg, "gccusage");
+	return path$9.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
+	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$5.existsSync(dir)) return [];
+	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1611,33 +1613,33 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$9.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$8.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$9.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$5.statSync(f);
+				const fstat = fs$6.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1648,9 +1650,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$4.existsSync(filePath)) return [];
+	if (!fs$5.existsSync(filePath)) return [];
 	try {
-		const content = fs$4.readFileSync(filePath, "utf-8");
+		const content = fs$5.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1802,6 +1804,26 @@ const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 //#region src/utils/atomic-json.ts
 let counter = 0;
 /**
+* The same atomicity guarantee as `writeJsonAtomic`, for content that is
+* already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
+* a file the user reads and edits, so it keeps its 2-space indentation and
+* trailing newline rather than the compact encoding `writeJsonAtomic` emits.
+*/
+function writeFileAtomic(filePath, contents) {
+	const dir = path$8.dirname(filePath);
+	ensureDir(dir);
+	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
+	fs$4.writeFileSync(tmpPath, contents, "utf-8");
+	try {
+		fs$4.renameSync(tmpPath, filePath);
+	} catch (err) {
+		try {
+			fs$4.unlinkSync(tmpPath);
+		} catch {}
+		throw err;
+	}
+}
+/**
 * Write JSON to `filePath` so that readers see either the previous contents
 * or the new ones, never a partial file: serialise into a uniquely named
 * sibling, then rename it over the target. Same directory means same
@@ -1810,19 +1832,7 @@ let counter = 0;
 * Throws on failure; callers keep whatever error posture they already have.
 */
 function writeJsonAtomic(filePath, data) {
-	const dir = path$7.dirname(filePath);
-	ensureDir(dir);
-	const serialised = JSON.stringify(data);
-	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$3.writeFileSync(tmpPath, serialised, "utf-8");
-	try {
-		fs$3.renameSync(tmpPath, filePath);
-	} catch (err) {
-		try {
-			fs$3.unlinkSync(tmpPath);
-		} catch {}
-		throw err;
-	}
+	writeFileAtomic(filePath, JSON.stringify(data));
 }
 /**
 * Read a JSON file and validate it, or get nothing. Every cache file in this
@@ -1838,7 +1848,7 @@ function writeJsonAtomic(filePath, data) {
 function readJsonValidated(filePath, schema) {
 	let raw;
 	try {
-		raw = fs$3.readFileSync(filePath, "utf-8");
+		raw = fs$4.readFileSync(filePath, "utf-8");
 	} catch {
 		return null;
 	}
@@ -1856,7 +1866,7 @@ function readJsonValidated(filePath, schema) {
 //#region src/cache/block-cache.ts
 const BlockCacheSchema = object({ blockStartTime: number() });
 function getBlockCachePath() {
-	return path$6.join(getCacheDir(), "blocks", "current.json");
+	return path$7.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
@@ -1864,7 +1874,7 @@ function loadBlockCache() {
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
 		try {
-			fs$2.unlinkSync(cachePath);
+			fs$3.unlinkSync(cachePath);
 		} catch {}
 		return null;
 	}
@@ -2151,7 +2161,7 @@ const PricingCacheSchema = object({
 	data: record(string(), unknown())
 });
 function getCachePath$1() {
-	return path$5.join(getCacheDir(), "pricing.json");
+	return path$6.join(getCacheDir(), "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -2308,11 +2318,11 @@ async function fetchPricing(ttlMs) {
 */
 const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 function stampPath() {
-	return path$4.join(getCacheDir(), "pricing-refresh-attempt.json");
+	return path$5.join(getCacheDir(), "pricing-refresh-attempt.json");
 }
 function attemptedRecently() {
 	try {
-		const raw = fs$1.readFileSync(stampPath(), "utf-8");
+		const raw = fs$2.readFileSync(stampPath(), "utf-8");
 		const stamp = JSON.parse(raw);
 		if (typeof stamp?.timestamp !== "number") return false;
 		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
@@ -2500,10 +2510,10 @@ const LegacyEntrySchema = object({
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function getShardDir() {
-	return path$3.join(getCacheDir(), "daily");
+	return path$4.join(getCacheDir(), "daily");
 }
 function getLegacyPath() {
-	return path$3.join(getCacheDir(), "daily-costs.json");
+	return path$4.join(getCacheDir(), "daily-costs.json");
 }
 /**
 * One file per session, so a render only ever writes its own session's data.
@@ -2512,7 +2522,7 @@ function getLegacyPath() {
 */
 function shardPath(sessionId) {
 	const key = SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-	return path$3.join(getShardDir(), `${key}.json`);
+	return path$4.join(getShardDir(), `${key}.json`);
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -2528,10 +2538,10 @@ function dateStr(d) {
 */
 function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
-	if (!fs.existsSync(legacyPath)) return;
+	if (!fs$1.existsSync(legacyPath)) return;
 	let raw;
 	try {
-		raw = fs.readFileSync(legacyPath, "utf-8");
+		raw = fs$1.readFileSync(legacyPath, "utf-8");
 	} catch {
 		return;
 	}
@@ -2550,7 +2560,7 @@ function migrateLegacyStore(now) {
 			if (!parsed.success) continue;
 			const s = parsed.output;
 			const target = shardPath(s.sessionId);
-			if (fs.existsSync(target)) continue;
+			if (fs$1.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
 				date,
@@ -2565,7 +2575,7 @@ function migrateLegacyStore(now) {
 		return;
 	}
 	try {
-		fs.unlinkSync(legacyPath);
+		fs$1.unlinkSync(legacyPath);
 	} catch {}
 }
 /**
@@ -2577,19 +2587,19 @@ function readEntries(now) {
 	migrateLegacyStore(now);
 	let files;
 	try {
-		files = fs.readdirSync(getShardDir());
+		files = fs$1.readdirSync(getShardDir());
 	} catch {
 		return [];
 	}
 	const entries = [];
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
-		const fullPath = path$3.join(getShardDir(), file);
+		const fullPath = path$4.join(getShardDir(), file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
 		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
 			try {
-				fs.unlinkSync(fullPath);
+				fs$1.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
@@ -2645,7 +2655,7 @@ const TurnDataSchema = object({
 	count: number()
 });
 function getTurnPath() {
-	return path$2.join(getCacheDir(), "turn-count.json");
+	return path$3.join(getCacheDir(), "turn-count.json");
 }
 /**
 * Increment and return the turn count for the given session.
@@ -3237,7 +3247,7 @@ const projectWidget = { render(context, config) {
 	if (!projectDir) return null;
 	const dir = projectDir.replace(/\/+$/, "") || "/";
 	const home = getHomeDir();
-	const name = dir === home ? "~" : path$1.basename(dir) || "/";
+	const name = dir === home ? "~" : path$2.basename(dir) || "/";
 	const label = config.label ?? "";
 	const text = label ? `${label} ${name}` : name;
 	return {
@@ -4096,7 +4106,7 @@ const CacheEntrySchema = object({
 	terminalWidth: optional(number())
 });
 function getCachePath() {
-	return path.join(getCacheDir(), "statusline-cache.json");
+	return path$1.join(getCacheDir(), "statusline-cache.json");
 }
 function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
 	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
@@ -4133,6 +4143,86 @@ async function runStatusline(stdin, settings) {
 	const output = renderStatusline(context, settings);
 	writeCache(output, sessionId, stdinCost, terminalWidth);
 	return output;
+}
+
+//#endregion
+//#region src/utils/node-path.ts
+/**
+* A path segment naming a specific Node version — the thing that makes an
+* interpreter path expire. Homebrew's Cellar, nvm, nodenv and volta all
+* encode the version this way, so one pattern covers every layout that has
+* the problem. Homebrew's per-major symlink (`opt/node@22/bin/node`) is
+* deliberately not matched: brew re-points it on upgrade, so it is stable.
+* fnm's install tree does encode a version the same way, but its live PATH
+* entry does not — that layout is rejected separately, by
+* `isSessionScoped` below.
+*/
+const VERSION_SEGMENT = /\/(v?\d+\.\d+\.\d+[^/]*)/;
+function versionSegment(p) {
+	return VERSION_SEGMENT.exec(p)?.[1] ?? null;
+}
+/**
+* fnm puts the *active* Node's bin directory on PATH via
+* `$FNM_MULTISHELL_PATH/bin`, a directory named after the shell session
+* (e.g. `~/.local/state/fnm_multishells/38561_1712345678901/bin`, or `/tmp`
+* on older fnm). It carries no version segment, so `versionSegment` alone
+* would call it stable — but it does not survive a reboot, let alone a Node
+* upgrade. That is worse than the `execPath` + warning fallback, which at
+* least lasts until the version is actually removed. Reject it explicitly so
+* resolution falls through to that fallback instead.
+*/
+function isSessionScoped(p) {
+	return p.includes("fnm_multishells");
+}
+function defaultProbe() {
+	return {
+		execPath: process.execPath,
+		pathEntries: (process.env["PATH"] ?? "").split(path.delimiter).filter((entry) => entry.length > 0),
+		realpath: (p) => fs.realpathSync(p)
+	};
+}
+function versionWarning(version) {
+	return `Warning: this Node path contains a version (${version}) and will stop working when that version is removed. Re-run \`gccusage setup\` after upgrading Node.`;
+}
+/**
+* The interpreter path to persist in `statusLine.command`.
+*
+* `process.execPath` is the obvious choice and the wrong one: Node resolves
+* symlinks for it, so on Homebrew it reports the Cellar path that the next
+* `brew upgrade node` deletes, silently breaking the statusline (#90). Bare
+* `node` was the alternative considered and rejected — Claude Code also runs
+* as a desktop app, which may spawn with a minimal PATH that omits
+* `/opt/homebrew/bin`.
+*/
+function resolveStableNodePath(probe = defaultProbe()) {
+	const version = versionSegment(probe.execPath);
+	if (version === null) return { path: probe.execPath };
+	let target;
+	try {
+		target = probe.realpath(probe.execPath);
+	} catch {
+		return {
+			path: probe.execPath,
+			warning: versionWarning(version)
+		};
+	}
+	for (const dir of probe.pathEntries) {
+		if (!path.isAbsolute(dir)) continue;
+		if (isSessionScoped(dir)) continue;
+		const candidate = path.join(dir, "node");
+		if (versionSegment(candidate) !== null) continue;
+		let resolved;
+		try {
+			resolved = probe.realpath(candidate);
+		} catch {
+			continue;
+		}
+		if (resolved === target) return { path: candidate };
+	}
+	return {
+		path: probe.execPath,
+		warning: versionWarning(version)
+	};
 }
 
 //#endregion
@@ -4190,28 +4280,65 @@ function shellQuote(p) {
 function buildStatusLineCommand(execPath, scriptPath) {
 	return `${shellQuote(execPath)} ${shellQuote(scriptPath)}`;
 }
+const FIX_HINT = "Fix or move it, then re-run `gccusage setup`.";
+function describeNonObject(value) {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "a JSON array";
+	return `a JSON ${typeof value}`;
+}
+function messageOf(err) {
+	return err instanceof Error ? err.message : String(err);
+}
+/**
+* The user's settings, plus the bytes they came from, or null when the file
+* does not exist yet.
+*
+* Anything we cannot read as a JSON object is refused rather than replaced.
+* This file holds the user's permissions, hooks, MCP servers and model
+* selection; a convenience command has no business overwriting it with
+* `{statusLine}` on the strength of a `.bak` the user does not know exists
+* (#88). Note that an array root does not throw on assignment — it silently
+* loses the key at `JSON.stringify` — so it must be rejected explicitly.
+*/
+function readExistingSettings(settingsPath) {
+	if (!existsSync(settingsPath)) return null;
+	let raw;
+	try {
+		raw = readFileSync(settingsPath, "utf8");
+	} catch (err) {
+		throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`);
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (err) {
+		throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`);
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error(`${settingsPath} contains ${describeNonObject(parsed)}, not a JSON object. ${FIX_HINT}`);
+	return {
+		settings: parsed,
+		raw
+	};
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
-	const claudeDir = resolve(homedir(), ".claude");
-	const settingsPath = resolve(claudeDir, "settings.json");
-	if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-	let settings = {};
-	if (existsSync(settingsPath)) try {
-		settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-	} catch {
-		console.error(`Warning: Could not parse ${settingsPath}, creating backup and starting fresh`);
-		writeFileSync(`${settingsPath}.bak`, readFileSync(settingsPath));
-		settings = {};
-	}
-	const command = buildStatusLineCommand(process.execPath, scriptPath);
-	settings.statusLine = {
+	const settingsPath = resolve(homedir(), ".claude", "settings.json");
+	const existing = readExistingSettings(settingsPath);
+	const settings = existing?.settings ?? {};
+	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw);
+	const node = resolveStableNodePath();
+	const command = buildStatusLineCommand(node.path, scriptPath);
+	settings["statusLine"] = {
 		type: "command",
 		command
 	};
-	writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 	console.log("gccusage setup complete!\n");
 	console.log(`  Settings: ${settingsPath}`);
-	console.log(`  Command:  ${command}\n`);
+	console.log(`  Command:  ${command}`);
+	if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
+	console.log();
+	if (node.warning) console.log(`${node.warning}\n`);
 	console.log("Restart Claude Code to activate the statusline.");
 }
 function printHelp() {
@@ -4236,7 +4363,12 @@ Config: ~/.config/gccusage/settings.json`);
 async function main() {
 	const args = process.argv.slice(2);
 	if (args.length > 0) {
-		await runCli(args);
+		try {
+			await runCli(args);
+		} catch (err) {
+			console.error(`gccusage: ${err instanceof Error ? err.message : String(err)}`);
+			process.exitCode = 1;
+		}
 		return;
 	}
 	const { settings, error } = loadSettings();

@@ -97,3 +97,90 @@ describe("gccusage today", () => {
     expect(lines.join("\n")).not.toMatch(/no pricing/i);
   });
 });
+
+describe("gccusage setup", () => {
+  let tmpDir: string;
+  let originalHome: string | undefined;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  const settingsPath = (): string => path.join(tmpDir, ".claude", "settings.json");
+  const backupPath = (): string => `${settingsPath()}.bak`;
+  const read = (p: string): string => fs.readFileSync(p, "utf8");
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-"));
+    originalHome = process.env["HOME"];
+    process.env["HOME"] = tmpDir;
+    fs.mkdirSync(path.join(tmpDir, ".claude"), { recursive: true });
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("adds statusLine without disturbing unrelated keys", async () => {
+    fs.writeFileSync(
+      settingsPath(),
+      JSON.stringify({ model: "opus", permissions: { allow: ["Bash"] } }),
+    );
+
+    await runCli(["setup"]);
+
+    const after = JSON.parse(read(settingsPath()));
+    expect(after.model).toBe("opus");
+    expect(after.permissions).toEqual({ allow: ["Bash"] });
+    expect(after.statusLine.type).toBe("command");
+    expect(after.statusLine.command).toContain("index.js");
+  });
+
+  it("writes a backup holding the exact pre-setup bytes", async () => {
+    const before = '{\n  "model": "opus"\n}\n';
+    fs.writeFileSync(settingsPath(), before);
+
+    await runCli(["setup"]);
+
+    expect(read(backupPath())).toBe(before);
+  });
+
+  it("writes settings.json as indented JSON with a trailing newline", async () => {
+    await runCli(["setup"]);
+
+    const raw = read(settingsPath());
+    expect(raw.endsWith("\n")).toBe(true);
+    expect(raw).toContain('\n  "statusLine"');
+  });
+
+  it("creates settings.json when none exists, and takes no backup", async () => {
+    await runCli(["setup"]);
+
+    expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
+    expect(fs.existsSync(backupPath())).toBe(false);
+  });
+
+  // #88: each of these previously exited 0 having written nothing (null,
+  // scalar) or having silently dropped statusLine (array).
+  it.each([
+    ["a null document", "null", "not a JSON object"],
+    ["a bare string", '"oops"', "not a JSON object"],
+    ["an array root", "[]", "not a JSON object"],
+    ["malformed JSON", "{oops", "not valid JSON"],
+  ])("refuses %s and changes nothing", async (_label, contents, expectedMessage) => {
+    fs.writeFileSync(settingsPath(), contents);
+
+    await expect(runCli(["setup"])).rejects.toThrow(expectedMessage);
+
+    expect(read(settingsPath())).toBe(contents);
+    expect(fs.existsSync(backupPath())).toBe(false);
+  });
+
+  it("names the offending file and how to recover", async () => {
+    fs.writeFileSync(settingsPath(), "null");
+
+    await expect(runCli(["setup"])).rejects.toThrow(settingsPath());
+    await expect(runCli(["setup"])).rejects.toThrow("re-run `gccusage setup`");
+  });
+});

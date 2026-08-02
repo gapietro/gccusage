@@ -4,10 +4,12 @@ import { aggregateTokens } from "./data/token-aggregator.js";
 import { fetchPricing, refreshPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { writeFileAtomic } from "./utils/atomic-json.js";
+import { resolveStableNodePath } from "./utils/node-path.js";
 
 export async function runCli(args: string[]): Promise<void> {
   const command = args[0] ?? "today";
@@ -82,44 +84,84 @@ export function buildStatusLineCommand(execPath: string, scriptPath: string): st
   return `${shellQuote(execPath)} ${shellQuote(scriptPath)}`;
 }
 
+const FIX_HINT = "Fix or move it, then re-run `gccusage setup`.";
+
+function describeNonObject(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a JSON array";
+  return `a JSON ${typeof value}`;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The user's settings, plus the bytes they came from, or null when the file
+ * does not exist yet.
+ *
+ * Anything we cannot read as a JSON object is refused rather than replaced.
+ * This file holds the user's permissions, hooks, MCP servers and model
+ * selection; a convenience command has no business overwriting it with
+ * `{statusLine}` on the strength of a `.bak` the user does not know exists
+ * (#88). Note that an array root does not throw on assignment — it silently
+ * loses the key at `JSON.stringify` — so it must be rejected explicitly.
+ */
+function readExistingSettings(
+  settingsPath: string,
+): { settings: Record<string, unknown>; raw: string } | null {
+  if (!existsSync(settingsPath)) return null;
+
+  let raw: string;
+  try {
+    raw = readFileSync(settingsPath, "utf8");
+  } catch (err) {
+    throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`);
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `${settingsPath} contains ${describeNonObject(parsed)}, not a JSON object. ${FIX_HINT}`,
+    );
+  }
+
+  return { settings: parsed as Record<string, unknown>, raw };
+}
+
 function runSetup(): void {
   // Resolve the absolute path to this script's dist/index.js
-  const scriptPath = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "index.js",
-  );
+  const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
+  const settingsPath = resolve(homedir(), ".claude", "settings.json");
 
-  const claudeDir = resolve(homedir(), ".claude");
-  const settingsPath = resolve(claudeDir, "settings.json");
+  // Validate before writing anything at all: a refused file leaves no .bak
+  // and no partial write.
+  const existing = readExistingSettings(settingsPath);
+  const settings = existing?.settings ?? {};
 
-  // Ensure ~/.claude/ exists
-  if (!existsSync(claudeDir)) {
-    mkdirSync(claudeDir, { recursive: true });
-  }
+  // The backup is for the success path — the common case, and the one that
+  // previously got none (#89).
+  if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw);
 
-  // Read existing settings or start fresh
-  let settings: Record<string, unknown> = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch {
-      console.error(
-        `Warning: Could not parse ${settingsPath}, creating backup and starting fresh`,
-      );
-      writeFileSync(`${settingsPath}.bak`, readFileSync(settingsPath));
-      settings = {};
-    }
-  }
+  const node = resolveStableNodePath();
+  const command = buildStatusLineCommand(node.path, scriptPath);
+  settings["statusLine"] = { type: "command", command };
 
-  // Merge statusLine config without overwriting other settings
-  const command = buildStatusLineCommand(process.execPath, scriptPath);
-  settings.statusLine = { type: "command", command };
-
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  // Indented with a trailing newline: this is a file the user reads and edits.
+  writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
   console.log("gccusage setup complete!\n");
   console.log(`  Settings: ${settingsPath}`);
-  console.log(`  Command:  ${command}\n`);
+  console.log(`  Command:  ${command}`);
+  if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
+  console.log();
+  if (node.warning) console.log(`${node.warning}\n`);
   console.log("Restart Claude Code to activate the statusline.");
 }
 
