@@ -72,14 +72,57 @@ export function findPricing(model: string, table: PricingTable): ModelPricing | 
   const stripped = model.replace(/^claude\//, "");
   if (table[stripped]) return table[stripped];
 
-  // Fuzzy match: find a key that contains the model base name
+  // Fuzzy match. A key can match in two directions: forward, where the model
+  // id is a longer, provider-qualified string containing a shorter table key
+  // ("claude-opus-5[1m]" -> "claude-opus-5", or a Bedrock/Vertex id like
+  // "us.anthropic.claude-sonnet-4-5-20250929-v1:0" -> the dated key); or
+  // reverse, where the table key instead contains the model. Every
+  // legitimate resolution here is forward. Reverse is the direction a
+  // poisoned pricing feed exploits: a newly introduced superset alias key
+  // that is absent from FALLBACK_PRICING skips snapshot anchoring entirely
+  // (anchorToSnapshot only checks keys present in the snapshot, #91) and can
+  // still win on length against a shorter, correctly anchored key by
+  // matching in reverse. Ranking forward above reverse closes that path
+  // without touching bounds or anchoring — reverse is kept only as a
+  // fallback for callers with no forward candidate, so no legitimate
+  // resolution is lost.
+  //
+  // Within a direction, longest key wins, lexicographic on ties.
+  // First-match-wins made the result a function of the upstream table's key
+  // ordering (#91): a bare "claude-opus-4" alias appearing before
+  // "claude-opus-4-5-20251101" priced a 4.5 session at 4.x rates. This makes
+  // the result deterministic regardless of key ordering, using length as an
+  // approximation of specificity — it is not a guarantee that the longest
+  // match is the correct one.
+  let best: string | null = null;
+  let bestIsForward = false;
   for (const key of Object.keys(table)) {
-    if (key.includes(model) || model.includes(key)) {
-      return table[key]!;
+    const forward = model.includes(key);
+    const reverse = !forward && key.includes(model);
+    if (!forward && !reverse) continue;
+
+    if (best === null) {
+      best = key;
+      bestIsForward = forward;
+      continue;
+    }
+
+    if (forward !== bestIsForward) {
+      // Direction differs: forward always outranks reverse, regardless of
+      // length. Only replace `best` when the candidate is the forward one.
+      if (forward) {
+        best = key;
+        bestIsForward = true;
+      }
+      continue;
+    }
+
+    if (key.length > best.length || (key.length === best.length && key < best)) {
+      best = key;
     }
   }
 
-  return null;
+  return best === null ? null : table[best]!;
 }
 
 export function calculateBurnRate(

@@ -158,3 +158,114 @@ describe("calculateBurnRate", () => {
     ).toBeNull();
   });
 });
+
+describe("findPricing fuzzy tie-break (#91)", () => {
+  const alias: ModelPricing = {
+    inputCostPerToken: 15 / 1_000_000,
+    outputCostPerToken: 75 / 1_000_000,
+    cacheCreationCostPerToken: 18.75 / 1_000_000,
+    cacheReadCostPerToken: 1.5 / 1_000_000,
+  };
+  const specific: ModelPricing = {
+    inputCostPerToken: 5 / 1_000_000,
+    outputCostPerToken: 25 / 1_000_000,
+    cacheCreationCostPerToken: 6.25 / 1_000_000,
+    cacheReadCostPerToken: 0.5 / 1_000_000,
+  };
+
+  const MODEL = "claude-opus-4-5-20251101-v1:0";
+
+  // Both keys substring-match the model. First-match-wins made the answer a
+  // function of upstream key ordering: one bare alias added to the feed ahead
+  // of the dated key charged a 4.5 session at 4.x rates, a 3x overcharge.
+  it("picks the same price regardless of key insertion order", () => {
+    const aliasFirst: PricingTable = {
+      "claude-opus-4": alias,
+      "claude-opus-4-5-20251101": specific,
+    };
+    const specificFirst: PricingTable = {
+      "claude-opus-4-5-20251101": specific,
+      "claude-opus-4": alias,
+    };
+
+    expect(findPricing(MODEL, aliasFirst)).toEqual(findPricing(MODEL, specificFirst));
+  });
+
+  it("resolves to the more specific key, not the bare alias", () => {
+    const table: PricingTable = {
+      "claude-opus-4": alias,
+      "claude-opus-4-5-20251101": specific,
+    };
+
+    expect(findPricing(MODEL, table)!.inputCostPerToken).toBe(5 / 1_000_000);
+  });
+
+  it("still prefers an exact match over any fuzzy candidate", () => {
+    const table: PricingTable = {
+      "claude-opus-4-5-20251101-v1:0-extra-long-key": alias,
+      [MODEL]: specific,
+    };
+
+    expect(findPricing(MODEL, table)).toBe(specific);
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(findPricing("gpt-4", { "claude-opus-4": alias })).toBeNull();
+  });
+});
+
+describe("findPricing forward/reverse direction preference (#108)", () => {
+  // Reproduction of the confirmed finding: longest-key-wins alone let a
+  // snapshot-absent superset alias outrank a correctly anchored key, because
+  // the alias only matched in reverse (table key contains the model) while
+  // being longer than the anchored key. Ranking forward matches (model
+  // contains table key) above reverse matches closes this without touching
+  // anchorToSnapshot or the cost bounds.
+  it("prefers an anchored key matched forward over a longer snapshot-absent alias matched only in reverse", () => {
+    const anchored: ModelPricing = {
+      inputCostPerToken: 0.000005,
+      outputCostPerToken: 0.000025,
+      cacheCreationCostPerToken: 0.00000625,
+      cacheReadCostPerToken: 0.0000005,
+    };
+    // Snapshot-absent alias, priced ~100x the real rate — this is the
+    // poisoned entry that passes isSaneModelPricing on bounds alone because
+    // it has no FALLBACK_PRICING counterpart to anchor against.
+    const poisonedAlias: ModelPricing = {
+      inputCostPerToken: 0.0005,
+      outputCostPerToken: 0.0009,
+      cacheCreationCostPerToken: 0.000625,
+      cacheReadCostPerToken: 0.00005,
+    };
+
+    const table: PricingTable = {
+      "claude-opus-5": anchored,
+      "claude-opus-5[1m]-preview": poisonedAlias,
+    };
+
+    const result = findPricing("claude-opus-5[1m]", table);
+
+    expect(result).toBe(anchored);
+    expect(result!.inputCostPerToken).toBe(0.000005);
+  });
+
+  // The demotion of reverse matches must not remove reverse as a fallback:
+  // when nothing matches forward, a containing table key still has to
+  // resolve the model, or a legitimate lookup silently starts failing.
+  it("still resolves via a reverse (containing-key) match when no forward match exists", () => {
+    const onlyPricing: ModelPricing = {
+      inputCostPerToken: 5 / 1_000_000,
+      outputCostPerToken: 25 / 1_000_000,
+      cacheCreationCostPerToken: 6.25 / 1_000_000,
+      cacheReadCostPerToken: 0.5 / 1_000_000,
+    };
+    const table: PricingTable = {
+      "claude-opus-4-5-20251101-v1:0": onlyPricing,
+    };
+
+    // "opus-4-5" does not contain the table key (no forward match), but the
+    // table key contains "opus-4-5" (reverse match) and is the only
+    // candidate.
+    expect(findPricing("opus-4-5", table)).toBe(onlyPricing);
+  });
+});

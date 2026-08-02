@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fetchPricing } from "../data/pricing-fetcher.js";
+import { fetchPricing, parseLitellmPricing } from "../data/pricing-fetcher.js";
 import { FALLBACK_PRICING } from "../data/fallback-pricing.js";
 import { findPricing } from "../data/cost-calculator.js";
 import type { PricingTable } from "../types/pricing.js";
@@ -22,6 +22,13 @@ let originalXdg: string | undefined;
 
 function cachePath(): string {
   return path.join(tmpDir, "gccusage", "pricing.json");
+}
+
+function stubFetchJson(data: Record<string, unknown>): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => data })),
+  );
 }
 
 function writeCache(data: PricingTable, ageMs = 0): void {
@@ -121,5 +128,54 @@ describe("fetchPricing", () => {
     const table = await fetchPricing(TTL);
 
     expect(findPricing(CACHED_ONLY, table)).toBeNull();
+  });
+});
+
+describe("pricing feed integrity (#91)", () => {
+  // The upstream field names, not ours — this is what parseLitellmPricing eats.
+  function upstream(input: number, output: number): Record<string, unknown> {
+    return { input_cost_per_token: input, output_cost_per_token: output };
+  }
+
+  it("drops a model whose price is absurd and keeps its table-mates", () => {
+    const table = parseLitellmPricing({
+      "claude-sane-test": upstream(3 / 1_000_000, 15 / 1_000_000),
+      "claude-absurd-test": upstream(3 / 1_000_000, 5),
+    });
+
+    expect(table["claude-sane-test"]).toBeDefined();
+    expect(table["claude-absurd-test"]).toBeUndefined();
+  });
+
+  it("drops a model priced at zero rather than reporting $0.00 for it", () => {
+    const table = parseLitellmPricing({
+      "claude-free-test": upstream(0, 0),
+    });
+
+    expect(table["claude-free-test"]).toBeUndefined();
+  });
+
+  it("rejects a known model whose fetched price deviates from the snapshot", async () => {
+    // haiku-4-5 ships in FALLBACK_PRICING at 1e-6 input. 1e-4 is 100x that:
+    // comfortably inside the bounds ceiling, nothing like the real price.
+    stubFetchJson({
+      "claude-haiku-4-5": upstream(1 / 10_000, 5 / 10_000),
+    });
+
+    const table = await fetchPricing(TTL);
+
+    expect(table["claude-haiku-4-5"]!.inputCostPerToken).toBe(
+      FALLBACK_PRICING["claude-haiku-4-5"]!.inputCostPerToken,
+    );
+  });
+
+  it("still accepts a fetched price for a model the snapshot has never seen", async () => {
+    stubFetchJson({
+      "claude-future-9": upstream(9 / 1_000_000, 45 / 1_000_000),
+    });
+
+    const table = await fetchPricing(TTL);
+
+    expect(table["claude-future-9"]!.inputCostPerToken).toBe(9 / 1_000_000);
   });
 });

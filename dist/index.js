@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-import * as fs$9 from "node:fs";
-import * as fs$8 from "node:fs";
-import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -153,6 +150,21 @@ function _getStandardProps(context) {
 			return context["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig());
 		}
 	};
+}
+/**
+* Disallows inherited object properties and prevents object prototype
+* pollution by disallowing certain keys.
+*
+* @param object The object to check.
+* @param key The key to check.
+*
+* @returns Whether the key is allowed.
+*
+* @internal
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function _isValidObjectKey(object$1, key) {
+	return Object.hasOwn(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
 }
 /**
 * Joins multiple `expects` values with the given separator.
@@ -485,6 +497,74 @@ function picklist(options, message$1) {
 	};
 }
 /* @__NO_SIDE_EFFECTS__ */
+function record(key, value$1, message$1) {
+	return {
+		kind: "schema",
+		type: "record",
+		reference: record,
+		expects: "Object",
+		async: false,
+		key,
+		value: value$1,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const input = dataset.value;
+			if (input && typeof input === "object") {
+				dataset.typed = true;
+				dataset.value = {};
+				for (const entryKey in input) if (/* @__PURE__ */ _isValidObjectKey(input, entryKey)) {
+					const entryValue = input[entryKey];
+					const keyDataset = this.key["~run"]({ value: entryKey }, config$1);
+					if (keyDataset.issues) {
+						const pathItem = {
+							type: "object",
+							origin: "key",
+							input,
+							key: entryKey,
+							value: entryValue
+						};
+						for (const issue of keyDataset.issues) {
+							issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = keyDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					const valueDataset = this.value["~run"]({ value: entryValue }, config$1);
+					if (valueDataset.issues) {
+						const pathItem = {
+							type: "object",
+							origin: "value",
+							input,
+							key: entryKey,
+							value: entryValue
+						};
+						for (const issue of valueDataset.issues) {
+							if (issue.path) issue.path.unshift(pathItem);
+							else issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = valueDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					if (!keyDataset.typed || !valueDataset.typed) dataset.typed = false;
+					if (keyDataset.typed) dataset.value[keyDataset.value] = valueDataset.value;
+				}
+			} else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
 function string(message$1) {
 	return {
 		kind: "schema",
@@ -554,6 +634,28 @@ function union(options, message$1) {
 				dataset.typed = true;
 			} else if (untypedDatasets?.length === 1) return untypedDatasets[0];
 			else _addIssue(this, "type", dataset, config$1, { issues: /* @__PURE__ */ _subIssues(untypedDatasets) });
+			return dataset;
+		}
+	};
+}
+/**
+* Creates a unknown schema.
+*
+* @returns A unknown schema.
+*/
+/* @__NO_SIDE_EFFECTS__ */
+function unknown() {
+	return {
+		kind: "schema",
+		type: "unknown",
+		reference: unknown,
+		expects: "unknown",
+		async: false,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset) {
+			dataset.typed = true;
 			return dataset;
 		}
 	};
@@ -1424,10 +1526,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$9.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$9.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1496,12 +1598,12 @@ function getCacheDir() {
 	return path$8.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$8.existsSync(dir)) fs$8.mkdirSync(dir, { recursive: true });
+	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$8.existsSync(dir)) return [];
+	if (!fs$5.existsSync(dir)) return [];
 	try {
-		return fs$8.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
+		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1509,12 +1611,12 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$8.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$8.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
 			files.push(...jsonlFiles.filter((f) => path$8.basename(f, ".jsonl") === sessionId));
@@ -1524,18 +1626,18 @@ function findSessionJsonlFiles(sessionId) {
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$8.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$8.join(projectsDir, projectDir);
-			const stat = fs$8.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$8.statSync(f);
+				const fstat = fs$5.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1546,9 +1648,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$7.existsSync(filePath)) return [];
+	if (!fs$4.existsSync(filePath)) return [];
 	try {
-		const content = fs$7.readFileSync(filePath, "utf-8");
+		const content = fs$4.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1712,36 +1814,61 @@ function writeJsonAtomic(filePath, data) {
 	ensureDir(dir);
 	const serialised = JSON.stringify(data);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$6.writeFileSync(tmpPath, serialised, "utf-8");
+	fs$3.writeFileSync(tmpPath, serialised, "utf-8");
 	try {
-		fs$6.renameSync(tmpPath, filePath);
+		fs$3.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$6.unlinkSync(tmpPath);
+			fs$3.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
 }
+/**
+* Read a JSON file and validate it, or get nothing. Every cache file in this
+* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
+* checks nothing at runtime — while config got full valibot validation. The
+* caches are the files that can actually be corrupted, by a torn write or by
+* hand (#92).
+*
+* Returns null for a missing file, an unreadable one, malformed JSON, or a
+* document that does not match `schema`. Callers treat null as "rebuild from
+* scratch", which is the posture they already had for a missing file.
+*/
+function readJsonValidated(filePath, schema) {
+	let raw;
+	try {
+		raw = fs$3.readFileSync(filePath, "utf-8");
+	} catch {
+		return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const result = safeParse(schema, parsed);
+	return result.success ? result.output : null;
+}
 
 //#endregion
 //#region src/cache/block-cache.ts
+const BlockCacheSchema = object({ blockStartTime: number() });
 function getBlockCachePath() {
 	return path$6.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
-	try {
-		if (!fs$5.existsSync(cachePath)) return null;
-		const raw = fs$5.readFileSync(cachePath, "utf-8");
-		const data = JSON.parse(raw);
-		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
-			fs$5.unlinkSync(cachePath);
-			return null;
-		}
-		return data;
-	} catch {
+	const data = readJsonValidated(cachePath, BlockCacheSchema);
+	if (!data) return null;
+	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+		try {
+			fs$2.unlinkSync(cachePath);
+		} catch {}
 		return null;
 	}
+	return data;
 }
 function saveBlockCache(data) {
 	const cachePath = getBlockCachePath();
@@ -1777,49 +1904,6 @@ function detectBlock(sessionStartTime) {
 		}
 	}
 	return null;
-}
-
-//#endregion
-//#region src/cache/pricing-cache.ts
-function getCachePath$1() {
-	return path$5.join(getCacheDir(), "pricing.json");
-}
-/**
-* Loads the cache regardless of age and reports how old it is, leaving the
-* age policy to the caller. The render path and the CLI want different
-* answers from the same file: the render path serves a stale table (and
-* refreshes out of band) rather than block, while an age ceiling decides when
-* the table is too old to price from at all.
-*/
-function loadPricingCacheEntry() {
-	const cachePath = getCachePath$1();
-	try {
-		if (!fs$4.existsSync(cachePath)) return null;
-		const raw = fs$4.readFileSync(cachePath, "utf-8");
-		const cache = JSON.parse(raw);
-		if (typeof cache?.timestamp !== "number" || !cache.data) return null;
-		return {
-			data: cache.data,
-			ageMs: Date.now() - cache.timestamp
-		};
-	} catch {
-		return null;
-	}
-}
-function loadPricingCache(ttlMs) {
-	const entry = loadPricingCacheEntry();
-	if (!entry) return null;
-	return entry.ageMs < ttlMs ? entry.data : null;
-}
-function savePricingCache(data) {
-	const cachePath = getCachePath$1();
-	try {
-		const cache = {
-			timestamp: Date.now(),
-			data
-		};
-		writeJsonAtomic(cachePath, cache);
-	} catch {}
 }
 
 //#endregion
@@ -1983,6 +2067,126 @@ const FALLBACK_PRICING = {
 };
 
 //#endregion
+//#region src/data/pricing-validation.ts
+/**
+* $1000 per million tokens. The live table tops out at 7.5e-5 (Opus output),
+* so this sits ~13x above anything real: it rejects the absurd and never a
+* genuine repricing.
+*/
+const MAX_COST_PER_TOKEN = .001;
+/**
+* How far a fetched price may drift from the checked-in snapshot before we
+* stop believing it. Anthropic has never moved a price by this factor.
+*/
+const MAX_SNAPSHOT_DEVIATION = 10;
+const COST_KEYS = [
+	"inputCostPerToken",
+	"outputCostPerToken",
+	"cacheCreationCostPerToken",
+	"cacheReadCostPerToken"
+];
+/**
+* Bounds. Answers "is this a plausible price record?", which is intrinsic to
+* parsing one — so it runs inside `parseLitellmPricing`, and every caller
+* inherits it, including `npm run pricing` when it regenerates the snapshot.
+*/
+function isSaneModelPricing(value) {
+	if (!value || typeof value !== "object") return false;
+	const record$1 = value;
+	for (const key of COST_KEYS) {
+		const cost = record$1[key];
+		if (typeof cost !== "number" || !Number.isFinite(cost)) return false;
+		if (cost < 0 || cost > MAX_COST_PER_TOKEN) return false;
+	}
+	return record$1["inputCostPerToken"] > 0;
+}
+/** Drop the entries that fail bounds, keep the rest. Never all-or-nothing. */
+function sanitisePricingTable(table) {
+	const out = {};
+	for (const [key, value] of Object.entries(table)) if (isSaneModelPricing(value)) out[key] = value;
+	return out;
+}
+/**
+* Integrity anchor. Bounds alone still admit a 13x overcharge, so a fetched
+* price for a model we already ship a snapshot for must land within
+* MAX_SNAPSHOT_DEVIATION of it. A rejected entry falls through to its
+* FALLBACK_PRICING value via the merge in pricing-fetcher, so the degradation
+* is to last-known-good rather than to nothing.
+*
+* Deliberately NOT applied when reading the cache: the anchor is about
+* trusting the feed, cached entries already passed it at write time, and
+* re-running it would silently invalidate a legitimately cached price the day
+* someone regenerates the snapshot after a real price move.
+*
+* Models absent from the snapshot are genuinely new and pass on bounds alone.
+*/
+function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
+	const out = {};
+	for (const [key, value] of Object.entries(table)) {
+		const known = snapshot[key];
+		if (!known) {
+			out[key] = value;
+			continue;
+		}
+		if (COST_KEYS.every((k) => withinDeviation(value[k], known[k]))) out[key] = value;
+	}
+	return out;
+}
+/**
+* A zero can only come from the feed stating one; there is no ratio to take.
+* `isSaneModelPricing` permits a zero `cacheCreation`/`cacheRead`/`output`
+* cost, so this branch is reachable — it is not dead code guarding against
+* something `parseLitellmPricing` rules out.
+*/
+function withinDeviation(fetched, known) {
+	if (known === 0) return fetched === 0;
+	const ratio = fetched / known;
+	return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
+}
+
+//#endregion
+//#region src/cache/pricing-cache.ts
+const PricingCacheSchema = object({
+	timestamp: number(),
+	data: record(string(), unknown())
+});
+function getCachePath$1() {
+	return path$5.join(getCacheDir(), "pricing.json");
+}
+/**
+* Loads the cache regardless of age and reports how old it is, leaving the
+* age policy to the caller. The render path and the CLI want different
+* answers from the same file: the render path serves a stale table (and
+* refreshes out of band) rather than block, while an age ceiling decides when
+* the table is too old to price from at all.
+*/
+function loadPricingCacheEntry() {
+	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
+	if (!cache) return null;
+	const data = sanitisePricingTable(cache.data);
+	if (Object.keys(data).length === 0) return null;
+	return {
+		data,
+		ageMs: Date.now() - cache.timestamp
+	};
+}
+function loadPricingCache(ttlMs) {
+	const entry = loadPricingCacheEntry();
+	if (!entry) return null;
+	return entry.ageMs < ttlMs ? entry.data : null;
+}
+function savePricingCache(data) {
+	const cachePath = getCachePath$1();
+	try {
+		const cache = {
+			timestamp: Date.now(),
+			data
+		};
+		writeJsonAtomic(cachePath, cache);
+	} catch {}
+}
+
+//#endregion
 //#region src/data/pricing-fetcher.ts
 const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 /**
@@ -2034,7 +2238,7 @@ async function refreshPricing() {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (!response.ok) return false;
 		const data = await response.json();
-		const pricing = parseLitellmPricing(data);
+		const pricing = anchorToSnapshot(parseLitellmPricing(data));
 		if (Object.keys(pricing).length === 0) return false;
 		savePricingCache(pricing);
 		return true;
@@ -2056,6 +2260,7 @@ function parseLitellmPricing(data) {
 			cacheCreationCostPerToken: typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25,
 			cacheReadCostPerToken: typeof model["cache_read_input_token_cost"] === "number" ? model["cache_read_input_token_cost"] : inputCost * .1
 		};
+		if (!isSaneModelPricing(pricing)) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
 		table[modelId] = pricing;
 		if (key !== modelId) table[key] = pricing;
@@ -2080,7 +2285,7 @@ async function fetchPricing(ttlMs) {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
 			const data = await response.json();
-			const pricing = parseLitellmPricing(data);
+			const pricing = anchorToSnapshot(parseLitellmPricing(data));
 			if (Object.keys(pricing).length > 0) {
 				savePricingCache(pricing);
 				return {
@@ -2107,7 +2312,7 @@ function stampPath() {
 }
 function attemptedRecently() {
 	try {
-		const raw = fs$3.readFileSync(stampPath(), "utf-8");
+		const raw = fs$1.readFileSync(stampPath(), "utf-8");
 		const stamp = JSON.parse(raw);
 		if (typeof stamp?.timestamp !== "number") return false;
 		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
@@ -2178,8 +2383,27 @@ function findPricing(model, table) {
 	if (table[model]) return table[model];
 	const stripped = model.replace(/^claude\//, "");
 	if (table[stripped]) return table[stripped];
-	for (const key of Object.keys(table)) if (key.includes(model) || model.includes(key)) return table[key];
-	return null;
+	let best = null;
+	let bestIsForward = false;
+	for (const key of Object.keys(table)) {
+		const forward = model.includes(key);
+		const reverse = !forward && key.includes(model);
+		if (!forward && !reverse) continue;
+		if (best === null) {
+			best = key;
+			bestIsForward = forward;
+			continue;
+		}
+		if (forward !== bestIsForward) {
+			if (forward) {
+				best = key;
+				bestIsForward = true;
+			}
+			continue;
+		}
+		if (key.length > best.length || key.length === best.length && key < best) best = key;
+	}
+	return best === null ? null : table[best];
 }
 function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionModel) {
 	if (!sessionStartTime) return null;
@@ -2238,6 +2462,41 @@ function visibleLength(str) {
 
 //#endregion
 //#region src/data/daily-cost-tracker.ts
+const CostSourceSchema = picklist(["stdin", "calculated"]);
+/**
+* The shard schema replaces four hand-rolled `typeof` checks scattered through
+* this file (#92). `v.fallback` preserves each tolerance exactly: a shard
+* written before `baselineUsd` existed reads as 0, and one with no `updatedAt`
+* reads as 0 and is therefore pruned as stale, which is what the old
+* `entry.updatedAt ?? 0` did.
+*
+* `v.object` strips unknown keys, and the parsed result is later written back
+* verbatim (see `writeJsonAtomic(shardPath(...), entry)` below). A future
+* version's extra field therefore survives a round-trip through a newer
+* binary but is silently dropped by an older one reading the same shard. No
+* impact today — every writer emits exactly these six fields — but adding a
+* seventh here without updating every reader will lose it quietly rather than
+* loudly.
+*/
+const ShardSchema = object({
+	sessionId: string(),
+	date: string(),
+	costUsd: number(),
+	baselineUsd: fallback(number(), 0),
+	source: fallback(optional(CostSourceSchema), void 0),
+	updatedAt: fallback(number(), 0)
+});
+const LegacyStoreSchema = object({
+	date: fallback(optional(string()), void 0),
+	sessions: fallback(array(unknown()), [])
+});
+const LegacyEntrySchema = object({
+	sessionId: string(),
+	costUsd: number(),
+	baselineUsd: fallback(number(), 0),
+	source: fallback(optional(CostSourceSchema), void 0),
+	updatedAt: fallback(optional(number()), void 0)
+});
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function getShardDir() {
@@ -2269,39 +2528,44 @@ function dateStr(d) {
 */
 function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
+	if (!fs.existsSync(legacyPath)) return;
 	let raw;
 	try {
-		raw = fs$2.readFileSync(legacyPath, "utf-8");
+		raw = fs.readFileSync(legacyPath, "utf-8");
 	} catch {
 		return;
 	}
-	let data = null;
+	let legacy;
 	try {
-		const parsed = JSON.parse(raw);
-		if (parsed && typeof parsed === "object") data = parsed;
-	} catch {}
-	const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
-	const date = typeof data?.date === "string" ? data.date : dateStr(now);
+		const result = safeParse(LegacyStoreSchema, JSON.parse(raw));
+		legacy = result.success ? result.output : null;
+	} catch {
+		legacy = null;
+	}
+	const sessions = legacy?.sessions ?? [];
+	const date = legacy?.date ?? dateStr(now);
 	try {
-		for (const s of sessions) {
-			if (typeof s?.sessionId !== "string" || typeof s.costUsd !== "number") continue;
+		for (const raw$1 of sessions) {
+			const parsed = safeParse(LegacyEntrySchema, raw$1);
+			if (!parsed.success) continue;
+			const s = parsed.output;
 			const target = shardPath(s.sessionId);
-			if (fs$2.existsSync(target)) continue;
+			if (fs.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
 				date,
 				costUsd: s.costUsd,
-				baselineUsd: typeof s.baselineUsd === "number" ? s.baselineUsd : 0,
-				updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : now.getTime()
+				baselineUsd: s.baselineUsd,
+				source: s.source,
+				updatedAt: s.updatedAt ?? now.getTime()
 			};
-			if (s.source === "stdin" || s.source === "calculated") entry.source = s.source;
 			writeJsonAtomic(target, entry);
 		}
 	} catch {
 		return;
 	}
 	try {
-		fs$2.unlinkSync(legacyPath);
+		fs.unlinkSync(legacyPath);
 	} catch {}
 }
 /**
@@ -2313,7 +2577,7 @@ function readEntries(now) {
 	migrateLegacyStore(now);
 	let files;
 	try {
-		files = fs$2.readdirSync(getShardDir());
+		files = fs.readdirSync(getShardDir());
 	} catch {
 		return [];
 	}
@@ -2321,23 +2585,15 @@ function readEntries(now) {
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
 		const fullPath = path$3.join(getShardDir(), file);
-		let entry;
-		try {
-			entry = JSON.parse(fs$2.readFileSync(fullPath, "utf-8"));
-		} catch {
-			continue;
-		}
-		if (typeof entry?.sessionId !== "string" || typeof entry.costUsd !== "number") continue;
-		if (now.getTime() - (entry.updatedAt ?? 0) >= STALE_SESSION_MS) {
+		const entry = readJsonValidated(fullPath, ShardSchema);
+		if (!entry) continue;
+		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
 			try {
-				fs$2.unlinkSync(fullPath);
+				fs.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
-		entries.push({
-			...entry,
-			baselineUsd: typeof entry.baselineUsd === "number" ? entry.baselineUsd : 0
-		});
+		entries.push(entry);
 	}
 	return entries;
 }
@@ -2384,6 +2640,10 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 
 //#endregion
 //#region src/data/turn-tracker.ts
+const TurnDataSchema = object({
+	sessionId: string(),
+	count: number()
+});
 function getTurnPath() {
 	return path$2.join(getCacheDir(), "turn-count.json");
 }
@@ -2394,14 +2654,10 @@ function getTurnPath() {
 function trackTurn(sessionId) {
 	if (!sessionId) return 0;
 	const filePath = getTurnPath();
-	let data = {
+	let data = readJsonValidated(filePath, TurnDataSchema) ?? {
 		sessionId: "",
 		count: 0
 	};
-	try {
-		const raw = fs$1.readFileSync(filePath, "utf-8");
-		data = JSON.parse(raw);
-	} catch {}
 	if (data.sessionId !== sessionId) data = {
 		sessionId,
 		count: 0
@@ -3832,23 +4088,24 @@ function isSeparatorOutput(output) {
 
 //#endregion
 //#region src/cache/cache-manager.ts
+const CacheEntrySchema = object({
+	output: string(),
+	timestamp: number(),
+	sessionId: optional(string()),
+	costUsd: optional(number()),
+	terminalWidth: optional(number())
+});
 function getCachePath() {
 	return path.join(getCacheDir(), "statusline-cache.json");
 }
 function checkCache(ttlMs, sessionId, costUsd, terminalWidth) {
-	const cachePath = getCachePath();
-	try {
-		if (!fs.existsSync(cachePath)) return null;
-		const raw = fs.readFileSync(cachePath, "utf-8");
-		const entry = JSON.parse(raw);
-		if (entry.sessionId !== sessionId) return null;
-		if (entry.costUsd !== costUsd) return null;
-		if (entry.terminalWidth !== terminalWidth) return null;
-		if (Date.now() - entry.timestamp > ttlMs) return null;
-		return entry.output;
-	} catch {
-		return null;
-	}
+	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
+	if (!entry) return null;
+	if (entry.sessionId !== sessionId) return null;
+	if (entry.costUsd !== costUsd) return null;
+	if (entry.terminalWidth !== terminalWidth) return null;
+	if (Date.now() - entry.timestamp > ttlMs) return null;
+	return entry.output;
 }
 function writeCache(output, sessionId, costUsd, terminalWidth) {
 	const cachePath = getCachePath();
