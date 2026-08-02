@@ -1,7 +1,7 @@
 {
   "name": "gccusage",
-  "version": "0.1.0",
-  "description": "Powerline-style statusline for Claude Code \u2014 model info, costs, context usage, git status, and more",
+  "version": "0.2.0",
+  "description": "Powerline-style statusline for Claude Code — model info, costs, context usage, git status, and more",
   "type": "module",
   "bin": {
     "gccusage": "./dist/index.js"
@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "schema": "UPDATE_CONFIG_SCHEMA=1 vitest run src/__tests__/config-schema.test.ts",
-    "analyze": "node scripts/analyze-transcripts.ts"
+    "analyze": "node scripts/analyze-transcripts.ts",
+    "badge": "node scripts/build-badge.ts"
   },
   "keywords": [
     "claude",

@@ -1,5 +1,10 @@
 # gccusage
 
+<!-- badges:start -->
+![version](https://img.shields.io/badge/version-0.2.0-blue)
+![build](https://img.shields.io/badge/build-pending-lightgrey)
+<!-- badges:end -->
+
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
 
 ```

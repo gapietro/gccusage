@@ -1,0 +1,46 @@
+name: build badge
+
+# Stamps README.md with MMDD.<pushes to main today>. The commit this job makes
+# is itself a push, so it carries [skip ci] — GitHub honours that natively for
+# push events and the run is never queued. The `if` below is the belt to that
+# brace. Consequence, and the intended one: the count measures human pushes.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Two pushes landing together must not both read the same count and write the
+# same number. Never cancel: a cancelled run would drop a push from the count.
+concurrency:
+  group: build-badge
+  cancel-in-progress: false
+
+jobs:
+  stamp:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The script is a .ts file run directly by Node, so this must be a
+      # version with native type stripping (23.6+, or 22.x backported).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: node scripts/build-badge.ts
+
+      - name: Commit the new build number
+        run: |
+          if git diff --quiet; then
+            echo "nothing changed"
+            exit 0
+          fi
+          build=$(node -p "require('./.github/build-number.json').build")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md .github/build-number.json
+          git commit -m "chore: build ${build} [skip ci]"
+          git push
