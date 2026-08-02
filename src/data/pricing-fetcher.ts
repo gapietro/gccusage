@@ -1,9 +1,76 @@
 import type { PricingTable, ModelPricing } from "../types/pricing.js";
-import { loadPricingCache, savePricingCache } from "../cache/pricing-cache.js";
+import {
+  loadPricingCache,
+  loadPricingCacheEntry,
+  savePricingCache,
+} from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
 
 export const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+
+/**
+ * Overridable so the blackhole test can point at an unroutable address, and so
+ * an air-gapped install can aim at an internal mirror. Read per call rather
+ * than captured at module load, because the test sets it per case.
+ */
+export function getPricingUrl(): string {
+  return process.env["GCCUSAGE_PRICING_URL"] || LITELLM_URL;
+}
+
+/**
+ * `ttlMs` says when to REFRESH; this says when the table is too old to price
+ * from at all. They are different questions. Serving a stale cache is right —
+ * it is real pricing, and the refresh lands within a prompt or two — but a
+ * machine that has been offline for months would otherwise prefer a
+ * long-dead cache to a FALLBACK_PRICING table generated at the last release.
+ */
+export const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface RenderPricing {
+  pricing: PricingTable;
+  /** True when the caller should trigger an out-of-band refresh. */
+  stale: boolean;
+}
+
+/**
+ * The pricing the statusline renders with. Does no I/O beyond reading the
+ * cache file, and in particular never touches the network (#84).
+ *
+ * The 10.6s stall was never the fetch's own duration — AbortSignal.timeout
+ * fires on schedule. It was that undici keeps the event loop alive long after
+ * the bar is written, and Claude Code waits for the process to exit. Putting a
+ * deadline around the fetch would have left that untouched.
+ */
+export function getPricingForRender(ttlMs: number): RenderPricing {
+  const entry = loadPricingCacheEntry();
+  if (!entry || entry.ageMs >= MAX_STALE_MS) {
+    return { pricing: { ...FALLBACK_PRICING }, stale: true };
+  }
+  return {
+    pricing: { ...FALLBACK_PRICING, ...entry.data },
+    stale: entry.ageMs >= ttlMs,
+  };
+}
+
+/**
+ * Fetches and caches live pricing. Runs in the detached refresh child and in
+ * explicit CLI commands — never on the render path. Returns whether the cache
+ * was updated.
+ */
+export async function refreshPricing(): Promise<boolean> {
+  try {
+    const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return false;
+    const data = (await response.json()) as Record<string, unknown>;
+    const pricing = parseLitellmPricing(data);
+    if (Object.keys(pricing).length === 0) return false;
+    savePricingCache(pricing);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
   const table: PricingTable = {};
@@ -53,7 +120,7 @@ export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
 
   // Try fetching from LiteLLM
   try {
-    const response = await fetch(LITELLM_URL, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5000) });
     if (response.ok) {
       const data = (await response.json()) as Record<string, unknown>;
       const pricing = parseLitellmPricing(data);

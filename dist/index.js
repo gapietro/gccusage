@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs$9 from "node:fs";
 import * as fs$8 from "node:fs";
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
@@ -9,6 +10,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as path$9 from "node:path";
 import * as path$8 from "node:path";
 import * as path$7 from "node:path";
 import * as path$6 from "node:path";
@@ -23,9 +25,9 @@ import process$1 from "node:process";
 import * as os$1 from "node:os";
 import os, { homedir } from "node:os";
 import tty from "node:tty";
-import * as crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import * as crypto from "node:crypto";
 
 //#region node_modules/valibot/dist/index.mjs
 let store$4;
@@ -1299,11 +1301,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$8.join(xdg, "gccusage");
-	return path$8.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$9.join(xdg, "gccusage");
+	return path$9.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$8.join(getConfigDir(), "settings.json");
+	return path$9.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1345,10 +1347,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$8.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$9.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$8.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$9.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1387,31 +1389,31 @@ function formatConfigError(error, configPath) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$7.isAbsolute(home)) return home;
+	if (path$8.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$7.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$8.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$7.join(getHomeDir(), ".claude");
+	return path$8.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$7.join(getClaudeDataDir(), "projects");
+	return path$8.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$7.join(xdg, "gccusage");
-	return path$7.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$8.join(xdg, "gccusage");
+	return path$8.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$7.existsSync(dir)) fs$7.mkdirSync(dir, { recursive: true });
+	if (!fs$8.existsSync(dir)) fs$8.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$7.existsSync(dir)) return [];
+	if (!fs$8.existsSync(dir)) return [];
 	try {
-		return fs$7.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$7.join(dir, f));
+		return fs$8.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$8.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1419,33 +1421,33 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$7.existsSync(projectsDir)) return [];
+	if (!fs$8.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$7.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
+		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+			const fullPath = path$8.join(projectsDir, projectDir);
+			const stat = fs$8.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$7.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$8.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
 }
 function findTodayJsonlFiles() {
 	const projectsDir = getProjectsDir();
-	if (!fs$7.existsSync(projectsDir)) return [];
+	if (!fs$8.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$7.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
+		for (const projectDir of fs$8.readdirSync(projectsDir)) {
+			const fullPath = path$8.join(projectsDir, projectDir);
+			const stat = fs$8.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$7.statSync(f);
+				const fstat = fs$8.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push(f);
 			}
 		}
@@ -1456,9 +1458,9 @@ function findTodayJsonlFiles() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$6.existsSync(filePath)) return [];
+	if (!fs$7.existsSync(filePath)) return [];
 	try {
-		const content = fs$6.readFileSync(filePath, "utf-8");
+		const content = fs$7.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1618,16 +1620,16 @@ let counter = 0;
 * Throws on failure; callers keep whatever error posture they already have.
 */
 function writeJsonAtomic(filePath, data) {
-	const dir = path$6.dirname(filePath);
+	const dir = path$7.dirname(filePath);
 	ensureDir(dir);
 	const serialised = JSON.stringify(data);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$5.writeFileSync(tmpPath, serialised, "utf-8");
+	fs$6.writeFileSync(tmpPath, serialised, "utf-8");
 	try {
-		fs$5.renameSync(tmpPath, filePath);
+		fs$6.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$5.unlinkSync(tmpPath);
+			fs$6.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
@@ -1636,16 +1638,16 @@ function writeJsonAtomic(filePath, data) {
 //#endregion
 //#region src/cache/block-cache.ts
 function getBlockCachePath() {
-	return path$5.join(getCacheDir(), "blocks", "current.json");
+	return path$6.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath = getBlockCachePath();
 	try {
-		if (!fs$4.existsSync(cachePath)) return null;
-		const raw = fs$4.readFileSync(cachePath, "utf-8");
+		if (!fs$5.existsSync(cachePath)) return null;
+		const raw = fs$5.readFileSync(cachePath, "utf-8");
 		const data = JSON.parse(raw);
 		if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
-			fs$4.unlinkSync(cachePath);
+			fs$5.unlinkSync(cachePath);
 			return null;
 		}
 		return data;
@@ -1692,17 +1694,34 @@ function detectBlock(sessionStartTime) {
 //#endregion
 //#region src/cache/pricing-cache.ts
 function getCachePath$1() {
-	return path$4.join(getCacheDir(), "pricing.json");
+	return path$5.join(getCacheDir(), "pricing.json");
 }
-function loadPricingCache(ttlMs) {
+/**
+* Loads the cache regardless of age and reports how old it is, leaving the
+* age policy to the caller. The render path and the CLI want different
+* answers from the same file: the render path serves a stale table (and
+* refreshes out of band) rather than block, while an age ceiling decides when
+* the table is too old to price from at all.
+*/
+function loadPricingCacheEntry() {
 	const cachePath = getCachePath$1();
 	try {
-		if (!fs$3.existsSync(cachePath)) return null;
-		const raw = fs$3.readFileSync(cachePath, "utf-8");
+		if (!fs$4.existsSync(cachePath)) return null;
+		const raw = fs$4.readFileSync(cachePath, "utf-8");
 		const cache = JSON.parse(raw);
-		if (Date.now() - cache.timestamp < ttlMs) return cache.data;
-	} catch {}
-	return null;
+		if (typeof cache?.timestamp !== "number" || !cache.data) return null;
+		return {
+			data: cache.data,
+			ageMs: Date.now() - cache.timestamp
+		};
+	} catch {
+		return null;
+	}
+}
+function loadPricingCache(ttlMs) {
+	const entry = loadPricingCacheEntry();
+	if (!entry) return null;
+	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
 	const cachePath = getCachePath$1();
@@ -1878,6 +1897,63 @@ const FALLBACK_PRICING = {
 //#endregion
 //#region src/data/pricing-fetcher.ts
 const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+/**
+* Overridable so the blackhole test can point at an unroutable address, and so
+* an air-gapped install can aim at an internal mirror. Read per call rather
+* than captured at module load, because the test sets it per case.
+*/
+function getPricingUrl() {
+	return process.env["GCCUSAGE_PRICING_URL"] || LITELLM_URL;
+}
+/**
+* `ttlMs` says when to REFRESH; this says when the table is too old to price
+* from at all. They are different questions. Serving a stale cache is right —
+* it is real pricing, and the refresh lands within a prompt or two — but a
+* machine that has been offline for months would otherwise prefer a
+* long-dead cache to a FALLBACK_PRICING table generated at the last release.
+*/
+const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1e3;
+/**
+* The pricing the statusline renders with. Does no I/O beyond reading the
+* cache file, and in particular never touches the network (#84).
+*
+* The 10.6s stall was never the fetch's own duration — AbortSignal.timeout
+* fires on schedule. It was that undici keeps the event loop alive long after
+* the bar is written, and Claude Code waits for the process to exit. Putting a
+* deadline around the fetch would have left that untouched.
+*/
+function getPricingForRender(ttlMs) {
+	const entry = loadPricingCacheEntry();
+	if (!entry || entry.ageMs >= MAX_STALE_MS) return {
+		pricing: { ...FALLBACK_PRICING },
+		stale: true
+	};
+	return {
+		pricing: {
+			...FALLBACK_PRICING,
+			...entry.data
+		},
+		stale: entry.ageMs >= ttlMs
+	};
+}
+/**
+* Fetches and caches live pricing. Runs in the detached refresh child and in
+* explicit CLI commands — never on the render path. Returns whether the cache
+* was updated.
+*/
+async function refreshPricing() {
+	try {
+		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
+		if (!response.ok) return false;
+		const data = await response.json();
+		const pricing = parseLitellmPricing(data);
+		if (Object.keys(pricing).length === 0) return false;
+		savePricingCache(pricing);
+		return true;
+	} catch {
+		return false;
+	}
+}
 function parseLitellmPricing(data) {
 	const table = {};
 	for (const [key, value] of Object.entries(data)) {
@@ -1913,7 +1989,7 @@ async function fetchPricing(ttlMs) {
 		...cached
 	};
 	try {
-		const response = await fetch(LITELLM_URL, { signal: AbortSignal.timeout(5e3) });
+		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
 			const data = await response.json();
 			const pricing = parseLitellmPricing(data);
@@ -1927,6 +2003,55 @@ async function fetchPricing(ttlMs) {
 		}
 	} catch {}
 	return { ...FALLBACK_PRICING };
+}
+
+//#endregion
+//#region src/data/pricing-refresh.ts
+/**
+* How long to wait after an attempt before spawning another refresher.
+* Shorter than the pricing TTL on purpose: this bounds retries after a
+* FAILED attempt, whereas a success makes the cache fresh and stops the
+* spawn at source.
+*/
+const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
+function stampPath() {
+	return path$4.join(getCacheDir(), "pricing-refresh-attempt.json");
+}
+function attemptedRecently() {
+	try {
+		const raw = fs$3.readFileSync(stampPath(), "utf-8");
+		const stamp = JSON.parse(raw);
+		if (typeof stamp?.timestamp !== "number") return false;
+		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
+	} catch {
+		return false;
+	}
+}
+/**
+* Refreshes pricing out of band when the cache is stale, so the render path
+* never waits on the network (#84).
+*
+* The child is detached with stdio ignored and immediately unref'd: that is
+* what keeps it from holding the parent's event loop open, which was the
+* actual mechanism behind the 10.6s stall. The parent renders from the cache
+* it already has and exits; the NEXT render picks up the new prices.
+*
+* Best-effort by construction — every failure path is swallowed, because a
+* statusline that cannot refresh pricing must still draw a bar.
+*/
+function maybeSpawnPricingRefresh(stale) {
+	if (!stale) return;
+	try {
+		if (attemptedRecently()) return;
+		ensureDir(getCacheDir());
+		writeJsonAtomic(stampPath(), { timestamp: Date.now() });
+		const entry = fileURLToPath(import.meta.url);
+		const child = spawn(process.execPath, [entry, "refresh-pricing"], {
+			detached: true,
+			stdio: "ignore"
+		});
+		child.unref();
+	} catch {}
 }
 
 //#endregion
@@ -2218,7 +2343,8 @@ async function buildRenderContext(stdin, settings) {
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
 	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 	const metrics = aggregateTokens(sessionEntries, todayEntries);
-	const pricing = await fetchPricing(settings.cache?.pricingTtlMs ?? 864e5);
+	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
+	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
 	const costByModel = session.costs;
 	const calculatedSessionCost = calculateTotalCost(costByModel);
@@ -3676,6 +3802,9 @@ async function runCli(args) {
 			break;
 		case "help":
 			printHelp();
+			break;
+		case "refresh-pricing":
+			await refreshPricing();
 			break;
 		default:
 			console.error(`Unknown command: ${command}`);

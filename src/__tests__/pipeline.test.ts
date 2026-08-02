@@ -10,15 +10,20 @@ import type { StatusJson } from "../types/status-json.js";
 // Pricing normally comes from the network; pin it so calculated costs are
 // exact. Everything else (transcripts, the daily cost store) runs for real
 // against a temp HOME/cache.
+const PINNED_PRICING = {
+  "test-model": {
+    inputCostPerToken: 1 / 1_000_000,
+    outputCostPerToken: 0,
+    cacheCreationCostPerToken: 0,
+    cacheReadCostPerToken: 0,
+  },
+};
+
 vi.mock("../data/pricing-fetcher.js", () => ({
-  fetchPricing: vi.fn(async () => ({
-    "test-model": {
-      inputCostPerToken: 1 / 1_000_000,
-      outputCostPerToken: 0,
-      cacheCreationCostPerToken: 0,
-      cacheReadCostPerToken: 0,
-    },
-  })),
+  fetchPricing: vi.fn(async () => PINNED_PRICING),
+  // stale: false on purpose — a true here would have the pipeline spawn a
+  // real detached refresher child on every case in this file.
+  getPricingForRender: vi.fn(() => ({ pricing: PINNED_PRICING, stale: false })),
 }));
 
 let tmpDir: string;

@@ -10,6 +10,9 @@ import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type:
 
 vi.mock("../data/pricing-fetcher.js", () => ({
   fetchPricing: async () => ({}),
+  // stale: false keeps the pipeline from spawning a real detached refresher
+  // child during the suite.
+  getPricingForRender: () => ({ pricing: {}, stale: false }),
 }));
 
 let tmpHome: string;
