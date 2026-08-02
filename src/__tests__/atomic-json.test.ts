@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import * as v from "valibot";
+import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 
 let tmpDir: string;
 
@@ -53,5 +54,47 @@ describe("writeJsonAtomic", () => {
 
     expect(() => writeJsonAtomic(target, { a: 1 })).toThrow();
     expect(siblings(tmpDir)).toEqual(["store.json"]);
+  });
+});
+
+describe("readJsonValidated", () => {
+  const Schema = v.object({ name: v.string(), count: v.number() });
+
+  it("returns the parsed value when the file matches the schema", () => {
+    const target = path.join(tmpDir, "ok.json");
+    fs.writeFileSync(target, JSON.stringify({ name: "a", count: 2 }));
+    expect(readJsonValidated(target, Schema)).toEqual({ name: "a", count: 2 });
+  });
+
+  it("returns null when the file does not exist", () => {
+    expect(readJsonValidated(path.join(tmpDir, "absent.json"), Schema)).toBeNull();
+  });
+
+  it("returns null on malformed JSON", () => {
+    const target = path.join(tmpDir, "torn.json");
+    fs.writeFileSync(target, '{"name": "a", "cou');
+    expect(readJsonValidated(target, Schema)).toBeNull();
+  });
+
+  // The exact shape that blanked the statusline: JSON.parse("null") succeeds
+  // and yields null, which every `as T` cast in the codebase then dereferenced.
+  it("returns null for a bare null document", () => {
+    const target = path.join(tmpDir, "null.json");
+    fs.writeFileSync(target, "null");
+    expect(readJsonValidated(target, Schema)).toBeNull();
+  });
+
+  it("returns null when a field has the wrong type", () => {
+    const target = path.join(tmpDir, "wrong.json");
+    fs.writeFileSync(target, JSON.stringify({ name: "a", count: "2" }));
+    expect(readJsonValidated(target, Schema)).toBeNull();
+  });
+
+  // valibot's object schema accepts an array and yields {}, so an array root
+  // only fails because required keys are missing. Pin that it does fail.
+  it("returns null for an array root", () => {
+    const target = path.join(tmpDir, "array.json");
+    fs.writeFileSync(target, "[1,2,3]");
+    expect(readJsonValidated(target, Schema)).toBeNull();
   });
 });

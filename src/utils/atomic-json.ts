@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as v from "valibot";
 import { ensureDir } from "./paths.js";
 
 // Distinguishes concurrent writes from within one process; the pid
@@ -34,4 +35,37 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
     }
     throw err;
   }
+}
+
+/**
+ * Read a JSON file and validate it, or get nothing. Every cache file in this
+ * codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
+ * checks nothing at runtime — while config got full valibot validation. The
+ * caches are the files that can actually be corrupted, by a torn write or by
+ * hand (#92).
+ *
+ * Returns null for a missing file, an unreadable one, malformed JSON, or a
+ * document that does not match `schema`. Callers treat null as "rebuild from
+ * scratch", which is the posture they already had for a missing file.
+ */
+export function readJsonValidated<S extends v.GenericSchema>(
+  filePath: string,
+  schema: S,
+): v.InferOutput<S> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const result = v.safeParse(schema, parsed);
+  return result.success ? result.output : null;
 }
