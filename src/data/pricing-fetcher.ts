@@ -5,6 +5,7 @@ import {
   savePricingCache,
 } from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
+import { anchorToSnapshot, isSaneModelPricing } from "./pricing-validation.js";
 
 export const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
@@ -63,7 +64,7 @@ export async function refreshPricing(): Promise<boolean> {
     const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5000) });
     if (!response.ok) return false;
     const data = (await response.json()) as Record<string, unknown>;
-    const pricing = parseLitellmPricing(data);
+    const pricing = anchorToSnapshot(parseLitellmPricing(data));
     if (Object.keys(pricing).length === 0) return false;
     savePricingCache(pricing);
     return true;
@@ -96,6 +97,11 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
           : inputCost * 0.1,
     };
 
+    // Bounds before storage, so an absurd or zero price never reaches the
+    // cache, the bar, or the regenerated snapshot (#91). Per entry: one
+    // poisoned model must not discard the two dozen good ones.
+    if (!isSaneModelPricing(pricing)) continue;
+
     // Store with the raw key (e.g. "claude/claude-sonnet-4-20250514" and also the model id)
     const modelId = key.includes("/") ? key.split("/").pop()! : key;
     table[modelId] = pricing;
@@ -123,7 +129,7 @@ export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
     const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5000) });
     if (response.ok) {
       const data = (await response.json()) as Record<string, unknown>;
-      const pricing = parseLitellmPricing(data);
+      const pricing = anchorToSnapshot(parseLitellmPricing(data));
       if (Object.keys(pricing).length > 0) {
         savePricingCache(pricing);
         return { ...FALLBACK_PRICING, ...pricing };

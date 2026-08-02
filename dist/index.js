@@ -1983,6 +1983,77 @@ const FALLBACK_PRICING = {
 };
 
 //#endregion
+//#region src/data/pricing-validation.ts
+/**
+* $1000 per million tokens. The live table tops out at 7.5e-5 (Opus output),
+* so this sits ~13x above anything real: it rejects the absurd and never a
+* genuine repricing.
+*/
+const MAX_COST_PER_TOKEN = .001;
+/**
+* How far a fetched price may drift from the checked-in snapshot before we
+* stop believing it. Anthropic has never moved a price by this factor.
+*/
+const MAX_SNAPSHOT_DEVIATION = 10;
+const COST_KEYS = [
+	"inputCostPerToken",
+	"outputCostPerToken",
+	"cacheCreationCostPerToken",
+	"cacheReadCostPerToken"
+];
+/**
+* Bounds. Answers "is this a plausible price record?", which is intrinsic to
+* parsing one — so it runs inside `parseLitellmPricing`, and every caller
+* inherits it, including `npm run pricing` when it regenerates the snapshot.
+*/
+function isSaneModelPricing(value) {
+	if (!value || typeof value !== "object") return false;
+	const record = value;
+	for (const key of COST_KEYS) {
+		const cost = record[key];
+		if (typeof cost !== "number" || !Number.isFinite(cost)) return false;
+		if (cost < 0 || cost > MAX_COST_PER_TOKEN) return false;
+	}
+	return record["inputCostPerToken"] > 0;
+}
+/**
+* Integrity anchor. Bounds alone still admit a 13x overcharge, so a fetched
+* price for a model we already ship a snapshot for must land within
+* MAX_SNAPSHOT_DEVIATION of it. A rejected entry falls through to its
+* FALLBACK_PRICING value via the merge in pricing-fetcher, so the degradation
+* is to last-known-good rather than to nothing.
+*
+* Deliberately NOT applied when reading the cache: the anchor is about
+* trusting the feed, cached entries already passed it at write time, and
+* re-running it would silently invalidate a legitimately cached price the day
+* someone regenerates the snapshot after a real price move.
+*
+* Models absent from the snapshot are genuinely new and pass on bounds alone.
+*/
+function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
+	const out = {};
+	for (const [key, value] of Object.entries(table)) {
+		const known = snapshot[key];
+		if (!known) {
+			out[key] = value;
+			continue;
+		}
+		if (COST_KEYS.every((k) => withinDeviation(value[k], known[k]))) out[key] = value;
+	}
+	return out;
+}
+/**
+* A zero in the snapshot means the feed stated zero — `parseLitellmPricing`
+* derives its defaults from the input cost and never produces one. There is no
+* ratio to take, so only zero matches.
+*/
+function withinDeviation(fetched, known) {
+	if (known === 0) return fetched === 0;
+	const ratio = fetched / known;
+	return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
+}
+
+//#endregion
 //#region src/data/pricing-fetcher.ts
 const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 /**
@@ -2034,7 +2105,7 @@ async function refreshPricing() {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (!response.ok) return false;
 		const data = await response.json();
-		const pricing = parseLitellmPricing(data);
+		const pricing = anchorToSnapshot(parseLitellmPricing(data));
 		if (Object.keys(pricing).length === 0) return false;
 		savePricingCache(pricing);
 		return true;
@@ -2056,6 +2127,7 @@ function parseLitellmPricing(data) {
 			cacheCreationCostPerToken: typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25,
 			cacheReadCostPerToken: typeof model["cache_read_input_token_cost"] === "number" ? model["cache_read_input_token_cost"] : inputCost * .1
 		};
+		if (!isSaneModelPricing(pricing)) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
 		table[modelId] = pricing;
 		if (key !== modelId) table[key] = pricing;
@@ -2080,7 +2152,7 @@ async function fetchPricing(ttlMs) {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
 			const data = await response.json();
-			const pricing = parseLitellmPricing(data);
+			const pricing = anchorToSnapshot(parseLitellmPricing(data));
 			if (Object.keys(pricing).length > 0) {
 				savePricingCache(pricing);
 				return {
