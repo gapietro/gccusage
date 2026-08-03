@@ -102,8 +102,9 @@ would otherwise silently break the whole bar.
 ### Grapheme clusters via `Intl.Segmenter`
 
 Summing East Asian width per code point gets CJK right and multi-code-point
-glyphs wrong: a decomposed `é` (e + U+0301) counts 2, a `🇯🇵` flag counts 4, a
-`👨‍👩‍👧` ZWJ family counts 6. `Intl.Segmenter` is built into Node, needs full ICU
+glyphs wrong: a decomposed `é` (e + U+0301) counts 2 and a `👨‍👩‍👧` ZWJ family
+counts 5. (Under today's `.length` those are 2 and 8, and a `🇯🇵` flag is 4.)
+`Intl.Segmenter` is built into Node, needs full ICU
 (shipped by default, and guaranteed by the `engines.node >=22` floor set in
 PR #109), and costs no new dependency.
 
@@ -113,10 +114,19 @@ work: a ZWJ family's base is `👨` (wide → 2), a decomposed `é`'s base is `e
 contribute nothing because they are inside the cluster rather than separate
 iterations.
 
-One exception, applied as an explicit rule: a cluster containing U+FE0F (VS16)
-counts 2. `❤️` is U+2764 (Ambiguous → 1) plus VS16, but terminals render the
-emoji presentation at two columns. This is what `string-width` does, and without
-it we would ship a known under-count of exactly the class this issue is about.
+Two exceptions, applied as explicit rules before the table lookup. Both were
+found by measuring the real package rather than reasoning about it, and both are
+what `string-width` does:
+
+- **A cluster containing U+FE0F (VS16) counts 2.** `❤️` is U+2764 (Ambiguous → 1)
+  plus VS16, but terminals render the emoji presentation at two columns.
+- **A cluster whose first code point is a Regional Indicator (U+1F1E6–U+1F1FF)
+  counts 2.** Regional Indicators are East_Asian_Width=**Neutral**, so widthing
+  `🇯🇵` by its base code point yields 1 — verified against the package, not
+  assumed. Terminals render a flag at two columns.
+
+Without these we would ship a known under-count of exactly the class this issue
+is about.
 
 ### No speculative fast path
 
@@ -191,8 +201,10 @@ They read through `visibleLength` and inherit the fix.
 ## Testing
 
 Unit tests on `display-width.ts`: ASCII, CJK (`日本語` → 6), fullwidth forms,
-decomposed `é` → 1, flag → 2, ZWJ family → 2, `❤️` → 2, and — the policy pin —
-`▶`, `…`, `│`, U+E0B0 and U+E0A0 each → 1.
+decomposed `é` → 1, precomposed `é` → 1 (it is Ambiguous, so it also pins the
+policy), flag → 2, ZWJ family → 2, `❤️` → 2, and — the policy pin — `▶`, `…`,
+`│`, U+E0B0 and U+E0A0 each → 1. Every one of these figures was measured against
+the real package while writing this spec, not derived from memory of the tables.
 
 `truncateAnsi`: a case reproducing the deleted `plain.length` line; a
 never-exceeds-`maxWidth` assertion; the wide-cluster-straddling case landing at
