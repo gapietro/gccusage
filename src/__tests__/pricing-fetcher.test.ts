@@ -179,3 +179,71 @@ describe("pricing feed integrity (#91)", () => {
     expect(table["claude-future-9"]!.inputCostPerToken).toBe(9 / 1_000_000);
   });
 });
+
+describe("parseLitellmPricing above-200k tier (#103)", () => {
+  it("reads the published premium rates into above200k", () => {
+    const table = parseLitellmPricing({
+      "claude-sonnet-4-5": {
+        input_cost_per_token: 0.000003,
+        output_cost_per_token: 0.000015,
+        cache_creation_input_token_cost: 0.00000375,
+        cache_read_input_token_cost: 0.0000003,
+        input_cost_per_token_above_200k_tokens: 0.000006,
+        output_cost_per_token_above_200k_tokens: 0.0000225,
+        cache_creation_input_token_cost_above_200k_tokens: 0.0000075,
+        cache_read_input_token_cost_above_200k_tokens: 0.0000006,
+      },
+    });
+
+    expect(table["claude-sonnet-4-5"]!.above200k).toEqual({
+      inputCostPerToken: 0.000006,
+      outputCostPerToken: 0.0000225,
+      cacheCreationCostPerToken: 0.0000075,
+      cacheReadCostPerToken: 0.0000006,
+    });
+    // The base rates must be untouched by the tier.
+    expect(table["claude-sonnet-4-5"]!.inputCostPerToken).toBe(0.000003);
+  });
+
+  it("leaves above200k absent when the feed publishes no tier", () => {
+    const table = parseLitellmPricing({
+      "claude-opus-5": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+        cache_creation_input_token_cost: 0.00000625,
+        cache_read_input_token_cost: 0.0000005,
+      },
+    });
+
+    expect(table["claude-opus-5"]).toBeDefined();
+    expect(table["claude-opus-5"]!.above200k).toBeUndefined();
+  });
+
+  it("requires both premium input and output before attaching a tier", () => {
+    const table = parseLitellmPricing({
+      "claude-sonnet-4-5": {
+        input_cost_per_token: 0.000003,
+        output_cost_per_token: 0.000015,
+        input_cost_per_token_above_200k_tokens: 0.000006,
+        // no output premium
+      },
+    });
+
+    expect(table["claude-sonnet-4-5"]!.above200k).toBeUndefined();
+  });
+
+  it("derives missing premium cache rates off the premium input rate", () => {
+    const table = parseLitellmPricing({
+      "claude-sonnet-4-5": {
+        input_cost_per_token: 0.000003,
+        output_cost_per_token: 0.000015,
+        input_cost_per_token_above_200k_tokens: 0.000006,
+        output_cost_per_token_above_200k_tokens: 0.0000225,
+      },
+    });
+
+    const tier = table["claude-sonnet-4-5"]!.above200k!;
+    expect(tier.cacheCreationCostPerToken).toBeCloseTo(0.000006 * 1.25, 12);
+    expect(tier.cacheReadCostPerToken).toBeCloseTo(0.000006 * 0.1, 12);
+  });
+});

@@ -1,4 +1,4 @@
-import type { PricingTable, ModelPricing } from "../types/pricing.js";
+import type { PricingTable, ModelPricing, RateSet } from "../types/pricing.js";
 import {
   loadPricingCache,
   loadPricingCacheEntry,
@@ -6,6 +6,7 @@ import {
 } from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
 import { anchorToSnapshot, isSaneModelPricing } from "./pricing-validation.js";
+import { TIER_FIELDS } from "./pricing-tiers.js";
 
 export const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
@@ -73,6 +74,29 @@ export async function refreshPricing(): Promise<boolean> {
   }
 }
 
+/**
+ * The feed publishes the long-context tier as four sibling fields rather than
+ * a nested object. Both premium input and output must be present before a
+ * tier is attached: a half-published tier would charge premium input against
+ * standard output and read as authoritative. Missing premium cache rates
+ * derive off the PREMIUM input rate exactly as the base ones derive off the
+ * base input rate.
+ */
+function parseTier(model: Record<string, unknown>): RateSet | null {
+  const input = model[TIER_FIELDS.input];
+  const output = model[TIER_FIELDS.output];
+  if (typeof input !== "number" || typeof output !== "number") return null;
+
+  const cacheCreation = model[TIER_FIELDS.cacheCreation];
+  const cacheRead = model[TIER_FIELDS.cacheRead];
+  return {
+    inputCostPerToken: input,
+    outputCostPerToken: output,
+    cacheCreationCostPerToken: typeof cacheCreation === "number" ? cacheCreation : input * 1.25,
+    cacheReadCostPerToken: typeof cacheRead === "number" ? cacheRead : input * 0.1,
+  };
+}
+
 export function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
   const table: PricingTable = {};
 
@@ -96,6 +120,9 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
           ? model["cache_read_input_token_cost"]
           : inputCost * 0.1,
     };
+
+    const tier = parseTier(model);
+    if (tier) pricing.above200k = tier;
 
     // Bounds before storage, so an absurd or zero price never reaches the
     // cache, the bar, or the regenerated snapshot (#91). Per entry: one

@@ -2318,6 +2318,16 @@ function savePricingCache(data) {
 }
 
 //#endregion
+//#region src/data/pricing-tiers.ts
+/** The LiteLLM feed's names for the tier. It encodes the threshold in them. */
+const TIER_FIELDS = {
+	input: "input_cost_per_token_above_200k_tokens",
+	output: "output_cost_per_token_above_200k_tokens",
+	cacheCreation: "cache_creation_input_token_cost_above_200k_tokens",
+	cacheRead: "cache_read_input_token_cost_above_200k_tokens"
+};
+
+//#endregion
 //#region src/data/pricing-fetcher.ts
 const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 /**
@@ -2377,6 +2387,27 @@ async function refreshPricing() {
 		return false;
 	}
 }
+/**
+* The feed publishes the long-context tier as four sibling fields rather than
+* a nested object. Both premium input and output must be present before a
+* tier is attached: a half-published tier would charge premium input against
+* standard output and read as authoritative. Missing premium cache rates
+* derive off the PREMIUM input rate exactly as the base ones derive off the
+* base input rate.
+*/
+function parseTier(model) {
+	const input = model[TIER_FIELDS.input];
+	const output = model[TIER_FIELDS.output];
+	if (typeof input !== "number" || typeof output !== "number") return null;
+	const cacheCreation = model[TIER_FIELDS.cacheCreation];
+	const cacheRead = model[TIER_FIELDS.cacheRead];
+	return {
+		inputCostPerToken: input,
+		outputCostPerToken: output,
+		cacheCreationCostPerToken: typeof cacheCreation === "number" ? cacheCreation : input * 1.25,
+		cacheReadCostPerToken: typeof cacheRead === "number" ? cacheRead : input * .1
+	};
+}
 function parseLitellmPricing(data) {
 	const table = {};
 	for (const [key, value] of Object.entries(data)) {
@@ -2391,6 +2422,8 @@ function parseLitellmPricing(data) {
 			cacheCreationCostPerToken: typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25,
 			cacheReadCostPerToken: typeof model["cache_read_input_token_cost"] === "number" ? model["cache_read_input_token_cost"] : inputCost * .1
 		};
+		const tier = parseTier(model);
+		if (tier) pricing.above200k = tier;
 		if (!isSaneModelPricing(pricing)) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
 		table[modelId] = pricing;
