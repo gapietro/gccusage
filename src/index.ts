@@ -1,6 +1,6 @@
 import { readStdin, parseStatusJson } from "./data/stdin-reader.js";
 import { loadSettings, getConfigPath } from "./config/loader.js";
-import { formatConfigError, formatStdinError } from "./config/error-line.js";
+import { formatConfigError, formatStdinError, formatStdinTimeout } from "./config/error-line.js";
 import { runStatusline } from "./statusline.js";
 import { runCli } from "./cli.js";
 
@@ -39,8 +39,22 @@ async function main(): Promise<void> {
   const isTTY = process.stdin.isTTY;
   let raw = "";
   if (!isTTY) {
-    const result = await readStdin();
-    raw = result.raw;
+    const { raw: payload, timedOut, timeoutMs } = await readStdin();
+    if (timedOut) {
+      // Returning here — before the parse and before runStatusline — keeps the
+      // statusline cache untouched, matching the two paths above. It matters:
+      // the empty-object bar used to be *written* to the cache under the empty
+      // payload's key, so a second timeout inside the TTL served the wrong bar
+      // from cache without even reading stdin.
+      //
+      // Partial bytes still report a timeout rather than being parsed. Claude
+      // Code end()s stdin immediately after writing, so bytes without an end
+      // mean truncation, and "stdin is not valid JSON" would misdiagnose the
+      // cause in the one place the user gets to read (#87).
+      process.stdout.write(formatStdinTimeout(timeoutMs));
+      return;
+    }
+    raw = payload;
   }
 
   // A bad FIELD is absorbed by the schema and costs only that field. An error

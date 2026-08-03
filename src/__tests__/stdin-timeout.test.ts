@@ -1,5 +1,10 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { PassThrough } from "node:stream";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   readStdin,
   resolveTimeoutMs,
@@ -91,4 +96,138 @@ describe("resolveTimeoutMs", () => {
       expect(resolveTimeoutMs()).toBe(DEFAULT_STDIN_TIMEOUT_MS);
     },
   );
+});
+
+// package.json sets "type": "module", so __dirname does not exist here.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DIST = path.resolve(HERE, "../../dist/index.js");
+const distExists = fs.existsSync(DIST);
+
+const PAYLOAD = JSON.stringify({
+  session_id: "00000000-0000-4000-8000-0000000000fe",
+  model: { id: "claude-opus-4-6", display_name: "Opus 4.6" },
+  workspace: { current_dir: "/tmp/x", project_dir: "/tmp/x" },
+  cost: {
+    total_cost_usd: 7.5,
+    total_duration_ms: 60_000,
+    total_api_duration_ms: 1000,
+    total_lines_added: 0,
+    total_lines_removed: 0,
+  },
+  context_window: {
+    used_percentage: 42,
+    context_window_size: 200_000,
+    current_usage: {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_creation_input_tokens: 10,
+      cache_read_input_tokens: 90,
+    },
+    total_input_tokens: 100,
+    total_output_tokens: 50,
+  },
+});
+
+describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    // A fresh HOME and cache per test: no daily store carried between cases,
+    // and no statusline cache hit serving one test's bar to another.
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-stdin-"));
+    fs.mkdirSync(path.join(dir, "cache"), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(opts: {
+    payload: string | null;
+    writeAfterMs: number;
+    timeoutMs: number;
+  }): Promise<{ stdout: string; status: number | null }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [DIST], {
+        env: {
+          ...process.env,
+          HOME: dir,
+          XDG_CACHE_HOME: path.join(dir, "cache"),
+          GCCUSAGE_STDIN_TIMEOUT_MS: String(opts.timeoutMs),
+          COLUMNS: "120",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.on("error", reject);
+      child.on("close", (status) => resolve({ stdout, status }));
+
+      // On the timeout path the child has already destroyed its stdin by the
+      // time we write, so the pipe is gone and the write raises EPIPE. That is
+      // the expected outcome of the feature, not a failure — without this
+      // handler it surfaces as an unhandled 'error' event and kills the runner.
+      child.stdin.on("error", () => {});
+
+      setTimeout(() => {
+        if (opts.payload === null) child.stdin.end();
+        else child.stdin.end(opts.payload);
+      }, opts.writeAfterMs);
+    });
+  }
+
+  it("shows the degraded line instead of a zeroed bar when the writer is slow", async () => {
+    const { stdout, status } = await run({
+      payload: PAYLOAD,
+      writeAfterMs: 500,
+      timeoutMs: 200,
+    });
+
+    expect(stdout).toContain("⚠ gccusage");
+    expect(stdout).toContain("within 200ms");
+    // The issue's literal acceptance criterion. Before the fix this rendered
+    // "$0.00" beside a Today: figure read from the daily store.
+    expect(stdout).not.toContain("$0.00");
+    // Claude Code discards output from a non-zero exit, so the message would
+    // never reach the user if this were anything but 0.
+    expect(status).toBe(0);
+    // Returning before runStatusline must leave the cache alone. Otherwise the
+    // degraded bar is written under the empty payload's key and a second
+    // timeout inside the TTL serves it back without reading stdin at all.
+    expect(
+      fs.existsSync(path.join(dir, "cache", "gccusage", "statusline-cache.json")),
+    ).toBe(false);
+  });
+
+  it("renders the normal bar when the payload arrives promptly", async () => {
+    const { stdout, status } = await run({
+      payload: PAYLOAD,
+      writeAfterMs: 0,
+      timeoutMs: 2000,
+    });
+
+    // Guards against the fix firing on the happy path.
+    expect(stdout).not.toContain("⚠");
+    expect(stdout).toContain("$7.50");
+    expect(status).toBe(0);
+  });
+
+  it("stays silent when stdin closes cleanly having sent nothing", async () => {
+    const { stdout, status } = await run({
+      payload: null,
+      writeAfterMs: 0,
+      timeoutMs: 2000,
+    });
+
+    // Deliberately unchanged: this is `gccusage < /dev/null` and pipe-based
+    // smoke checks. Pinned so a later tidy-up cannot quietly widen the
+    // degraded line to cover a case we decided to leave alone.
+    expect(stdout).not.toContain("⚠");
+    expect(stdout).toContain("$0.00");
+    expect(status).toBe(0);
+  });
 });
