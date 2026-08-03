@@ -6,7 +6,7 @@ import { colorize } from "./colors.js";
 import { renderPowerlineSegments } from "./powerline.js";
 import { applyFlex, type FlexMode } from "./flex.js";
 import { truncateAnsi } from "./truncation.js";
-import { visibleLength } from "../utils/terminal.js";
+import { sanitizeAnsi, visibleLength } from "../utils/terminal.js";
 import { shrinkOutputs } from "./shrink.js";
 
 interface WidgetResult {
@@ -35,8 +35,9 @@ function collectWidgets(
     if (!widget) continue;
     const output = widget.render(context, config);
     if (!output) continue;
-    if (isSeparatorOutput(output)) continue;
-    results.push({ output, priority: config.priority ?? 99 });
+    const sanitized = sanitizeOutput(output);
+    if (isSeparatorOutput(sanitized)) continue;
+    results.push({ output: sanitized, priority: config.priority ?? 99 });
   }
   return results;
 }
@@ -152,7 +153,7 @@ function renderFull(context: RenderContext, settings: Settings): string {
       const output = widget.render(context, widgetConfig);
       if (!output) continue;
 
-      outputs.push(output);
+      outputs.push(sanitizeOutput(output));
     }
 
     const cleaned = cleanSeparators(outputs);
@@ -170,6 +171,16 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   let lastWasSeparator = true;
 
   for (const output of outputs) {
+    // A widget that rendered nothing (issue #115: a custom-command whose
+    // output sanitises down to "") is dropped unconditionally, regardless of
+    // its position in the line — unlike an explicit `|`/`│` marker, it has no
+    // content to separate, so there is no "leading/trailing/consecutive"
+    // case where keeping it makes sense. Checked before isSeparatorOutput,
+    // which also matches "" but only removes it when adjacent to another
+    // separator or at a boundary — the collapse logic that IS still correct
+    // for a deliberately placed pipe marker.
+    if (isEmptyOutput(output)) continue;
+
     const isSep = isSeparatorOutput(output);
     if (isSep && lastWasSeparator) continue;
     result.push(output);
@@ -183,7 +194,30 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   return result;
 }
 
+function isEmptyOutput(output: WidgetOutput): boolean {
+  return output.text.trim() === "";
+}
+
 function isSeparatorOutput(output: WidgetOutput): boolean {
   const text = output.text.trim();
   return text === "|" || text === "│" || text === "" || output.text === " | ";
+}
+
+/**
+ * Widget text, with every terminal control sequence but SGR removed.
+ *
+ * Applied to EVERY widget rather than to `custom-command` alone. No widget
+ * emits ANSI of its own — colour arrives later, in `powerline.ts`, from the
+ * `fg`/`bg` fields — so a blanket pass cannot damage anything this codebase
+ * generates, and it covers `git-branch`, `project`, `cwd` and `model`, which
+ * all surface text this tool did not author. Requiring each widget to opt in
+ * is the same shape of failure as "registered ≠ displayed". Issue #115.
+ *
+ * Callers must run this BEFORE `isSeparatorOutput`: text that sanitises down
+ * to nothing has to reach that function's `text === ""` branch, or a command
+ * emitting only escapes lays out as a bare padded segment with a separator on
+ * each side.
+ */
+function sanitizeOutput(output: WidgetOutput): WidgetOutput {
+  return { ...output, text: sanitizeAnsi(output.text) };
 }

@@ -924,3 +924,189 @@ describe("compact mode also shrinks (renderCompact renders through the shared re
     expect(plain).not.toContain("an-extremely-long-project-directory-name");
   });
 });
+
+describe("widget text sanitising (#115)", () => {
+  const ESC = "\u001b";
+
+  /** A shell command that writes `payload` to stdout verbatim, portably. */
+  function emit(payload: string): string {
+    return `${process.execPath} -e 'process.stdout.write(${JSON.stringify(payload)})'`;
+  }
+
+  /**
+   * Every escape in `bar` is SGR.
+   *
+   * Stronger than asserting one hazardous sequence is absent, and independent
+   * of the implementation: it re-derives "escape" here rather than importing
+   * the recogniser under test, so a bug in that recogniser cannot hide behind
+   * it. chalk emits SGR and nothing else, so this holds for the whole bar.
+   */
+  function expectOnlySgr(bar: string): void {
+    const escapes = bar.match(/\u001b(?:\[[0-?]*[ -\/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|.)/g) ?? [];
+    expect(escapes.filter((e) => !/^\u001b\[[0-9;:]*m$/.test(e))).toEqual([]);
+  }
+
+  function renderCommand(command: string): string {
+    return renderStatusline(
+      makeContext(),
+      makeSettings({ lines: [{ widgets: [{ type: "custom-command", command }], flex: "left" }] }),
+    );
+  }
+
+  const HAZARDS: Array<[name: string, sequence: string]> = [
+    ["erase display", `${ESC}[2J`],
+    ["cursor up", `${ESC}[1A`],
+    ["cursor home", `${ESC}[H`],
+    ["hide cursor", `${ESC}[?25l`],
+    ["carriage return", "\r"],
+    ["window title", `${ESC}]0;pwned`],
+    ["modifyOtherKeys", `${ESC}[>4;2m`],
+  ];
+
+  it.each(HAZARDS)("a custom-command emitting %s cannot put it in the bar", (_name, sequence) => {
+    const bar = renderCommand(emit(`${sequence}visible`));
+
+    expect(bar).not.toContain(sequence);
+    expectOnlySgr(bar);
+    // Without this the test passes vacuously when the widget renders nothing at
+    // all — "sanitised" and "absent" are different outcomes and only the first
+    // is the fix.
+    expect(stripAnsi(bar)).toContain("visible");
+  });
+
+  it("keeps SGR colour emitted by a custom-command", () => {
+    const bar = renderCommand(emit(`${ESC}[31mred${ESC}[0m`));
+
+    expect(bar).toContain(`${ESC}[31m`);
+    expect(stripAnsi(bar)).toContain("red");
+  });
+
+  it("sanitises on the compact path too", () => {
+    const bar = renderStatusline(
+      makeContext({ terminalWidth: 40 }),
+      makeSettings({
+        compact: { mode: "always", threshold: 80 },
+        lines: [
+          {
+            widgets: [{ type: "custom-command", command: emit(`${ESC}[2Jcompact`) }],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    expect(bar).not.toContain(`${ESC}[2J`);
+    expectOnlySgr(bar);
+    expect(stripAnsi(bar)).toContain("compact");
+  });
+
+  // Powerline mode, because it is the mode where a surviving empty segment is
+  // unmistakable: every segment costs two padding spaces and a separator glyph.
+  // The oracle is equality with the same bar rendered without the widget at
+  // all — "contributes nothing" is the actual contract.
+  it("contributes no segment for a command that emits only control sequences", () => {
+    const powerline = { enabled: true, theme: "default", separator: "▶", separatorThin: "│" };
+    const context = makeContext({ terminalWidth: 200 });
+
+    const withNoise = renderStatusline(
+      context,
+      makeSettings({
+        powerline,
+        lines: [
+          {
+            widgets: [
+              { type: "custom-text", text: "before" },
+              { type: "custom-command", command: emit(`${ESC}[2J${ESC}[H`) },
+              { type: "custom-text", text: "after" },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    const without = renderStatusline(
+      context,
+      makeSettings({
+        powerline,
+        lines: [
+          {
+            widgets: [
+              { type: "custom-text", text: "before" },
+              { type: "custom-text", text: "after" },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    expect(withNoise).toBe(without);
+  });
+
+  // Compact-mode variant of the test above: `renderCompact` reaches
+  // `collectWidgets`, not `cleanSeparators`, so this is the row that actually
+  // exercises the isSeparatorOutput-ordering requirement in that function.
+  it("contributes no segment for a control-only command in compact mode either", () => {
+    const powerline = { enabled: true, theme: "default", separator: "▶", separatorThin: "│" };
+    const context = makeContext({ terminalWidth: 200 });
+    const compact = { mode: "always" as const, threshold: 80 };
+
+    const withNoise = renderStatusline(
+      context,
+      makeSettings({
+        powerline,
+        compact,
+        lines: [
+          {
+            widgets: [
+              { type: "custom-text", text: "before", priority: 1 },
+              { type: "custom-command", command: emit(`${ESC}[2J${ESC}[H`), priority: 2 },
+              { type: "custom-text", text: "after", priority: 3 },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    const without = renderStatusline(
+      context,
+      makeSettings({
+        powerline,
+        compact,
+        lines: [
+          {
+            widgets: [
+              { type: "custom-text", text: "before", priority: 1 },
+              { type: "custom-text", text: "after", priority: 3 },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    expect(withNoise).toBe(without);
+  });
+
+  it("cannot be completed into a hazard by the text of a later widget", () => {
+    const bar = renderStatusline(
+      makeContext(),
+      makeSettings({
+        lines: [
+          {
+            widgets: [
+              { type: "custom-command", command: emit(`${ESC}[2`) },
+              { type: "custom-text", text: "Jam" },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    expectOnlySgr(bar);
+    expect(stripAnsi(bar)).toContain("Jam");
+  });
+});

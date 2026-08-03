@@ -1648,7 +1648,7 @@ function loadSettings() {
 //#endregion
 //#region src/config/error-line.ts
 const BOLD_RED = "\x1B[1;31m";
-const RESET$1 = "\x1B[0m";
+const RESET$2 = "\x1B[0m";
 /** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
 function shortenPath(filePath) {
 	const home = process.env["HOME"];
@@ -1661,7 +1661,7 @@ function shortenPath(filePath) {
 * terminals the default `▶` separator targets.
 */
 function formatConfigError(error, configPath) {
-	return `${BOLD_RED}⚠ gccusage config${RESET$1}  ${shortenPath(configPath)} — ${error}`;
+	return `${BOLD_RED}⚠ gccusage config${RESET$2}  ${shortenPath(configPath)} — ${error}`;
 }
 /**
 * The same treatment for a payload that could not be read at all (#83).
@@ -1672,7 +1672,7 @@ function formatConfigError(error, configPath) {
 * individual fields never reach here; the schema absorbs those.
 */
 function formatStdinError(error) {
-	return `${BOLD_RED}⚠ gccusage${RESET$1}  ${error}`;
+	return `${BOLD_RED}⚠ gccusage${RESET$2}  ${error}`;
 }
 /**
 * A payload that never arrived (#87), as distinct from one that arrived
@@ -1684,7 +1684,7 @@ function formatStdinError(error) {
 * the bar and throw this message away.
 */
 function formatStdinTimeout(timeoutMs) {
-	return `${BOLD_RED}⚠ gccusage${RESET$1}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
+	return `${BOLD_RED}⚠ gccusage${RESET$2}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
 }
 /**
 * Not `formatDuration` from utils/format.ts: that floors to whole seconds and
@@ -3562,6 +3562,111 @@ function isZeroWidthControl(cluster) {
 function visibleLength(str) {
 	return displayWidth(stripAnsi(str));
 }
+/**
+* SGR alone: `ESC [`, digits/`;`/`:`, `m`. Anchored, and deliberately narrower
+* than "a CSI whose final byte is `m`".
+*
+* `ESCAPE_SEQUENCE` spells a CSI's parameter bytes `[0-?]`, per ECMA-48, and
+* that range includes the private markers `< = > ?`. So `ESC[>4;2m` ends in
+* `m` and would pass the obvious check — but it is xterm's `modifyOtherKeys`,
+* which reconfigures how the terminal reports keypresses. Letting a
+* `custom-command` do that is precisely the hazard #115 exists to close.
+*
+* `:` is admitted for T.416 subparameter forms (`38:2::10:20:30`), which real
+* tools emit for truecolour and underline styles. A private marker may only
+* appear as the FIRST parameter byte, so admitting `:` cannot smuggle one in.
+* Intermediate bytes are excluded too: `ESC[ m` is not SGR.
+*
+* This is a second pattern in a module whose whole point is that there is one
+* recogniser. It does not break that rule. `sanitizeAnsi` uses
+* `escapeLengthAt` — and only `escapeLengthAt` — to decide where a sequence
+* starts and ends; this pattern only classifies a span whose boundaries are
+* already fixed. Finding boundaries is the job that must never be duplicated.
+* Keep it anchored so it can only ever test a whole span.
+*/
+const SGR_ONLY = /^\u001b\[[0-9;:]*m$/;
+const RESET$1 = "\x1B[0m";
+/**
+* `str` with every terminal control sequence removed except SGR colour.
+*
+* The other half of #113. That fix made non-SGR escapes *measure* correctly;
+* measuring them correctly does not stop them reaching the terminal. This
+* statusline is not written to a terminal the tool owns — Claude Code embeds
+* it in its own Ink-rendered TUI — so `ESC[2J`, `ESC[1A`, `ESC[?25l`, `ESC]0;`
+* or a bare `CR` corrupt a rendering this tool has no control over, on a
+* cadence of every render. Issue #115. Reachable through `custom-command`,
+* which puts arbitrary shell output in the bar.
+*
+* **Three rules here invert what the rest of this module does, each on
+* purpose:**
+*
+* - **An incomplete escape is dropped, not kept.** For measuring, a sequence
+*   the grammar cannot complete stays visible text: over-measuring truncates
+*   early, which is cosmetic, while under-measuring overflows the terminal.
+*   For emitting, keeping it is the attack — output ending in an unterminated
+*   `ESC[2` is completed into a screen-clear by the next literal `J` anywhere
+*   later in the bar, and the terminal does not care that the two halves came
+*   from different widgets. Only the ESC byte goes; the printable remainder
+*   stays and renders as literal text.
+* - **LF is dropped, though `stripAnsi` deliberately keeps it.** There, LF is
+*   structural: the bar is two lines and callers `split("\n")`. Here we are one
+*   layer down, on a single segment, before `renderFull` joins lines — so a LF
+*   can only break the bar's line structure from inside a segment.
+* - **TAB becomes one space rather than being dropped.** Its width is not
+*   knowable statically, so `ZERO_WIDTH_CONTROL_CLASS` excludes it and callers
+*   count it as 1 — a floor. One space makes that floor exact, and keeps the
+*   separation the tab was expressing instead of turning `foo⇥bar` into
+*   `foobar`.
+*
+* **OSC-8 hyperlinks are dropped**, which is the judgment call #115 flags.
+* Keeping them would mean parsing OSC parameters to separate `ESC]8;;uri` from
+* `ESC]0;title` — the allowlist stops being one sequence class and becomes a
+* parameter-level policy — and force-closing every link, since an unclosed one
+* leaks link state onto everything Claude Code draws after the bar. That is
+* real machinery for a capability nobody has asked for, and which only some
+* terminals render inside a statusline. To relax it, widen this one predicate.
+*
+* **A trailing reset is appended when any SGR survives.** `powerline.ts` wraps
+* each segment as `chalk.hex(fg).bgHex(bg)(" " + text + " ")`, and chalk closes
+* only fg (`ESC[39m`) and bg (`ESC[49m`) — never a full reset. So an unclosed
+* `ESC[7m` or `ESC[5m` survives past the segment, past the bar, and into
+* Claude Code's TUI: the same corruption class as `ESC[2J`, arriving through a
+* sequence we agreed to allow. The cost is the segment's trailing padding
+* column losing its background in powerline mode, which is already being paid
+* — a command that colours itself almost always emits its own `ESC[0m`.
+*
+* Text with no visible content collapses to `""`, so `renderer.ts` sees what it
+* already treats as a separator and cleans it away, rather than laying out a
+* bare padded segment with a separator on each side.
+*/
+function sanitizeAnsi(str) {
+	let out = "";
+	let sawSgr = false;
+	let i = 0;
+	while (i < str.length) {
+		const ch = str[i];
+		if (ch === "\x1B") {
+			const length = escapeLengthAt(str, i);
+			if (length === 0) {
+				i += 1;
+				continue;
+			}
+			const sequence = str.slice(i, i + length);
+			if (SGR_ONLY.test(sequence)) {
+				out += sequence;
+				sawSgr = true;
+			}
+			i += length;
+			continue;
+		}
+		if (ch === "	") out += " ";
+		else if (ch !== "\n" && !isZeroWidthControl(ch)) out += ch;
+		i += 1;
+	}
+	if (visibleLength(out) === 0) return "";
+	if (!sawSgr || out.endsWith(RESET$1)) return out;
+	return out + RESET$1;
+}
 
 //#endregion
 //#region src/data/daily-cost-tracker.ts
@@ -5110,9 +5215,10 @@ function collectWidgets(configs, context) {
 		if (!widget) continue;
 		const output = widget.render(context, config);
 		if (!output) continue;
-		if (isSeparatorOutput(output)) continue;
+		const sanitized = sanitizeOutput(output);
+		if (isSeparatorOutput(sanitized)) continue;
 		results.push({
-			output,
+			output: sanitized,
 			priority: config.priority ?? 99
 		});
 	}
@@ -5183,7 +5289,7 @@ function renderFull(context, settings) {
 			if (!widget) continue;
 			const output = widget.render(context, widgetConfig);
 			if (!output) continue;
-			outputs.push(output);
+			outputs.push(sanitizeOutput(output));
 		}
 		const cleaned = cleanSeparators(outputs);
 		if (cleaned.length === 0) continue;
@@ -5196,6 +5302,7 @@ function cleanSeparators(outputs) {
 	const result = [];
 	let lastWasSeparator = true;
 	for (const output of outputs) {
+		if (isEmptyOutput(output)) continue;
 		const isSep = isSeparatorOutput(output);
 		if (isSep && lastWasSeparator) continue;
 		result.push(output);
@@ -5204,9 +5311,33 @@ function cleanSeparators(outputs) {
 	while (result.length > 0 && isSeparatorOutput(result[result.length - 1])) result.pop();
 	return result;
 }
+function isEmptyOutput(output) {
+	return output.text.trim() === "";
+}
 function isSeparatorOutput(output) {
 	const text = output.text.trim();
 	return text === "|" || text === "│" || text === "" || output.text === " | ";
+}
+/**
+* Widget text, with every terminal control sequence but SGR removed.
+*
+* Applied to EVERY widget rather than to `custom-command` alone. No widget
+* emits ANSI of its own — colour arrives later, in `powerline.ts`, from the
+* `fg`/`bg` fields — so a blanket pass cannot damage anything this codebase
+* generates, and it covers `git-branch`, `project`, `cwd` and `model`, which
+* all surface text this tool did not author. Requiring each widget to opt in
+* is the same shape of failure as "registered ≠ displayed". Issue #115.
+*
+* Callers must run this BEFORE `isSeparatorOutput`: text that sanitises down
+* to nothing has to reach that function's `text === ""` branch, or a command
+* emitting only escapes lays out as a bare padded segment with a separator on
+* each side.
+*/
+function sanitizeOutput(output) {
+	return {
+		...output,
+		text: sanitizeAnsi(output.text)
+	};
 }
 
 //#endregion
