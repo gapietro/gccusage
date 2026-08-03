@@ -55,8 +55,8 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "context-percent": { text: "[===-------] 27% (1.00M)", why: "used_percentage against a 1M window" },
   "git-branch": { text: "reality-fixture", why: "scratch repo branch" },
   "git-changes": { text: "+1", why: "scratch repo has one added file" },
-  "tokens-input": { text: "In: 396", why: "metrics.session.inputTokens — uncached input only" },
-  "tokens-output": { text: "Out: 137.8k", why: "metrics.session.outputTokens, real session total" },
+  "tokens-input": { text: "In: 396", why: "metrics.totals.inputTokens — uncached input only" },
+  "tokens-output": { text: "Out: 137.8k", why: "metrics.totals.outputTokens, real session total" },
   "tokens-cached": {
     text: "Cached: 35.37M",
     why: "cacheCreation + cacheRead. Labelled 'Cached:' so it cannot be confused with cache-hit-rate's 'Hit:' percentage — both said 'Cache:' (#60 resolved)",
@@ -92,7 +92,7 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   },
   "token-breakdown": {
     text: "In:396 Out:137.8k",
-    why: "metrics.session totals (#58) — the same source tokens-input and tokens-output read, so all three now agree about one session. Was In:268.8k Out:536 from context_window.total_input/output_tokens, a last-assistant-message snapshot",
+    why: "metrics.totals (#58) — the same source tokens-input and tokens-output read, so all three now agree about one session. Was In:268.8k Out:536 from context_window.total_input/output_tokens, a last-assistant-message snapshot",
   },
   "session-timer": {
     text: "Up: 1hr 46m",

@@ -125,10 +125,14 @@ describe("cache-miss cost is flat in the day's transcript volume (#94)", () => {
       const paths = writeCorpus(8, linesPerFile);
       await buildRenderContext(stdin, settingsWith("calculated"));
       vi.mocked(parseJsonlFile).mockClear();
-      await buildRenderContext(stdin, settingsWith("calculated"));
+      const warm = await buildRenderContext(stdin, settingsWith("calculated"));
 
       // Exactly the session's own transcript, nothing else.
       expect(vi.mocked(parseJsonlFile).mock.calls.map((c) => c[0])).toEqual([paths[0]]);
+      // Proves calculated mode actually engaged and priced the transcript,
+      // not just that the (possibly broken) gate read zero files and still
+      // produced a flat — but meaningless — byte count.
+      expect(warm.todayCostUsd).toBeGreaterThan(0);
       return bytesParsed();
     };
 

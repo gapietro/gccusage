@@ -180,7 +180,7 @@ describe("getTodayAggregate", () => {
     expect(result.totals.inputTokens).toBe(100);
   });
 
-  it("recomputes correctly from a schema-valid-looking but wrong cache file", () => {
+  it("recomputes correctly from a schema-invalid cache file", () => {
     write("a", [line("opus", 100, EARLIER_TODAY)]);
     const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
