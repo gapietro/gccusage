@@ -37,3 +37,24 @@ export function formatConfigError(error: string, configPath: string): string {
 export function formatStdinError(error: string): string {
   return `${BOLD_RED}⚠ gccusage${RESET}  ${error}`;
 }
+
+/**
+ * A payload that never arrived (#87), as distinct from one that arrived
+ * unusable (`formatStdinError`). Naming the deadline is what separates
+ * "Claude Code is wedged" from "Claude Code sent garbage" for the reader.
+ *
+ * Written to stdout and followed by a normal exit: Claude Code only renders
+ * statusline output when the command exits 0, so a non-zero exit would blank
+ * the bar and throw this message away.
+ */
+export function formatStdinTimeout(timeoutMs: number): string {
+  return `${BOLD_RED}⚠ gccusage${RESET}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
+}
+
+/**
+ * Not `formatDuration` from utils/format.ts: that floors to whole seconds and
+ * renders a 200ms test deadline as "0s".
+ */
+function formatDeadline(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${ms / 1000}s`;
+}
