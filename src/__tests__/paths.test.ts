@@ -8,7 +8,6 @@ import {
   getClaudeDataDir,
   getProjectsDir,
   findTodayJsonlFileStats,
-  findTodayJsonlFiles,
 } from "../utils/paths.js";
 
 let tmpHome: string;
@@ -132,12 +131,5 @@ describe("findTodayJsonlFileStats", () => {
     fs.utimesSync(filePath, yesterday, yesterday);
 
     expect(findTodayJsonlFileStats()).toHaveLength(0);
-  });
-
-  it("findTodayJsonlFiles returns the same paths", () => {
-    const a = writeTranscript("a", "x\n");
-    const b = writeTranscript("b", "y\n");
-
-    expect(findTodayJsonlFiles().sort()).toEqual([a, b].sort());
   });
 });

@@ -111,7 +111,3 @@ export function findTodayJsonlFileStats(): TodayJsonlFile[] {
   }
   return files;
 }
-
-export function findTodayJsonlFiles(): string[] {
-  return findTodayJsonlFileStats().map((f) => f.path);
-}

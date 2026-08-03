@@ -44,6 +44,7 @@ vi.mock("../data/pricing-fetcher.js", () => ({
 describe("gccusage today", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
+  let originalXdg: string | undefined;
   let lines: string[];
   let logSpy: ReturnType<typeof vi.spyOn>;
 
@@ -64,7 +65,9 @@ describe("gccusage today", () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-cli-"));
     originalHome = process.env["HOME"];
+    originalXdg = process.env["XDG_CACHE_HOME"];
     process.env["HOME"] = tmpDir;
+    process.env["XDG_CACHE_HOME"] = tmpDir;
     lines = [];
     logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       lines.push(args.join(" "));
@@ -75,6 +78,8 @@ describe("gccusage today", () => {
     logSpy.mockRestore();
     if (originalHome === undefined) delete process.env["HOME"];
     else process.env["HOME"] = originalHome;
+    if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = originalXdg;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
