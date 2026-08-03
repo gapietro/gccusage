@@ -212,6 +212,13 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
  * `custom-text` or `separator` config is a real segment a user configured on
  * purpose, not sanitiser fallout, and must survive full-mode rendering
  * regardless of where it sits in the line.
+ *
+ * That guarantee is `cleanSeparators`-only, i.e. `renderFull`. `renderCompact`
+ * never calls this function — it filters via `collectWidgets`'s inline
+ * `isSeparatorOutput(sanitized)` check, whose looser `.trim() === ""` drops a
+ * whitespace-only `custom-text` the same as a real empty one. That divergence
+ * is pre-existing (not introduced here) and deliberately left alone: changing
+ * compact mode to match full mode would be an unrequested behaviour change.
  */
 function isEmptyOutput(output: WidgetOutput): boolean {
   return output.text === "";

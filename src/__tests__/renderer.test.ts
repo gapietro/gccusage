@@ -927,6 +927,7 @@ describe("compact mode also shrinks (renderCompact renders through the shared re
 
 describe("widget text sanitising (#115)", () => {
   const ESC = "\u001b";
+  const BEL = "\u0007";
 
   /** A shell command that writes `payload` to stdout verbatim, portably. */
   function emit(payload: string): string {
@@ -966,7 +967,7 @@ describe("widget text sanitising (#115)", () => {
     ["cursor home", `${ESC}[H`],
     ["hide cursor", `${ESC}[?25l`],
     ["carriage return", "\r", "visible\rmore"],
-    ["window title", `${ESC}]0;pwned`],
+    ["window title", `${ESC}]0;pwned${BEL}`],
     ["modifyOtherKeys", `${ESC}[>4;2m`],
   ];
 

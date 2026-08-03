@@ -58,10 +58,25 @@ The call sits immediately after `if (!output) continue;` and **before**
 
 `isSeparatorOutput` already treats `text === ""` as a separator. Placing the
 sanitiser first means text that reduces to nothing — a command emitting only
-escapes — flows into that existing branch and gets cleaned away by
-`cleanSeparators`, instead of rendering as a bare padded segment with a
-separator on each side. No new empty-drop rule is needed; the ordering is what
-buys it.
+escapes — flows into that existing branch in `collectWidgets`, so the compact
+path cleans it away with no further change.
+
+**`renderFull` needed a second, new rule.** `renderFull` does not call
+`isSeparatorOutput` inline; it hands its collected outputs to
+`cleanSeparators`, which only removes a separator-shaped entry when it is
+adjacent to another separator or sits at a line boundary — the behaviour a
+deliberately placed `{ type: "separator" }` widget mid-line depends on. An
+emptied `custom-command` sitting between two ordinary widgets is neither
+adjacent nor a boundary, so `cleanSeparators` kept it as-is and it laid out as
+a bare padded, coloured segment with a separator glyph on each side — visible
+proof the command ran, contradicting the whole point of sanitising it. The
+ordering above is necessary but was not sufficient: the shipped code adds
+`isEmptyOutput`, a predicate keyed on the sanitiser's exact empty-string
+contract (`text === ""`, not `.trim() === ""` — whitespace is visible output,
+not sanitiser fallout), checked in `cleanSeparators` *before* its existing
+consecutive/boundary collapse logic runs. `isEmptyOutput` is not redundant
+with the ordering rule; it is what makes `renderFull`'s empty-segment case
+actually collapse. See `src/render/renderer.ts`.
 
 ### The allowlist
 
@@ -93,8 +108,10 @@ SGR is therefore matched by its own narrow pattern: `ESC [`, then parameter
 bytes drawn from digits, `;` and `:` only, then `m`. No private markers, no
 intermediate bytes (`ESC [ SP m` is not SGR either). `:` is included for T.416
 subparameter forms such as `38:2::1:2:3`, which real tools emit for truecolour
-and underline styles; a private marker can only appear as the *first* parameter
-byte, so admitting `:` cannot smuggle one in.
+and underline styles; a private marker is excluded outright — the
+parameter-byte class admits only digits, `;` and `:`, so `<`, `=`, `>` and `?`
+cannot appear anywhere in it, not merely as the first byte — so admitting `:`
+cannot smuggle one in.
 
 This is a second recogniser in `terminal.ts`, which sits uneasily beside "never
 let a consumer re-derive 'is this an escape'". It does not violate that rule:
@@ -172,11 +189,17 @@ reset. So an allowed-but-unclosed `ESC[7m` (reverse) or `ESC[5m` (blink)
 survives past the segment, past the bar, and into Claude Code's TUI — the same
 corruption class as `ESC[2J`, arriving through a sequence we agreed to allow.
 
-If any SGR survives sanitising, one `ESC[0m` is appended. The cost is that the
-segment's trailing padding column loses its background in powerline mode. That
-cost is already being paid today: a command that colours itself almost always
-emits its own `ESC[0m`, which we keep, so that column is already resetting. Our
-reset introduces no new glitch and closes the leak.
+If any SGR survives sanitising, one `ESC[0m` is appended — unless the output
+already ends in `ESC[0m`, in which case nothing is appended. That guard is
+what makes the function idempotent: without it, sanitising an
+already-sanitised string (which itself ends in the appended reset, still
+valid SGR) would see SGR survive again and append a second one, so re-running
+the sanitiser would keep growing the string instead of reaching a fixed
+point. The cost of the reset itself is that the segment's trailing padding
+column loses its background in powerline mode. That cost is already being
+paid today: a command that colours itself almost always emits its own
+`ESC[0m`, which we keep, so that column is already resetting. Our reset
+introduces no new glitch and closes the leak.
 
 ## Testing
 

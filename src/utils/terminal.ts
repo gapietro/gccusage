@@ -164,8 +164,9 @@ export function visibleLength(str: string): number {
  * `custom-command` do that is precisely the hazard #115 exists to close.
  *
  * `:` is admitted for T.416 subparameter forms (`38:2::10:20:30`), which real
- * tools emit for truecolour and underline styles. A private marker may only
- * appear as the FIRST parameter byte, so admitting `:` cannot smuggle one in.
+ * tools emit for truecolour and underline styles. A private marker is excluded
+ * outright: the parameter-byte class admits only digits, `;` and `:`, so `<`,
+ * `=`, `>` and `?` cannot appear anywhere in it, not merely as the first byte.
  * Intermediate bytes are excluded too: `ESC[ m` is not SGR.
  *
  * This is a second pattern in a module whose whole point is that there is one
@@ -180,7 +181,27 @@ const SGR_ONLY = /^\u001b\[[0-9;:]*m$/;
 const RESET = "\u001b[0m";
 
 /**
- * `str` with every terminal control sequence removed except SGR colour.
+ * 8-bit C1 control range, U+0080-U+009F. \u009b is CSI and \u009d is OSC in
+ * their single-byte forms -- the same sequence classes ESCAPE_SEQUENCE
+ * recognises via their 7-bit ESC-prefixed spellings (ESC [ and ESC ]), one
+ * byte shorter. VTE-based terminals (GNOME Terminal, Tilix, Terminator) parse
+ * C1 controls when reading UTF-8, so a `custom-command` printing \u009b2J
+ * erases the screen and \u009d0;pwned retitles the window without ever
+ * spelling ESC -- issue #115's exact hazard, walking straight past a
+ * recogniser that only ever inspects `\u001b`.
+ *
+ * `sanitizeAnsi` alone drops these. `ZERO_WIDTH_CONTROL_CLASS` is
+ * deliberately NOT widened to cover this range: that constant governs
+ * measurement, whose semantics were settled by #113 and #86, and widening it
+ * would change what `visibleLength` counts as zero-width for every caller,
+ * not just this one.
+ */
+const C1_CONTROL = /[\u0080-\u009f]/;
+
+/**
+ * `str` with every terminal control sequence removed except SGR colour,
+ * whether spelled as a 7-bit ESC-prefixed sequence or its 8-bit C1
+ * equivalent.
  *
  * The other half of #113. That fix made non-SGR escapes *measure* correctly;
  * measuring them correctly does not stop them reaching the terminal. This
@@ -190,7 +211,7 @@ const RESET = "\u001b[0m";
  * cadence of every render. Issue #115. Reachable through `custom-command`,
  * which puts arbitrary shell output in the bar.
  *
- * **Three rules here invert what the rest of this module does, each on
+ * **Four rules here invert what the rest of this module does, each on
  * purpose:**
  *
  * - **An incomplete escape is dropped, not kept.** For measuring, a sequence
@@ -210,6 +231,11 @@ const RESET = "\u001b[0m";
  *   count it as 1 — a floor. One space makes that floor exact, and keeps the
  *   separation the tab was expressing instead of turning `foo⇥bar` into
  *   `foobar`.
+ * - **An 8-bit C1 introducer is dropped too, not just the 7-bit ESC form.**
+ *   \u009b (CSI) and \u009d (OSC) reach a VTE-based terminal identically to
+ *   `ESC [` / `ESC ]` -- see `C1_CONTROL` above. Only the one-byte
+ *   introducer goes; the printable remainder is ordinary text, same
+ *   failsafe as the stray-ESC rule.
  *
  * **OSC-8 hyperlinks are dropped**, which is the judgment call #115 flags.
  * Keeping them would mean parsing OSC parameters to separate `ESC]8;;uri` from
@@ -253,6 +279,11 @@ export function sanitizeAnsi(str: string): string {
       }
       i += length;
       continue;
+    }
+
+    if (C1_CONTROL.test(ch)) {
+      i += 1; // 8-bit C1 introducer: drop the byte, keep whatever printable
+      continue; // follows -- the same failsafe as the stray-ESC rule above.
     }
 
     if (ch === "\t") {

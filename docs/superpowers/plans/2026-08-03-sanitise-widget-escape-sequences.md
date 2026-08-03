@@ -343,7 +343,7 @@ git commit -m "feat: add sanitizeAnsi, an SGR-only allowlist for untrusted text 
 
 Both must be changed. Changing one leaves the other exposed, and the compact path is the one that fires on a narrow terminal.
 
-The call must go **after** `if (!output) continue;` and **before** `isSeparatorOutput(output)`. `isSeparatorOutput` returns true for `output.text.trim() === ""`, so ordering it this way is what makes an escapes-only command collapse into the existing separator cleanup instead of laying out as a bare padded segment. `renderFull` has no inline `isSeparatorOutput` call — `cleanSeparators` runs after its loop — but put the sanitise immediately after the null check there too, so both sites read identically.
+The call must go **after** `if (!output) continue;` and **before** `isSeparatorOutput(output)`. `isSeparatorOutput` returns true for `output.text.trim() === ""`, so ordering it this way is what makes an escapes-only command collapse into the existing separator cleanup on the `collectWidgets`/compact path instead of laying out as a bare padded segment. `renderFull` has no inline `isSeparatorOutput` call — `cleanSeparators` runs after its loop — so put the sanitise immediately after the null check there too, for read-identically consistency between the two sites, but **that alone is not sufficient for `renderFull`**: `cleanSeparators` only drops a separator-shaped entry when it is adjacent to another separator or sits at a line boundary (the behaviour a deliberately placed `{ type: "separator" }` widget mid-line depends on), so an emptied `custom-command` sitting between two ordinary widgets survives that logic unchanged and lays out as a bare padded segment anyway. Shipping this task correctly also required a new `isEmptyOutput` predicate in `cleanSeparators`, keyed on the sanitiser's exact `text === ""` contract and checked before the existing consecutive/boundary collapse — see Step 3's note below and `src/render/renderer.ts`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -389,7 +389,7 @@ describe("widget text sanitising (#115)", () => {
     ["cursor home", `${ESC}[H`],
     ["hide cursor", `${ESC}[?25l`],
     ["carriage return", "\r"],
-    ["window title", `${ESC}]0;pwned`],
+    ["window title", `${ESC}]0;pwned\u0007`],
     ["modifyOtherKeys", `${ESC}[>4;2m`],
   ];
 
@@ -504,6 +504,8 @@ Expected: FAIL — the hazard sequences are present in the rendered bar.
 **Check what fails before continuing.** If `expect(stripAnsi(bar)).toContain("visible")` is what fails, the harness is broken (the widget is not rendering at all) and must be fixed *now* — otherwise the `not.toContain` assertions will go green for the wrong reason once the implementation lands, and the whole block is vacuous.
 
 - [ ] **Step 3: Wire the sanitiser into both collection sites**
+
+**This step's code block is necessary but not sufficient to make Step 1's tests pass.** The `contributes no segment for a command that emits only control sequences` test renders in full (non-compact) mode, which goes through `renderFull` → `cleanSeparators`, not `collectWidgets`. Wiring only the two call sites below leaves that test failing, because `cleanSeparators`'s existing collapse logic is adjacent/boundary-only (see the note above). Making it pass also requires adding an `isEmptyOutput` predicate — `output.text === ""`, deliberately stricter than `isSeparatorOutput`'s `.trim() === ""` — and checking it first in `cleanSeparators`, unconditionally, before its existing loop. Add that in this same step; it belongs beside `isSeparatorOutput` in `src/render/renderer.ts`.
 
 In `src/render/renderer.ts`, add `sanitizeAnsi` to the existing import from `../utils/terminal.js`.
 

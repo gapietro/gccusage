@@ -261,4 +261,45 @@ describe("sanitizeAnsi", () => {
     const once = sanitizeAnsi(`${ESC}[31mred${ESC}[2J`);
     expect(sanitizeAnsi(once)).toBe(once);
   });
+
+  describe("8-bit C1 controls", () => {
+    // U+009B is CSI and U+009D is OSC in their single-byte (8-bit) forms —
+    // the same sequence classes as the 7-bit `ESC [` / `ESC ]` spellings
+    // tested above, one byte shorter. `ESCAPE_SEQUENCE` only ever inspects
+    // the 7-bit ESC-prefixed grammar, so before this fix these walked
+    // straight through unrecognised. VTE-based terminals (GNOME Terminal,
+    // Tilix, Terminator) parse C1 controls in UTF-8 mode, so this is not a
+    // theoretical gap. Built with `String.fromCharCode` rather than a
+    // `\u...` literal so the raw byte is visibly deliberate here, not a
+    // typo.
+    const CSI_C1 = String.fromCharCode(0x9b);
+    const OSC_C1 = String.fromCharCode(0x9d);
+
+    // Unlike the 7-bit forms, `sanitizeAnsi` has no grammar that recognises
+    // a C1-introduced sequence as one unit — it only knows to drop the
+    // single introducer byte (the same failsafe as the stray-ESC rule), so
+    // the printable remainder after it survives as literal text rather than
+    // vanishing with the rest of a recognised sequence.
+    it("drops an 8-bit CSI introducer, leaving the erase-display payload as literal text", () => {
+      expect(sanitizeAnsi(`a${CSI_C1}2Jb`)).toBe("a2Jb");
+    });
+
+    it("drops an 8-bit OSC introducer, leaving the window-title payload as literal text", () => {
+      // The trailing BEL terminator is itself a C0 zero-width control and is
+      // dropped by the existing `isZeroWidthControl` branch, not by this fix.
+      expect(sanitizeAnsi(`a${OSC_C1}0;pwned${BEL}b`)).toBe("a0;pwnedb");
+    });
+
+    it("cannot let any 8-bit C1 control byte survive to reach the terminal", () => {
+      for (let code = 0x80; code <= 0x9f; code++) {
+        const out = sanitizeAnsi(`a${String.fromCharCode(code)}b`);
+        for (const ch of out) {
+          expect(
+            ch.codePointAt(0)!,
+            `U+${code.toString(16).padStart(4, "0")} produced ${JSON.stringify(out)}`,
+          ).not.toBe(code);
+        }
+      }
+    });
+  });
 });

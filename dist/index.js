@@ -3573,8 +3573,9 @@ function visibleLength(str) {
 * `custom-command` do that is precisely the hazard #115 exists to close.
 *
 * `:` is admitted for T.416 subparameter forms (`38:2::10:20:30`), which real
-* tools emit for truecolour and underline styles. A private marker may only
-* appear as the FIRST parameter byte, so admitting `:` cannot smuggle one in.
+* tools emit for truecolour and underline styles. A private marker is excluded
+* outright: the parameter-byte class admits only digits, `;` and `:`, so `<`,
+* `=`, `>` and `?` cannot appear anywhere in it, not merely as the first byte.
 * Intermediate bytes are excluded too: `ESC[ m` is not SGR.
 *
 * This is a second pattern in a module whose whole point is that there is one
@@ -3587,7 +3588,26 @@ function visibleLength(str) {
 const SGR_ONLY = /^\u001b\[[0-9;:]*m$/;
 const RESET$1 = "\x1B[0m";
 /**
-* `str` with every terminal control sequence removed except SGR colour.
+* 8-bit C1 control range, U+0080-U+009F. \u009b is CSI and \u009d is OSC in
+* their single-byte forms -- the same sequence classes ESCAPE_SEQUENCE
+* recognises via their 7-bit ESC-prefixed spellings (ESC [ and ESC ]), one
+* byte shorter. VTE-based terminals (GNOME Terminal, Tilix, Terminator) parse
+* C1 controls when reading UTF-8, so a `custom-command` printing \u009b2J
+* erases the screen and \u009d0;pwned retitles the window without ever
+* spelling ESC -- issue #115's exact hazard, walking straight past a
+* recogniser that only ever inspects `\u001b`.
+*
+* `sanitizeAnsi` alone drops these. `ZERO_WIDTH_CONTROL_CLASS` is
+* deliberately NOT widened to cover this range: that constant governs
+* measurement, whose semantics were settled by #113 and #86, and widening it
+* would change what `visibleLength` counts as zero-width for every caller,
+* not just this one.
+*/
+const C1_CONTROL = /[\u0080-\u009f]/;
+/**
+* `str` with every terminal control sequence removed except SGR colour,
+* whether spelled as a 7-bit ESC-prefixed sequence or its 8-bit C1
+* equivalent.
 *
 * The other half of #113. That fix made non-SGR escapes *measure* correctly;
 * measuring them correctly does not stop them reaching the terminal. This
@@ -3597,7 +3617,7 @@ const RESET$1 = "\x1B[0m";
 * cadence of every render. Issue #115. Reachable through `custom-command`,
 * which puts arbitrary shell output in the bar.
 *
-* **Three rules here invert what the rest of this module does, each on
+* **Four rules here invert what the rest of this module does, each on
 * purpose:**
 *
 * - **An incomplete escape is dropped, not kept.** For measuring, a sequence
@@ -3617,6 +3637,11 @@ const RESET$1 = "\x1B[0m";
 *   count it as 1 — a floor. One space makes that floor exact, and keeps the
 *   separation the tab was expressing instead of turning `foo⇥bar` into
 *   `foobar`.
+* - **An 8-bit C1 introducer is dropped too, not just the 7-bit ESC form.**
+*   \u009b (CSI) and \u009d (OSC) reach a VTE-based terminal identically to
+*   `ESC [` / `ESC ]` -- see `C1_CONTROL` above. Only the one-byte
+*   introducer goes; the printable remainder is ordinary text, same
+*   failsafe as the stray-ESC rule.
 *
 * **OSC-8 hyperlinks are dropped**, which is the judgment call #115 flags.
 * Keeping them would mean parsing OSC parameters to separate `ESC]8;;uri` from
@@ -3657,6 +3682,10 @@ function sanitizeAnsi(str) {
 				sawSgr = true;
 			}
 			i += length;
+			continue;
+		}
+		if (C1_CONTROL.test(ch)) {
+			i += 1;
 			continue;
 		}
 		if (ch === "	") out += " ";
@@ -5159,6 +5188,16 @@ function trimTo(text, width) {
 * destroying one while another stays long. Callers pass the amount a line
 * exceeds the terminal by; this module knows nothing about terminals or
 * rendering. Never mutates its argument.
+*
+* Hazard, currently latent: `trimTo` slices by grapheme cluster with no idea
+* that `sanitizeAnsi` (issue #115) may have appended a trailing `ESC[0m` to
+* `output.text`, so trimming a shrinkable segment can cut that reset off and
+* leave an open SGR loose in the bar. Unreachable today only because the two
+* `shrinkable: true` widgets, `git-branch` and `project`, both surface git
+* refnames, and refnames cannot contain control bytes — so their text never
+* carries SGR for `trimTo` to endanger. A future widget that sets
+* `shrinkable: true` on text that can carry SGR reopens this; re-appending a
+* reset after any trim would be the fix.
 */
 function shrinkOutputs(outputs, overflow) {
 	if (overflow <= 0) return outputs;
@@ -5321,6 +5360,13 @@ function cleanSeparators(outputs) {
 * `custom-text` or `separator` config is a real segment a user configured on
 * purpose, not sanitiser fallout, and must survive full-mode rendering
 * regardless of where it sits in the line.
+*
+* That guarantee is `cleanSeparators`-only, i.e. `renderFull`. `renderCompact`
+* never calls this function — it filters via `collectWidgets`'s inline
+* `isSeparatorOutput(sanitized)` check, whose looser `.trim() === ""` drops a
+* whitespace-only `custom-text` the same as a real empty one. That divergence
+* is pre-existing (not introduced here) and deliberately left alone: changing
+* compact mode to match full mode would be an unrequested behaviour change.
 */
 function isEmptyOutput(output) {
 	return output.text === "";
