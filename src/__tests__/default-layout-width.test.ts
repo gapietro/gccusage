@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { contextFromFixture } from "./fixtures/context-from-fixture.js";
 import type { RealPayloadFixture } from "./fixtures/real-payloads/fixture-types.js";
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
+import { displayWidth } from "../utils/display-width.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type: "json" };
 import lowFixture from "./fixtures/real-payloads/fable5-1m-low.json" with { type: "json" };
@@ -267,7 +268,18 @@ describe("default layout width against real payloads", () => {
       expect(lines.some((line) => line.includes(CJK_PROJECT.slice(0, 2)))).toBe(true);
 
       for (const line of lines) {
-        expect(visibleLength(line)).toBeLessThanOrEqual(NARROW_WIDTH);
+        // Deliberately `displayWidth`, not `visibleLength`: the renderer's
+        // own truncation/shrink decisions are made using `visibleLength`, so
+        // if it were ever broken (as it was pre-fix — plain UTF-16 length),
+        // asserting with `visibleLength` here would check the broken
+        // renderer's output against the same broken ruler and pass no
+        // matter how many columns the line actually occupies. Only
+        // `displayWidth` (the ground truth for terminal columns) is
+        // independent of that decision. Post-fix the two agree exactly
+        // (`visibleLength` IS `displayWidth(stripAnsi(...))`), but this
+        // assertion must not be "simplified" back to `visibleLength` — that
+        // would silently turn this guard vacuous again.
+        expect(displayWidth(line)).toBeLessThanOrEqual(NARROW_WIDTH);
       }
     });
   });
