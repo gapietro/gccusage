@@ -1,12 +1,13 @@
 import type { StatusJson } from "../types/status-json.js";
 import type { Settings } from "../config/schema.js";
 import type { RenderContext } from "../types/render-context.js";
-import { findSessionJsonlFiles, findTodayJsonlFiles } from "../utils/paths.js";
-import { parseJsonlFile, filterTodayEntries } from "./jsonl-reader.js";
+import { findSessionJsonlFiles } from "../utils/paths.js";
+import { parseJsonlFile } from "./jsonl-reader.js";
 import { aggregateTokens, getFirstTimestamp } from "./token-aggregator.js";
 import { detectBlock } from "./block-tracker.js";
 import { getPricingForRender } from "./pricing-fetcher.js";
 import { maybeSpawnPricingRefresh } from "./pricing-refresh.js";
+import { getTodayAggregate } from "../cache/today-aggregate-cache.js";
 import {
   calculateCostByModel,
   calculateTotalCost,
@@ -76,11 +77,7 @@ export async function buildRenderContext(
   // read back.
   const today =
     settings.costSource === "calculated"
-      ? calculateCostByModel(
-          aggregateTokens(filterTodayEntries(findTodayJsonlFiles().flatMap(parseJsonlFile)))
-            .byModel,
-          pricing,
-        )
+      ? calculateCostByModel(getTodayAggregate().byModel, pricing)
       : null;
 
   // Today's cost: JSONL-calculated when the user forces calculated costs,

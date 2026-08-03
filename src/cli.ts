@@ -1,6 +1,4 @@
-import { findTodayJsonlFiles, findSessionJsonlFiles } from "./utils/paths.js";
-import { parseJsonlFile, filterTodayEntries } from "./data/jsonl-reader.js";
-import { aggregateTokens } from "./data/token-aggregator.js";
+import { getTodayAggregate } from "./cache/today-aggregate-cache.js";
 import { fetchPricing, refreshPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
@@ -38,24 +36,22 @@ export async function runCli(args: string[]): Promise<void> {
 }
 
 async function reportToday(): Promise<void> {
-  const files = findTodayJsonlFiles();
-  const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
-  const metrics = aggregateTokens(entries);
+  // Same per-file cache the statusline uses, so a `gccusage today` run right
+  // after a render costs a stat sweep rather than a full re-parse (#94).
+  const { byModel, totals, fileCount } = getTodayAggregate();
   const pricing = await fetchPricing(86400000);
-  const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
+  const { costs: costByModel, unpriced } = calculateCostByModel(byModel, pricing);
   const totalCost = calculateTotalCost(costByModel);
 
   console.log("=== Today's Usage ===\n");
   console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
-  console.log(
-    `Total Tokens: ${formatTokens(metrics.totals.inputTokens + metrics.totals.outputTokens)}`,
-  );
+  console.log(`Total Tokens: ${formatTokens(totals.inputTokens + totals.outputTokens)}`);
   console.log();
 
   if (costByModel.size > 0) {
     console.log("By Model:");
     for (const [model, cost] of costByModel) {
-      const tokens = metrics.byModel.get(model);
+      const tokens = byModel.get(model);
       const total = tokens
         ? tokens.inputTokens + tokens.outputTokens
         : 0;
@@ -72,7 +68,7 @@ async function reportToday(): Promise<void> {
     console.log("Run `npm run pricing` to refresh the offline table.");
   }
 
-  console.log(`\nSessions analyzed: ${files.length} files`);
+  console.log(`\nSessions analyzed: ${fileCount} files`);
 }
 
 /** POSIX shell single-quote escaping: ' becomes '\'' */

@@ -465,4 +465,24 @@ describe("today's transcripts are read only when they are used (#94)", () => {
     // session's and the "other" one named in this test.
     expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
   });
+
+  it("does not re-parse unchanged transcripts on a second calculated render", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    await buildRenderContext(stdinWithCost, settingsWith("calculated"));
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const ctx = await buildRenderContext(stdinWithCost, settingsWith("calculated"));
+
+    // The session transcript is still read every render — it feeds byModel,
+    // session totals and the start timestamp. Today's OTHER transcripts come
+    // from the cache.
+    expect(parsedPaths()).not.toContain(other);
+    // $1.00 from the shared beforeEach's "session-a" transcript + $1.00 from
+    // the current session + $2.00 from the other one — same arithmetic as
+    // "does read them under costSource calculated" above, since both calls
+    // to buildRenderContext see the same three today-dated transcripts.
+    expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
+  });
 });
