@@ -4927,28 +4927,30 @@ const ELLIPSIS = "…";
 /**
 * `text` reduced to at most `width` visible columns, ending in an ellipsis.
 *
-* Slices by code point: `String.prototype.slice` would cut a surrogate pair in
-* half, so a branch name containing an emoji would render as a broken glyph.
+* Slices by grapheme cluster. `String.prototype.slice` would cut a surrogate
+* pair in half, and code-point slicing — what this used to do — would strip a
+* combining mark off its base or leave a ZWJ with nothing to join, so a branch
+* name containing an emoji rendered as a broken glyph.
 *
-* When text contains multi-column characters (astral characters like emoji),
-* removing one code point removes multiple columns. If removing one more would
-* cross below MIN_SHRUNK_TEXT, we stop and return a result slightly wider than
-* requested rather than violating the floor — the caller's truncation is the
-* backstop. This can cause slight overshoot of the requested overflow (removing
-* 5 when 4 were asked), which is acceptable.
+* A single cluster can occupy two terminal columns (CJK, emoji), so removing
+* one cluster can remove two columns. If removing one more would cross below
+* MIN_SHRUNK_TEXT, we stop and return a result slightly wider than requested
+* rather than violating the floor — the caller's truncation is the backstop.
+* This can overshoot the requested overflow slightly (removing 5 columns when
+* 4 were asked), which is acceptable.
 */
 function trimTo(text, width) {
 	if (visibleLength(text) <= width) return text;
-	let chars = Array.from(text);
-	while (chars.length > 0) {
-		const current = visibleLength(chars.join("") + ELLIPSIS);
+	let clusters = splitGraphemes(text);
+	while (clusters.length > 0) {
+		const current = visibleLength(clusters.join("") + ELLIPSIS);
 		if (current <= width) break;
-		const nextChars = chars.slice(0, -1);
-		const next = visibleLength(nextChars.join("") + ELLIPSIS);
+		const nextClusters = clusters.slice(0, -1);
+		const next = visibleLength(nextClusters.join("") + ELLIPSIS);
 		if (next < MIN_SHRUNK_TEXT) break;
-		chars = nextChars;
+		clusters = nextClusters;
 	}
-	return chars.join("") + ELLIPSIS;
+	return clusters.join("") + ELLIPSIS;
 }
 /**
 * The same outputs with `overflow` visible columns removed from segments that

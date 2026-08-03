@@ -213,4 +213,19 @@ describe("shrinkOutputs", () => {
       expect(visibleLength(after[1]!.text)).toBe(MIN_SHRUNK_TEXT);
     });
   });
+
+  it("never leaves a dangling ZWJ or a split surrogate when trimming", () => {
+    // A branch name whose trailing glyph is a ZWJ family emoji. Code-point
+    // slicing removes one piece at a time and can stop mid-sequence, leaving
+    // a joiner with nothing to join or half a surrogate pair.
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const outputs = [shrinkable(`feature/long-branch-name-${family}`)];
+
+    for (let overflow = 1; overflow <= 20; overflow++) {
+      const text = shrinkOutputs(outputs, overflow)[0]!.text;
+      expect(text.endsWith("‍…")).toBe(false); // no dangling joiner
+      expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text)).toBe(false);
+      expect(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text)).toBe(false);
+    }
+  });
 });

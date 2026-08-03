@@ -1,5 +1,6 @@
 import type { WidgetOutput } from "../widgets/base.js";
 import { visibleLength } from "../utils/terminal.js";
+import { splitGraphemes } from "../utils/display-width.js";
 
 /**
  * Fewest visible columns a shrunk segment may keep, ellipsis included.
@@ -16,33 +17,35 @@ const ELLIPSIS = "…";
 /**
  * `text` reduced to at most `width` visible columns, ending in an ellipsis.
  *
- * Slices by code point: `String.prototype.slice` would cut a surrogate pair in
- * half, so a branch name containing an emoji would render as a broken glyph.
+ * Slices by grapheme cluster. `String.prototype.slice` would cut a surrogate
+ * pair in half, and code-point slicing — what this used to do — would strip a
+ * combining mark off its base or leave a ZWJ with nothing to join, so a branch
+ * name containing an emoji rendered as a broken glyph.
  *
- * When text contains multi-column characters (astral characters like emoji),
- * removing one code point removes multiple columns. If removing one more would
- * cross below MIN_SHRUNK_TEXT, we stop and return a result slightly wider than
- * requested rather than violating the floor — the caller's truncation is the
- * backstop. This can cause slight overshoot of the requested overflow (removing
- * 5 when 4 were asked), which is acceptable.
+ * A single cluster can occupy two terminal columns (CJK, emoji), so removing
+ * one cluster can remove two columns. If removing one more would cross below
+ * MIN_SHRUNK_TEXT, we stop and return a result slightly wider than requested
+ * rather than violating the floor — the caller's truncation is the backstop.
+ * This can overshoot the requested overflow slightly (removing 5 columns when
+ * 4 were asked), which is acceptable.
  */
 function trimTo(text: string, width: number): string {
   if (visibleLength(text) <= width) return text;
-  let chars = Array.from(text);
-  // Trim by code point until the result fits the target AND never drops below the floor.
-  while (chars.length > 0) {
-    const current = visibleLength(chars.join("") + ELLIPSIS);
+  let clusters = splitGraphemes(text);
+  // Trim by cluster until the result fits the target AND never drops below the floor.
+  while (clusters.length > 0) {
+    const current = visibleLength(clusters.join("") + ELLIPSIS);
     // Stop if we've reached the target.
     if (current <= width) break;
     // Peek ahead: what if we removed one more?
-    const nextChars = chars.slice(0, -1);
-    const next = visibleLength(nextChars.join("") + ELLIPSIS);
+    const nextClusters = clusters.slice(0, -1);
+    const next = visibleLength(nextClusters.join("") + ELLIPSIS);
     // Stop if removing one more would drop below the floor.
     if (next < MIN_SHRUNK_TEXT) break;
     // Safe to proceed.
-    chars = nextChars;
+    clusters = nextClusters;
   }
-  return chars.join("") + ELLIPSIS;
+  return clusters.join("") + ELLIPSIS;
 }
 
 /**
@@ -64,7 +67,7 @@ export function shrinkOutputs(
   let remaining = overflow;
 
   // Indices `trimTo` cannot shorten any further without breaching the floor.
-  // Without this, a segment made of multi-column (astral) characters can sit
+  // Without this, a segment made of two-column clusters (CJK, emoji) can sit
   // ABOVE the floor (say, width 9) purely as `trimTo`'s peek-ahead overshoot,
   // so the `width > MIN_SHRUNK_TEXT` eligibility check below keeps re-selecting
   // it — and re-trimming it to the exact same text forever, since the very
