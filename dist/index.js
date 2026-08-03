@@ -1648,7 +1648,7 @@ function loadSettings() {
 //#endregion
 //#region src/config/error-line.ts
 const BOLD_RED = "\x1B[1;31m";
-const RESET = "\x1B[0m";
+const RESET$1 = "\x1B[0m";
 /** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
 function shortenPath(filePath) {
 	const home = process.env["HOME"];
@@ -1661,7 +1661,7 @@ function shortenPath(filePath) {
 * terminals the default `▶` separator targets.
 */
 function formatConfigError(error, configPath) {
-	return `${BOLD_RED}⚠ gccusage config${RESET}  ${shortenPath(configPath)} — ${error}`;
+	return `${BOLD_RED}⚠ gccusage config${RESET$1}  ${shortenPath(configPath)} — ${error}`;
 }
 /**
 * The same treatment for a payload that could not be read at all (#83).
@@ -1672,7 +1672,7 @@ function formatConfigError(error, configPath) {
 * individual fields never reach here; the schema absorbs those.
 */
 function formatStdinError(error) {
-	return `${BOLD_RED}⚠ gccusage${RESET}  ${error}`;
+	return `${BOLD_RED}⚠ gccusage${RESET$1}  ${error}`;
 }
 /**
 * A payload that never arrived (#87), as distinct from one that arrived
@@ -1684,7 +1684,7 @@ function formatStdinError(error) {
 * the bar and throw this message away.
 */
 function formatStdinTimeout(timeoutMs) {
-	return `${BOLD_RED}⚠ gccusage${RESET}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
+	return `${BOLD_RED}⚠ gccusage${RESET$1}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
 }
 /**
 * Not `formatDuration` from utils/format.ts: that floors to whole seconds and
@@ -3368,6 +3368,12 @@ const VS16 = "️";
 /** REGIONAL INDICATOR SYMBOL LETTER A .. Z — two of these make a flag. */
 const REGIONAL_INDICATOR_FIRST = 127462;
 const REGIONAL_INDICATOR_LAST = 127487;
+/** `str` split into grapheme clusters — what a reader would call "characters". */
+function splitGraphemes(str) {
+	const clusters = [];
+	for (const { segment } of segmenter.segment(str)) clusters.push(segment);
+	return clusters;
+}
 /**
 * Terminal columns occupied by ONE grapheme cluster.
 *
@@ -4858,15 +4864,29 @@ function applyFlex(segments, totalWidth, mode) {
 
 //#endregion
 //#region src/render/truncation.ts
+const ELLIPSIS$1 = "…";
+const RESET = "\x1B[0m";
+/**
+* `str` cut to at most `maxWidth` terminal columns, ending in an ellipsis.
+*
+* Walks grapheme clusters, not UTF-16 units: the previous implementation
+* incremented one column per code unit, which both under-counted wide glyphs
+* and could cut a surrogate pair in half. Issue #86.
+*
+* It also carried a second guard, `stripAnsi(str).length <= maxWidth`, that
+* defeated the whole fix on its own — 17 CJK glyphs are 34 columns but report
+* a `length` of 17, so a bar overflowing a 20-column budget was returned
+* untouched. That guard is deliberately gone; do not reintroduce it.
+*/
 function truncateAnsi(str, maxWidth) {
 	if (maxWidth === void 0) return str;
 	if (visibleLength(str) <= maxWidth) return str;
-	const plain = stripAnsi(str);
-	if (plain.length <= maxWidth) return str;
-	let visible = 0;
-	let i = 0;
+	const budget = maxWidth - 1;
+	if (budget <= 0) return RESET;
 	const result = [];
-	while (i < str.length && visible < maxWidth - 1) {
+	let used = 0;
+	let i = 0;
+	while (i < str.length) {
 		if (str[i] === "\x1B" && str[i + 1] === "[") {
 			const end = str.indexOf("m", i);
 			if (end !== -1) {
@@ -4875,12 +4895,20 @@ function truncateAnsi(str, maxWidth) {
 				continue;
 			}
 		}
-		result.push(str[i]);
-		visible++;
-		i++;
+		let runEnd = str.indexOf("\x1B", i + 1);
+		if (runEnd === -1) runEnd = str.length;
+		for (const cluster of splitGraphemes(str.slice(i, runEnd))) {
+			const width = graphemeWidth(cluster);
+			if (used + width > budget) {
+				result.push(ELLIPSIS$1, RESET);
+				return result.join("");
+			}
+			result.push(cluster);
+			used += width;
+		}
+		i = runEnd;
 	}
-	result.push("…");
-	result.push("\x1B[0m");
+	result.push(ELLIPSIS$1, RESET);
 	return result.join("");
 }
 
