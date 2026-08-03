@@ -152,3 +152,149 @@ export function isZeroWidthControl(cluster: string): boolean {
 export function visibleLength(str: string): number {
   return displayWidth(stripAnsi(str));
 }
+
+/**
+ * SGR alone: `ESC [`, digits/`;`/`:`, `m`. Anchored, and deliberately narrower
+ * than "a CSI whose final byte is `m`".
+ *
+ * `ESCAPE_SEQUENCE` spells a CSI's parameter bytes `[0-?]`, per ECMA-48, and
+ * that range includes the private markers `< = > ?`. So `ESC[>4;2m` ends in
+ * `m` and would pass the obvious check — but it is xterm's `modifyOtherKeys`,
+ * which reconfigures how the terminal reports keypresses. Letting a
+ * `custom-command` do that is precisely the hazard #115 exists to close.
+ *
+ * `:` is admitted for T.416 subparameter forms (`38:2::10:20:30`), which real
+ * tools emit for truecolour and underline styles. A private marker is excluded
+ * outright: the parameter-byte class admits only digits, `;` and `:`, so `<`,
+ * `=`, `>` and `?` cannot appear anywhere in it, not merely as the first byte.
+ * Intermediate bytes are excluded too: `ESC[ m` is not SGR.
+ *
+ * This is a second pattern in a module whose whole point is that there is one
+ * recogniser. It does not break that rule. `sanitizeAnsi` uses
+ * `escapeLengthAt` — and only `escapeLengthAt` — to decide where a sequence
+ * starts and ends; this pattern only classifies a span whose boundaries are
+ * already fixed. Finding boundaries is the job that must never be duplicated.
+ * Keep it anchored so it can only ever test a whole span.
+ */
+const SGR_ONLY = /^\u001b\[[0-9;:]*m$/;
+
+const RESET = "\u001b[0m";
+
+/**
+ * 8-bit C1 control range, U+0080-U+009F. \u009b is CSI and \u009d is OSC in
+ * their single-byte forms -- the same sequence classes ESCAPE_SEQUENCE
+ * recognises via their 7-bit ESC-prefixed spellings (ESC [ and ESC ]), one
+ * byte shorter. VTE-based terminals (GNOME Terminal, Tilix, Terminator) parse
+ * C1 controls when reading UTF-8, so a `custom-command` printing \u009b2J
+ * erases the screen and \u009d0;pwned retitles the window without ever
+ * spelling ESC -- issue #115's exact hazard, walking straight past a
+ * recogniser that only ever inspects `\u001b`.
+ *
+ * `sanitizeAnsi` alone drops these. `ZERO_WIDTH_CONTROL_CLASS` is
+ * deliberately NOT widened to cover this range: that constant governs
+ * measurement, whose semantics were settled by #113 and #86, and widening it
+ * would change what `visibleLength` counts as zero-width for every caller,
+ * not just this one.
+ */
+const C1_CONTROL = /[\u0080-\u009f]/;
+
+/**
+ * `str` with every terminal control sequence removed except SGR colour,
+ * whether spelled as a 7-bit ESC-prefixed sequence or its 8-bit C1
+ * equivalent.
+ *
+ * The other half of #113. That fix made non-SGR escapes *measure* correctly;
+ * measuring them correctly does not stop them reaching the terminal. This
+ * statusline is not written to a terminal the tool owns — Claude Code embeds
+ * it in its own Ink-rendered TUI — so `ESC[2J`, `ESC[1A`, `ESC[?25l`, `ESC]0;`
+ * or a bare `CR` corrupt a rendering this tool has no control over, on a
+ * cadence of every render. Issue #115. Reachable through `custom-command`,
+ * which puts arbitrary shell output in the bar.
+ *
+ * **Four rules here invert what the rest of this module does, each on
+ * purpose:**
+ *
+ * - **An incomplete escape is dropped, not kept.** For measuring, a sequence
+ *   the grammar cannot complete stays visible text: over-measuring truncates
+ *   early, which is cosmetic, while under-measuring overflows the terminal.
+ *   For emitting, keeping it is the attack — output ending in an unterminated
+ *   `ESC[2` is completed into a screen-clear by the next literal `J` anywhere
+ *   later in the bar, and the terminal does not care that the two halves came
+ *   from different widgets. Only the ESC byte goes; the printable remainder
+ *   stays and renders as literal text.
+ * - **LF is dropped, though `stripAnsi` deliberately keeps it.** There, LF is
+ *   structural: the bar is two lines and callers `split("\n")`. Here we are one
+ *   layer down, on a single segment, before `renderFull` joins lines — so a LF
+ *   can only break the bar's line structure from inside a segment.
+ * - **TAB becomes one space rather than being dropped.** Its width is not
+ *   knowable statically, so `ZERO_WIDTH_CONTROL_CLASS` excludes it and callers
+ *   count it as 1 — a floor. One space makes that floor exact, and keeps the
+ *   separation the tab was expressing instead of turning `foo⇥bar` into
+ *   `foobar`.
+ * - **An 8-bit C1 introducer is dropped too, not just the 7-bit ESC form.**
+ *   \u009b (CSI) and \u009d (OSC) reach a VTE-based terminal identically to
+ *   `ESC [` / `ESC ]` -- see `C1_CONTROL` above. Only the one-byte
+ *   introducer goes; the printable remainder is ordinary text, same
+ *   failsafe as the stray-ESC rule.
+ *
+ * **OSC-8 hyperlinks are dropped**, which is the judgment call #115 flags.
+ * Keeping them would mean parsing OSC parameters to separate `ESC]8;;uri` from
+ * `ESC]0;title` — the allowlist stops being one sequence class and becomes a
+ * parameter-level policy — and force-closing every link, since an unclosed one
+ * leaks link state onto everything Claude Code draws after the bar. That is
+ * real machinery for a capability nobody has asked for, and which only some
+ * terminals render inside a statusline. To relax it, widen this one predicate.
+ *
+ * **A trailing reset is appended when any SGR survives.** `powerline.ts` wraps
+ * each segment as `chalk.hex(fg).bgHex(bg)(" " + text + " ")`, and chalk closes
+ * only fg (`ESC[39m`) and bg (`ESC[49m`) — never a full reset. So an unclosed
+ * `ESC[7m` or `ESC[5m` survives past the segment, past the bar, and into
+ * Claude Code's TUI: the same corruption class as `ESC[2J`, arriving through a
+ * sequence we agreed to allow. The cost is the segment's trailing padding
+ * column losing its background in powerline mode, which is already being paid
+ * — a command that colours itself almost always emits its own `ESC[0m`.
+ *
+ * Text with no visible content collapses to `""`, so `renderer.ts` sees what it
+ * already treats as a separator and cleans it away, rather than laying out a
+ * bare padded segment with a separator on each side.
+ */
+export function sanitizeAnsi(str: string): string {
+  let out = "";
+  let sawSgr = false;
+  let i = 0;
+
+  while (i < str.length) {
+    const ch = str[i]!;
+
+    if (ch === "\u001b") {
+      const length = escapeLengthAt(str, i);
+      if (length === 0) {
+        i += 1; // Stray ESC: drop the byte, keep whatever printable follows.
+        continue;
+      }
+      const sequence = str.slice(i, i + length);
+      if (SGR_ONLY.test(sequence)) {
+        out += sequence;
+        sawSgr = true;
+      }
+      i += length;
+      continue;
+    }
+
+    if (C1_CONTROL.test(ch)) {
+      i += 1; // 8-bit C1 introducer: drop the byte, keep whatever printable
+      continue; // follows -- the same failsafe as the stray-ESC rule above.
+    }
+
+    if (ch === "\t") {
+      out += " ";
+    } else if (ch !== "\n" && !isZeroWidthControl(ch)) {
+      out += ch;
+    }
+    i += 1;
+  }
+
+  if (visibleLength(out) === 0) return "";
+  if (!sawSgr || out.endsWith(RESET)) return out;
+  return out + RESET;
+}

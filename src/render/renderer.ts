@@ -6,7 +6,7 @@ import { colorize } from "./colors.js";
 import { renderPowerlineSegments } from "./powerline.js";
 import { applyFlex, type FlexMode } from "./flex.js";
 import { truncateAnsi } from "./truncation.js";
-import { visibleLength } from "../utils/terminal.js";
+import { sanitizeAnsi, visibleLength } from "../utils/terminal.js";
 import { shrinkOutputs } from "./shrink.js";
 
 interface WidgetResult {
@@ -35,8 +35,9 @@ function collectWidgets(
     if (!widget) continue;
     const output = widget.render(context, config);
     if (!output) continue;
-    if (isSeparatorOutput(output)) continue;
-    results.push({ output, priority: config.priority ?? 99 });
+    const sanitized = sanitizeOutput(output);
+    if (isSeparatorOutput(sanitized)) continue;
+    results.push({ output: sanitized, priority: config.priority ?? 99 });
   }
   return results;
 }
@@ -152,7 +153,7 @@ function renderFull(context: RenderContext, settings: Settings): string {
       const output = widget.render(context, widgetConfig);
       if (!output) continue;
 
-      outputs.push(output);
+      outputs.push(sanitizeOutput(output));
     }
 
     const cleaned = cleanSeparators(outputs);
@@ -170,6 +171,24 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   let lastWasSeparator = true;
 
   for (const output of outputs) {
+    // A widget whose text sanitised to the sanitiser's exact empty-string
+    // contract (issue #115: `sanitizeAnsi` returns "" only when nothing
+    // visible remains — whitespace counts as visible, so "   " is NOT this
+    // case) is dropped unconditionally, regardless of its position in the
+    // line — unlike an explicit `|`/`│` marker, it has no content to
+    // separate, so there is no "leading/trailing/consecutive" case where
+    // keeping it makes sense. Checked before isSeparatorOutput, which also
+    // matches "" but via `.trim() === ""` — a looser test that exists so
+    // whitespace-only pipe-collapse candidates behave like real separators —
+    // and only removes a match when adjacent to another separator or at a
+    // boundary, the collapse logic that IS still correct for a deliberately
+    // placed pipe marker. isEmptyOutput must stay strict (`=== ""`, not
+    // `.trim() === ""`), or a whitespace-only `custom-text`/`separator`
+    // config — a real segment a user configured on purpose, not sanitiser
+    // fallout — would be silently dropped from anywhere in the line, not
+    // just consecutive/boundary positions.
+    if (isEmptyOutput(output)) continue;
+
     const isSep = isSeparatorOutput(output);
     if (isSep && lastWasSeparator) continue;
     result.push(output);
@@ -183,7 +202,48 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   return result;
 }
 
+/**
+ * True only for the sanitiser's exact empty-string contract: `sanitizeAnsi`
+ * returns "" only when nothing visible remains, and whitespace counts as
+ * visible (`visibleLength("   ")` is 3), so a whitespace-only string is not
+ * empty here. Deliberately narrower than `isSeparatorOutput`'s
+ * `.trim() === ""`, which serves a different purpose (collapsing pipe-marker
+ * separators) and must not be reused for this check: a whitespace-only
+ * `custom-text` or `separator` config is a real segment a user configured on
+ * purpose, not sanitiser fallout, and must survive full-mode rendering
+ * regardless of where it sits in the line.
+ *
+ * That guarantee is `cleanSeparators`-only, i.e. `renderFull`. `renderCompact`
+ * never calls this function — it filters via `collectWidgets`'s inline
+ * `isSeparatorOutput(sanitized)` check, whose looser `.trim() === ""` drops a
+ * whitespace-only `custom-text` the same as a real empty one. That divergence
+ * is pre-existing (not introduced here) and deliberately left alone: changing
+ * compact mode to match full mode would be an unrequested behaviour change.
+ */
+function isEmptyOutput(output: WidgetOutput): boolean {
+  return output.text === "";
+}
+
 function isSeparatorOutput(output: WidgetOutput): boolean {
   const text = output.text.trim();
   return text === "|" || text === "│" || text === "" || output.text === " | ";
+}
+
+/**
+ * Widget text, with every terminal control sequence but SGR removed.
+ *
+ * Applied to EVERY widget rather than to `custom-command` alone. No widget
+ * emits ANSI of its own — colour arrives later, in `powerline.ts`, from the
+ * `fg`/`bg` fields — so a blanket pass cannot damage anything this codebase
+ * generates, and it covers `git-branch`, `project`, `cwd` and `model`, which
+ * all surface text this tool did not author. Requiring each widget to opt in
+ * is the same shape of failure as "registered ≠ displayed". Issue #115.
+ *
+ * Callers must run this BEFORE `isSeparatorOutput`: text that sanitises down
+ * to nothing has to reach that function's `text === ""` branch, or a command
+ * emitting only escapes lays out as a bare padded segment with a separator on
+ * each side.
+ */
+function sanitizeOutput(output: WidgetOutput): WidgetOutput {
+  return { ...output, text: sanitizeAnsi(output.text) };
 }

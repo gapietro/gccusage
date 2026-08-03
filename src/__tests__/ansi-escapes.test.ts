@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripAnsi, visibleLength } from "../utils/terminal.js";
+import { sanitizeAnsi, stripAnsi, visibleLength } from "../utils/terminal.js";
 import { truncateAnsi } from "../render/truncation.js";
 
 const ESC = "\u001b";
@@ -145,5 +145,161 @@ describe("truncateAnsi honours its contract on non-SGR escapes", () => {
     const out = truncateAnsi(`${ESC}[31mredredredred${RESET}`, 6);
     expect(out).toContain(`${ESC}[31m`);
     expect(out.endsWith(RESET)).toBe(true);
+  });
+});
+
+describe("sanitizeAnsi", () => {
+  // Issue #115. The bar is embedded in Claude Code's own Ink-rendered TUI, so
+  // a sequence that moves the cursor or erases the screen corrupts a rendering
+  // this tool does not own — on a cadence of every render.
+  const DROPPED: Array<[name: string, input: string]> = [
+    ["erase display", `${ESC}[2J`],
+    ["erase line", `${ESC}[2K`],
+    ["cursor up", `${ESC}[1A`],
+    ["cursor home", `${ESC}[H`],
+    ["hide cursor", `${ESC}[?25l`],
+    ["window title, BEL-terminated", `${ESC}]0;pwned${BEL}`],
+    ["window title, ST-terminated", `${ESC}]0;pwned${ST}`],
+    ["full reset", `${ESC}c`],
+    ["charset select", `${ESC}(B`],
+    ["APC string", `${ESC}_payload${ST}`],
+    ["carriage return", "\r"],
+    ["bell", BEL],
+    ["backspace", "\b"],
+    ["line feed", "\n"],
+    ["delete", "\u007f"],
+    // These end in `m` but are not SGR. `ESC[>4;2m` is xterm's
+    // modifyOtherKeys, which reconfigures how the terminal reports keypresses.
+    ["private-marker CSI ending in m", `${ESC}[>4;2m`],
+    ["private-mode CSI ending in m", `${ESC}[?1m`],
+    ["CSI with intermediate byte ending in m", `${ESC}[ m`],
+  ];
+
+  it.each(DROPPED)("drops %s but keeps the text around it", (_name, input) => {
+    expect(sanitizeAnsi(`a${input}b`)).toBe("ab");
+  });
+
+  // OSC-8 is not special-cased (that would be exactly the parameter-level
+  // policy the function's docstring disclaims), so it is dropped the same
+  // way as any other non-SGR escape: the ESC...ST/BEL wrapper bytes go, but
+  // "link" is ordinary printable text sitting between two escapes, not part
+  // of either one, so it survives — identically to how `stripAnsi(OSC8)`
+  // already resolves to "link" above. The hazard (the escapes themselves)
+  // is removed; only the human-readable label remains.
+  it("drops the OSC-8 escapes but keeps the link's visible label text", () => {
+    expect(sanitizeAnsi(`a${OSC8}b`)).toBe("alinkb");
+  });
+
+  const KEPT: Array<[name: string, input: string]> = [
+    ["basic colour", `${ESC}[31m`],
+    ["reset", RESET],
+    ["empty-parameter SGR", `${ESC}[m`],
+    ["256-colour", `${ESC}[38;5;42m`],
+    ["truecolour", `${ESC}[38;2;10;20;30m`],
+    ["T.416 subparameter truecolour", `${ESC}[38:2::10:20:30m`],
+    ["bold", `${ESC}[1m`],
+  ];
+
+  it.each(KEPT)("keeps %s", (_name, input) => {
+    expect(sanitizeAnsi(`a${input}b`)).toBe(`a${input}b${RESET}`);
+  });
+
+  it("appends exactly one reset when SGR survives", () => {
+    expect(sanitizeAnsi(`${ESC}[31mred`)).toBe(`${ESC}[31mred${RESET}`);
+  });
+
+  it("appends no reset when no SGR survives", () => {
+    expect(sanitizeAnsi("plain")).toBe("plain");
+    expect(sanitizeAnsi(`plain${ESC}[2J`)).toBe("plain");
+  });
+
+  // The asymmetry with stripAnsi. For MEASURING, an escape the grammar cannot
+  // complete stays visible text: over-measuring truncates early, which is
+  // cosmetic, while under-measuring overflows the terminal. For EMITTING, that
+  // same rule is the attack — a trailing unterminated `ESC[2` is completed into
+  // a screen-clear by the next literal `J` anywhere later in the bar.
+  it("drops a stray ESC the grammar cannot complete, keeping its printable tail", () => {
+    expect(sanitizeAnsi(`branch${ESC}[2`)).toBe("branch[2");
+  });
+
+  it("cannot leave an ESC that a later segment could complete", () => {
+    const bar = `${sanitizeAnsi(`a${ESC}[2`)}J`;
+    expect(bar).not.toContain(ESC);
+  });
+
+  // TAB's width depends on the cursor's position against the next tab stop,
+  // which is not knowable statically; terminal.ts counts it as 1 as a floor.
+  // One space makes that floor exact and preserves the separation the tab meant.
+  it("replaces TAB with a single space", () => {
+    expect(sanitizeAnsi("a\tb")).toBe("a b");
+  });
+
+  // stripAnsi deliberately preserves LF because the bar is two lines and its
+  // callers split on it. This runs one layer down, on a single segment, before
+  // renderFull joins lines — so here a LF can only break the bar from inside.
+  it("drops LF, which stripAnsi deliberately keeps", () => {
+    expect(sanitizeAnsi("a\nb")).toBe("ab");
+    expect(stripAnsi("a\nb")).toBe("a\nb");
+  });
+
+  // Otherwise a command emitting only escapes renders as a bare padded segment
+  // with a separator on each side. Empty text is what renderer.ts already
+  // treats as a separator and cleans away.
+  it("collapses text with no visible content to the empty string", () => {
+    expect(sanitizeAnsi(`${ESC}[31m${ESC}[0m`)).toBe("");
+    expect(sanitizeAnsi(`${ESC}[2J`)).toBe("");
+    expect(sanitizeAnsi("")).toBe("");
+  });
+
+  it("leaves ordinary text untouched", () => {
+    expect(sanitizeAnsi("main ✓ $12.34")).toBe("main ✓ $12.34");
+  });
+
+  // The output must be a fixed point: sanitising an already-sanitised string
+  // must not append a second reset or otherwise drift.
+  it("is idempotent", () => {
+    const once = sanitizeAnsi(`${ESC}[31mred${ESC}[2J`);
+    expect(sanitizeAnsi(once)).toBe(once);
+  });
+
+  describe("8-bit C1 controls", () => {
+    // U+009B is CSI and U+009D is OSC in their single-byte (8-bit) forms —
+    // the same sequence classes as the 7-bit `ESC [` / `ESC ]` spellings
+    // tested above, one byte shorter. `ESCAPE_SEQUENCE` only ever inspects
+    // the 7-bit ESC-prefixed grammar, so before this fix these walked
+    // straight through unrecognised. VTE-based terminals (GNOME Terminal,
+    // Tilix, Terminator) parse C1 controls in UTF-8 mode, so this is not a
+    // theoretical gap. Built with `String.fromCharCode` rather than a
+    // `\u...` literal so the raw byte is visibly deliberate here, not a
+    // typo.
+    const CSI_C1 = String.fromCharCode(0x9b);
+    const OSC_C1 = String.fromCharCode(0x9d);
+
+    // Unlike the 7-bit forms, `sanitizeAnsi` has no grammar that recognises
+    // a C1-introduced sequence as one unit — it only knows to drop the
+    // single introducer byte (the same failsafe as the stray-ESC rule), so
+    // the printable remainder after it survives as literal text rather than
+    // vanishing with the rest of a recognised sequence.
+    it("drops an 8-bit CSI introducer, leaving the erase-display payload as literal text", () => {
+      expect(sanitizeAnsi(`a${CSI_C1}2Jb`)).toBe("a2Jb");
+    });
+
+    it("drops an 8-bit OSC introducer, leaving the window-title payload as literal text", () => {
+      // The trailing BEL terminator is itself a C0 zero-width control and is
+      // dropped by the existing `isZeroWidthControl` branch, not by this fix.
+      expect(sanitizeAnsi(`a${OSC_C1}0;pwned${BEL}b`)).toBe("a0;pwnedb");
+    });
+
+    it("cannot let any 8-bit C1 control byte survive to reach the terminal", () => {
+      for (let code = 0x80; code <= 0x9f; code++) {
+        const out = sanitizeAnsi(`a${String.fromCharCode(code)}b`);
+        for (const ch of out) {
+          expect(
+            ch.codePointAt(0)!,
+            `U+${code.toString(16).padStart(4, "0")} produced ${JSON.stringify(out)}`,
+          ).not.toBe(code);
+        }
+      }
+    });
   });
 });

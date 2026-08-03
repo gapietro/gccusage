@@ -56,6 +56,16 @@ function trimTo(text: string, width: number): string {
  * destroying one while another stays long. Callers pass the amount a line
  * exceeds the terminal by; this module knows nothing about terminals or
  * rendering. Never mutates its argument.
+ *
+ * Hazard, currently latent: `trimTo` slices by grapheme cluster with no idea
+ * that `sanitizeAnsi` (issue #115) may have appended a trailing `ESC[0m` to
+ * `output.text`, so trimming a shrinkable segment can cut that reset off and
+ * leave an open SGR loose in the bar. Unreachable today only because the two
+ * `shrinkable: true` widgets, `git-branch` and `project`, both surface git
+ * refnames, and refnames cannot contain control bytes — so their text never
+ * carries SGR for `trimTo` to endanger. A future widget that sets
+ * `shrinkable: true` on text that can carry SGR reopens this; re-appending a
+ * reset after any trim would be the fix.
  */
 export function shrinkOutputs(
   outputs: WidgetOutput[],
