@@ -73,7 +73,19 @@ export function findSessionJsonlFiles(sessionId?: string): string[] {
   return files;
 }
 
-export function findTodayJsonlFiles(): string[] {
+export interface TodayJsonlFile {
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/**
+ * Today's transcripts with the `mtimeMs` and `size` from the stat this walk
+ * already performs. `today-aggregate-cache.ts` keys its reuse decision on that
+ * pair, and re-statting to get it would double the syscalls the cache exists
+ * to avoid.
+ */
+export function findTodayJsonlFileStats(): TodayJsonlFile[] {
   const projectsDir = getProjectsDir();
   if (!fs.existsSync(projectsDir)) return [];
 
@@ -81,7 +93,7 @@ export function findTodayJsonlFiles(): string[] {
   todayStart.setHours(0, 0, 0, 0);
   const todayMs = todayStart.getTime();
 
-  const files: string[] = [];
+  const files: TodayJsonlFile[] = [];
   try {
     for (const projectDir of fs.readdirSync(projectsDir)) {
       const fullPath = path.join(projectsDir, projectDir);
@@ -90,7 +102,7 @@ export function findTodayJsonlFiles(): string[] {
       for (const f of findJsonlFiles(fullPath)) {
         const fstat = fs.statSync(f);
         if (fstat.mtimeMs >= todayMs) {
-          files.push(f);
+          files.push({ path: f, mtimeMs: fstat.mtimeMs, size: fstat.size });
         }
       }
     }
@@ -98,4 +110,8 @@ export function findTodayJsonlFiles(): string[] {
     // ignore
   }
   return files;
+}
+
+export function findTodayJsonlFiles(): string[] {
+  return findTodayJsonlFileStats().map((f) => f.path);
 }

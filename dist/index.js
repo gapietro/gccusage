@@ -1627,7 +1627,13 @@ function findSessionJsonlFiles(sessionId) {
 	} catch {}
 	return files;
 }
-function findTodayJsonlFiles() {
+/**
+* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
+* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
+* pair, and re-statting to get it would double the syscalls the cache exists
+* to avoid.
+*/
+function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
 	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
@@ -1641,11 +1647,18 @@ function findTodayJsonlFiles() {
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
 				const fstat = fs$6.statSync(f);
-				if (fstat.mtimeMs >= todayMs) files.push(f);
+				if (fstat.mtimeMs >= todayMs) files.push({
+					path: f,
+					mtimeMs: fstat.mtimeMs,
+					size: fstat.size
+				});
 			}
 		}
 	} catch {}
 	return files;
+}
+function findTodayJsonlFiles() {
+	return findTodayJsonlFileStats().map((f) => f.path);
 }
 
 //#endregion
