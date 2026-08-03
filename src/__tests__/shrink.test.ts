@@ -64,11 +64,12 @@ describe("shrinkOutputs", () => {
     ]);
   });
 
-  it("slices by code points so an astral character is never split", () => {
-    // Each rocket is one code point but TWO UTF-16 code units, and
-    // visibleLength counts code units — so 20 rockets measure as 40 columns.
-    // The overflow must exceed 20 to force an actual trim; a smaller one
-    // leaves the text untouched and the test proves nothing.
+  it("slices by grapheme cluster so an astral character is never split", () => {
+    // Each rocket is a single grapheme cluster (and a single code point),
+    // but it is East_Asian_Width Wide, so it costs 2 terminal columns — 20
+    // rockets measure as 40 columns, not 20. The overflow must exceed 20 to
+    // force an actual trim; a smaller one leaves the text untouched and the
+    // test proves nothing.
     const after = shrinkOutputs([shrinkable("\u{1F680}".repeat(20))], 25);
 
     // Trimming really happened.
@@ -88,12 +89,13 @@ describe("shrinkOutputs", () => {
   });
 
   describe("the floor invariant under astral (surrogate-pair) text", () => {
-    // A rocket is one code point but TWO UTF-16 code units, and visibleLength
-    // counts code units. That mismatch is exactly what let a naive `trimTo`
-    // step straight past MIN_SHRUNK_TEXT: removing one rocket removes two
-    // columns, so a segment sitting at 9 columns can jump to 7 in a single
-    // removal with nothing between. These tests pin the floor for text built
-    // entirely (or partly) from such characters, not just single-column ASCII.
+    // A rocket is a single grapheme cluster, but it is East_Asian_Width
+    // Wide, so trimTo removes 2 columns for it, not 1. That is exactly what
+    // let a naive `trimTo` step straight past MIN_SHRUNK_TEXT: removing one
+    // rocket removes two columns, so a segment sitting at 9 columns can jump
+    // to 7 in a single removal with nothing between. These tests pin the
+    // floor for text built entirely (or partly) from such two-column
+    // clusters, not just single-column ASCII.
 
     it("never drops emoji-only text below the floor under a huge overflow", () => {
       // 20 rockets measure 40 columns. An overflow of 10,000 forces the
@@ -168,11 +170,12 @@ describe("shrinkOutputs", () => {
     // second shrinkable segment still has room left to give. This is that
     // case.
     //
-    // 20 rockets (2 columns/code-unit each) cannot land exactly on
-    // MIN_SHRUNK_TEXT (8): repro 1 above already pins that, alone, it parks
-    // one column short, at width 9 -- "\u{1F680}\u{1F680}\u{1F680}\u{1F680}…".
-    // A plain-ASCII segment moves 1 column per removed character, so it CAN
-    // land exactly on 8.
+    // 20 rockets (2 columns per grapheme cluster, since each is
+    // East_Asian_Width Wide) cannot land exactly on MIN_SHRUNK_TEXT (8):
+    // repro 1 above already pins that, alone, it parks one column short, at
+    // width 9 -- "\u{1F680}\u{1F680}\u{1F680}\u{1F680}…". A plain-ASCII
+    // segment moves 1 column per removed character, so it CAN land exactly
+    // on 8.
     //
     // Widths below were derived by hand-tracing shrinkOutputs/trimTo (both
     // widest-first selection and trimTo's floor peek-ahead), not by running

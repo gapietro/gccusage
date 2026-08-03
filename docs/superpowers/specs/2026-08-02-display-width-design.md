@@ -130,7 +130,8 @@ is about.
 
 ### No speculative fast path
 
-Measured, 20,000 iterations over the default 66-column bar:
+Measured, 20,000 iterations over the default 66-column bar, with the
+`Intl.Segmenter` constructed OUTSIDE the loop:
 
 ```
 .length             0.2ms
@@ -142,10 +143,44 @@ The ASCII fast path that would have carried the common case **misses the default
 bar entirely**, because `▶` is not ASCII. Meanwhile ~4us per call against a ~60ms
 render budget means several hundred calls stay under 1ms.
 
-So: implement correctly, then measure the render path using this repo's
-established method (`git show <merge-base>:dist/index.js` as the before-binary,
-statusline cache cleared between runs, timed to process exit). Add a fast path
-only if that measurement justifies one.
+**This benchmark measured the wrong thing.** It excluded segmenter construction,
+which is a one-time cost paid at module load, so it correctly showed per-call
+segmentation is cheap but said nothing about what actually landed on the render
+path. The real, measured render-path regression after shipping was **+7.3ms**,
+not the sub-millisecond figure this section implied.
+
+The gap was tracked down after the fact: `new Intl.Segmenter("en", {
+granularity: "grapheme" })` (`src/utils/display-width.ts:11`) costs ~7.3ms on
+its own — a bare `node -e` measured 25.3ms empty versus 32.6ms constructing one
+segmenter and doing nothing else. Actual segmentation, once constructed, is
+~2.2us per call, consistent with the per-call figure measured above. So the
+entire regression is one-time ICU segmenter construction at module scope,
+running unconditionally on import, not per-call segmentation work.
+
+Two consequences follow, because they change what a future optimiser should do:
+
+- **The ASCII fast path this section contemplated (a per-call test inside
+  `graphemeWidth`/`displayWidth` that skips the segmenter for plain ASCII)
+  would have recovered approximately zero.** The segmenter constructor runs
+  once at module scope on import, before any call happens, regardless of
+  whether individual calls end up needing it.
+- **The only lever that recovers the ~7ms is avoiding construction entirely**:
+  lazy-construct the segmenter on first use that actually needs it, and add a
+  whole-string "simple text" path (no astral characters, no combining marks,
+  no VS16, no regional indicators) that computes width directly from code
+  points without ever touching the segmenter, so the common case never
+  triggers construction at all.
+
+Both of those are future work, not this change. The pre-registered decision
+rule for this design was: ship the correct implementation unconditionally
+unless the measured render-path regression exceeds 10ms, in which case add a
+fast path before merging. The measured +7.3ms came in under that threshold, so
+the conclusion stands as originally decided: implement correctly, measure the
+render path using this repo's established method (`git show
+<merge-base>:dist/index.js` as the before-binary, statusline cache cleared
+between runs, timed to process exit), and do not ship a fast path. Only the
+reasoning above — attributing the cost correctly — is new; the decision is
+unchanged.
 
 ## Design
 

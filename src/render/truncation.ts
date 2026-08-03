@@ -1,4 +1,4 @@
-import { stripAnsi, visibleLength } from "../utils/terminal.js";
+import { visibleLength } from "../utils/terminal.js";
 import { graphemeWidth, splitGraphemes } from "../utils/display-width.js";
 
 const ELLIPSIS = "…";
@@ -74,8 +74,13 @@ export function truncateAnsi(str: string, maxWidth: number | undefined): string 
     i = runEnd;
   }
 
-  // Unreachable while `visibleLength(str) > maxWidth` holds — kept so the
-  // function still terminates correctly if that invariant is ever loosened.
+  // Reachable: a malformed escape that `stripAnsi`'s SGR regex does not
+  // recognise (e.g. `"\x1b[" + "x".repeat(30) + "m"`, whose body is
+  // non-digit) is still swallowed whole by this walk's own `indexOf("m", i)`
+  // scan and charged 0 columns, so the loop can exhaust `str` and fall
+  // through here even though the emitted string overflows `maxWidth`. That
+  // is a defect in non-SGR escape handling, tracked as issue #113 — not
+  // something to fix by tightening this function's own guard.
   result.push(ELLIPSIS, RESET);
   return result.join("");
 }
