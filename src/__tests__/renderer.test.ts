@@ -953,18 +953,25 @@ describe("widget text sanitising (#115)", () => {
     );
   }
 
-  const HAZARDS: Array<[name: string, sequence: string]> = [
+  // `payload` defaults to `${sequence}visible` (sequence up front) but can be
+  // overridden — needed for carriage return, where a *leading* `\r` is
+  // stripped by custom-command.ts's own `raw.trim()` before the sanitiser
+  // ever runs (`\r` is Unicode whitespace), making the row pass whether or
+  // not the renderer's sanitiser does anything at all. Placing it mid-string
+  // (`visible\rmore`) puts it out of `.trim()`'s reach and forces
+  // `sanitizeAnsi`'s `isZeroWidthControl` path to do the actual stripping.
+  const HAZARDS: Array<[name: string, sequence: string, payload?: string]> = [
     ["erase display", `${ESC}[2J`],
     ["cursor up", `${ESC}[1A`],
     ["cursor home", `${ESC}[H`],
     ["hide cursor", `${ESC}[?25l`],
-    ["carriage return", "\r"],
+    ["carriage return", "\r", "visible\rmore"],
     ["window title", `${ESC}]0;pwned`],
     ["modifyOtherKeys", `${ESC}[>4;2m`],
   ];
 
-  it.each(HAZARDS)("a custom-command emitting %s cannot put it in the bar", (_name, sequence) => {
-    const bar = renderCommand(emit(`${sequence}visible`));
+  it.each(HAZARDS)("a custom-command emitting %s cannot put it in the bar", (_name, sequence, payload) => {
+    const bar = renderCommand(emit(payload ?? `${sequence}visible`));
 
     expect(bar).not.toContain(sequence);
     expectOnlySgr(bar);
@@ -1108,5 +1115,41 @@ describe("widget text sanitising (#115)", () => {
 
     expectOnlySgr(bar);
     expect(stripAnsi(bar)).toContain("Jam");
+  });
+
+  it("keeps a whitespace-only custom-text segment rather than dropping it as empty", () => {
+    // Regression for a #115 review finding: cleanSeparators' isEmptyOutput
+    // check must key on sanitizeAnsi's own "" contract (strict `=== ""`),
+    // not `.trim() === ""`. custom-text never goes near sanitizeAnsi's
+    // escape handling — nothing about this widget is sanitiser fallout —
+    // and whitespace is visible content by sanitizeAnsi's own definition
+    // (`visibleLength("   ")` is 3, so its empty-collapse branch never
+    // fires for it). A `.trim() === ""` predicate would misclassify this
+    // deliberately-configured blank segment as "rendered nothing" and drop
+    // it regardless of position, which is exactly the over-broad behaviour
+    // this test guards against.
+    const bar = renderStatusline(
+      makeContext({ terminalWidth: undefined }),
+      makeSettings({
+        powerline: { enabled: false, theme: "default", separator: "▶", separatorThin: "│" },
+        lines: [
+          {
+            widgets: [
+              { type: "custom-text", text: "before" },
+              { type: "custom-text", text: "   " },
+              { type: "custom-text", text: "after" },
+            ],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    // Plain mode at unknown width joins segments with no separator (see
+    // "renderLine at unknown terminal width..." above), so the natural
+    // content is exactly the three widgets' own text concatenated — the
+    // whitespace segment must appear intact between the other two, neither
+    // collapsed nor removed.
+    expect(stripAnsi(bar)).toBe("before   after");
   });
 });

@@ -5311,8 +5311,19 @@ function cleanSeparators(outputs) {
 	while (result.length > 0 && isSeparatorOutput(result[result.length - 1])) result.pop();
 	return result;
 }
+/**
+* True only for the sanitiser's exact empty-string contract: `sanitizeAnsi`
+* returns "" only when nothing visible remains, and whitespace counts as
+* visible (`visibleLength("   ")` is 3), so a whitespace-only string is not
+* empty here. Deliberately narrower than `isSeparatorOutput`'s
+* `.trim() === ""`, which serves a different purpose (collapsing pipe-marker
+* separators) and must not be reused for this check: a whitespace-only
+* `custom-text` or `separator` config is a real segment a user configured on
+* purpose, not sanitiser fallout, and must survive full-mode rendering
+* regardless of where it sits in the line.
+*/
 function isEmptyOutput(output) {
-	return output.text.trim() === "";
+	return output.text === "";
 }
 function isSeparatorOutput(output) {
 	const text = output.text.trim();

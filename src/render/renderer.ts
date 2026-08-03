@@ -171,14 +171,22 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   let lastWasSeparator = true;
 
   for (const output of outputs) {
-    // A widget that rendered nothing (issue #115: a custom-command whose
-    // output sanitises down to "") is dropped unconditionally, regardless of
-    // its position in the line — unlike an explicit `|`/`│` marker, it has no
-    // content to separate, so there is no "leading/trailing/consecutive"
-    // case where keeping it makes sense. Checked before isSeparatorOutput,
-    // which also matches "" but only removes it when adjacent to another
-    // separator or at a boundary — the collapse logic that IS still correct
-    // for a deliberately placed pipe marker.
+    // A widget whose text sanitised to the sanitiser's exact empty-string
+    // contract (issue #115: `sanitizeAnsi` returns "" only when nothing
+    // visible remains — whitespace counts as visible, so "   " is NOT this
+    // case) is dropped unconditionally, regardless of its position in the
+    // line — unlike an explicit `|`/`│` marker, it has no content to
+    // separate, so there is no "leading/trailing/consecutive" case where
+    // keeping it makes sense. Checked before isSeparatorOutput, which also
+    // matches "" but via `.trim() === ""` — a looser test that exists so
+    // whitespace-only pipe-collapse candidates behave like real separators —
+    // and only removes a match when adjacent to another separator or at a
+    // boundary, the collapse logic that IS still correct for a deliberately
+    // placed pipe marker. isEmptyOutput must stay strict (`=== ""`, not
+    // `.trim() === ""`), or a whitespace-only `custom-text`/`separator`
+    // config — a real segment a user configured on purpose, not sanitiser
+    // fallout — would be silently dropped from anywhere in the line, not
+    // just consecutive/boundary positions.
     if (isEmptyOutput(output)) continue;
 
     const isSep = isSeparatorOutput(output);
@@ -194,8 +202,19 @@ function cleanSeparators(outputs: WidgetOutput[]): WidgetOutput[] {
   return result;
 }
 
+/**
+ * True only for the sanitiser's exact empty-string contract: `sanitizeAnsi`
+ * returns "" only when nothing visible remains, and whitespace counts as
+ * visible (`visibleLength("   ")` is 3), so a whitespace-only string is not
+ * empty here. Deliberately narrower than `isSeparatorOutput`'s
+ * `.trim() === ""`, which serves a different purpose (collapsing pipe-marker
+ * separators) and must not be reused for this check: a whitespace-only
+ * `custom-text` or `separator` config is a real segment a user configured on
+ * purpose, not sanitiser fallout, and must survive full-mode rendering
+ * regardless of where it sits in the line.
+ */
 function isEmptyOutput(output: WidgetOutput): boolean {
-  return output.text.trim() === "";
+  return output.text === "";
 }
 
 function isSeparatorOutput(output: WidgetOutput): boolean {
