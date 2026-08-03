@@ -39,7 +39,8 @@ async function main(): Promise<void> {
   const isTTY = process.stdin.isTTY;
   let raw = "";
   if (!isTTY) {
-    raw = await readStdin();
+    const result = await readStdin();
+    raw = result.raw;
   }
 
   // A bad FIELD is absorbed by the schema and costs only that field. An error

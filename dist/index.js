@@ -835,23 +835,66 @@ const StatusJsonSchema = object({
 
 //#endregion
 //#region src/data/stdin-reader.ts
-function readStdin() {
+/**
+* Claude Code waits 600s for the statusline command (its hook spawn helper
+* computes `e.timeout ? e.timeout*1000 : 600000`, verified against the 2.1.220
+* binary), so nothing external pressured the old 1s deadline — we chose it, and
+* it was the only binding constraint. Claude Code also writes the payload and
+* immediately `end()`s stdin, so a read still incomplete after 5s is pathology
+* rather than a merely loaded machine (#87).
+*/
+const DEFAULT_STDIN_TIMEOUT_MS = 5e3;
+/**
+* Overridable so tests can drive the real bundle at a deadline short enough to
+* keep, following the precedent of `GCCUSAGE_PRICING_URL` (PR #106).
+*
+* A malformed value degrades to the default rather than being coerced: a NaN
+* deadline makes `setTimeout` fire immediately, which would turn every render
+* into the degraded line.
+*/
+function resolveTimeoutMs() {
+	const raw = process.env["GCCUSAGE_STDIN_TIMEOUT_MS"];
+	if (raw === void 0 || raw.trim() === "") return DEFAULT_STDIN_TIMEOUT_MS;
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_STDIN_TIMEOUT_MS;
+	return parsed;
+}
+/**
+* The old signature resolved `""` on timeout, which the caller could not tell
+* from "Claude Code sent nothing" — so a slow payload rendered a confident
+* $0.00 bar beside a non-zero `Today:` read from the daily store (#87).
+*
+* Both parameters exist for the tests; production has exactly one call site
+* (`src/index.ts`) and passes neither.
+*/
+function readStdin(stream = process.stdin, timeoutMs = resolveTimeoutMs()) {
 	return new Promise((resolve$1, reject) => {
 		const chunks = [];
-		const timeout = setTimeout(() => {
-			process.stdin.destroy();
-			resolve$1("");
-		}, 1e3);
-		process.stdin.on("data", (chunk) => chunks.push(chunk));
-		process.stdin.on("end", () => {
-			clearTimeout(timeout);
-			resolve$1(Buffer.concat(chunks).toString("utf-8"));
-		});
-		process.stdin.on("error", (err) => {
-			clearTimeout(timeout);
+		let settled = false;
+		let timer;
+		const settle = (timedOut) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve$1({
+				raw: Buffer.concat(chunks).toString("utf-8"),
+				timedOut,
+				timeoutMs
+			});
+		};
+		timer = setTimeout(() => {
+			settle(true);
+			stream.destroy();
+		}, timeoutMs);
+		stream.on("data", (chunk) => chunks.push(chunk));
+		stream.on("end", () => settle(false));
+		stream.on("error", (err) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
 			reject(err);
 		});
-		process.stdin.resume();
+		stream.resume();
 	});
 }
 /**
@@ -4583,7 +4626,10 @@ async function main() {
 	}
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
-	if (!isTTY) raw = await readStdin();
+	if (!isTTY) {
+		const result = await readStdin();
+		raw = result.raw;
+	}
 	const { stdin, error: stdinError } = parseStatusJson(raw);
 	if (stdinError) {
 		process.stdout.write(formatStdinError(stdinError));
