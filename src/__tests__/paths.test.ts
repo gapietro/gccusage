@@ -7,6 +7,7 @@ import {
   getCacheDir,
   getClaudeDataDir,
   getProjectsDir,
+  findTodayJsonlFileStats,
 } from "../utils/paths.js";
 
 let tmpHome: string;
@@ -88,5 +89,47 @@ describe("findSessionJsonlFiles", () => {
   it("fails closed when no session id is given", () => {
     expect(findSessionJsonlFiles(undefined)).toHaveLength(0);
     expect(findSessionJsonlFiles("")).toHaveLength(0);
+  });
+});
+
+describe("findTodayJsonlFileStats", () => {
+  beforeEach(() => {
+    // Age the files from the outer beforeEach to yesterday so they don't interfere
+    const yesterday = new Date(Date.now() - 26 * 60 * 60 * 1000);
+    const sessionDir = path.join(tmpHome, ".claude", "projects", "-some-project");
+    if (fs.existsSync(sessionDir)) {
+      for (const file of fs.readdirSync(sessionDir)) {
+        const filePath = path.join(sessionDir, file);
+        fs.utimesSync(filePath, yesterday, yesterday);
+      }
+    }
+  });
+
+  function writeTranscript(name: string, contents: string): string {
+    const dir = path.join(tmpHome, ".claude", "projects", "proj");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${name}.jsonl`);
+    fs.writeFileSync(filePath, contents);
+    return filePath;
+  }
+
+  it("reports the size and mtime of each of today's transcripts", () => {
+    const filePath = writeTranscript("a", "line one\nline two\n");
+    const stat = fs.statSync(filePath);
+
+    const stats = findTodayJsonlFileStats();
+
+    expect(stats).toHaveLength(1);
+    expect(stats[0]!.path).toBe(filePath);
+    expect(stats[0]!.size).toBe(stat.size);
+    expect(stats[0]!.mtimeMs).toBe(stat.mtimeMs);
+  });
+
+  it("excludes transcripts last written before today", () => {
+    const filePath = writeTranscript("old", "x\n");
+    const yesterday = new Date(Date.now() - 26 * 60 * 60 * 1000);
+    fs.utimesSync(filePath, yesterday, yesterday);
+
+    expect(findTodayJsonlFileStats()).toHaveLength(0);
   });
 });

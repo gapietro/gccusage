@@ -6,8 +6,8 @@ import { formatTokens } from "../utils/format.js";
 export const tokensCachedWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
     const cached =
-      context.metrics.session.cacheCreationTokens +
-      context.metrics.session.cacheReadTokens;
+      context.metrics.totals.cacheCreationTokens +
+      context.metrics.totals.cacheReadTokens;
     // "Cached:" (a count), distinct from cache-hit-rate's "Hit:" (a percentage) — #60.
     const label = config.label ?? "Cached:";
     const text = `${label} ${formatTokens(cached)}`;

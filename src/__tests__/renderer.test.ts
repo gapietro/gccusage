@@ -16,8 +16,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     },
     metrics: {
       byModel: new Map(),
-      session: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
-      today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      totals: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     },
     block: null,
     burnRate: null,

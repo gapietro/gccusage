@@ -30,8 +30,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     stdin: { model: "claude-sonnet-4-20250514" },
     metrics: {
       byModel: new Map(),
-      session: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
-      today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      totals: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     },
     block: null,
     burnRate: null,
@@ -616,21 +615,20 @@ describe("tokenBreakdownWidget", () => {
   // are a last-assistant-message snapshot, the session really billed 122 in
   // and 37,659 out. Both are present here so the assertion distinguishes the
   // two sources rather than passing on whichever one is wired up.
-  function ctx(session: Partial<RenderContext["metrics"]["session"]>): RenderContext {
+  function ctx(session: Partial<RenderContext["metrics"]["totals"]>): RenderContext {
     return makeContext({
       stdin: {
         context_window: { total_input_tokens: 115847, total_output_tokens: 2 },
       } as never,
       metrics: {
         byModel: new Map(),
-        session: {
+        totals: {
           inputTokens: 0,
           outputTokens: 0,
           cacheCreationTokens: 0,
           cacheReadTokens: 0,
           ...session,
         },
-        today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
       },
     });
   }
@@ -656,13 +654,12 @@ describe("tokenBreakdownWidget", () => {
       stdin: {} as never,
       metrics: {
         byModel: new Map(),
-        session: {
+        totals: {
           inputTokens: 10,
           outputTokens: 20,
           cacheCreationTokens: 0,
           cacheReadTokens: 0,
         },
-        today: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
       },
     });
     expect(tokenBreakdownWidget.render(context, { type: "token-breakdown" })?.text).toBe(

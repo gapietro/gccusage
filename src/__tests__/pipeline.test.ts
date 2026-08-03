@@ -6,6 +6,7 @@ import { buildRenderContext } from "../data/pipeline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import type { Settings } from "../config/schema.js";
 import type { StatusJson } from "../types/status-json.js";
+import { parseJsonlFile } from "../data/jsonl-reader.js";
 
 // Pricing normally comes from the network; pin it so calculated costs are
 // exact. Everything else (transcripts, the daily cost store) runs for real
@@ -25,6 +26,15 @@ vi.mock("../data/pricing-fetcher.js", () => ({
   // real detached refresher child on every case in this file.
   getPricingForRender: vi.fn(() => ({ pricing: PINNED_PRICING, stale: false })),
 }));
+
+// A pass-through spy: real parsing, but every path the pipeline reads is
+// recorded. Used to assert that today's transcripts are NOT read in the
+// default config — a behavioural assertion can't see that, because the old
+// code read them and then discarded the result.
+vi.mock("../data/jsonl-reader.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/jsonl-reader.js")>();
+  return { ...actual, parseJsonlFile: vi.fn(actual.parseJsonlFile) };
+});
 
 let tmpDir: string;
 let originalHome: string | undefined;
@@ -118,6 +128,32 @@ function settingsWith(costSource: Settings["costSource"]): Settings {
   return { ...DEFAULT_SETTINGS, costSource };
 }
 
+function parsedPaths(): string[] {
+  return vi.mocked(parseJsonlFile).mock.calls.map((c) => c[0]);
+}
+
+// A today-dated transcript belonging to some OTHER session, worth $2.00 of
+// calculated cost. The current session's own transcript is written by
+// `writeTranscript`.
+function writeOtherSessionTranscript(sessionId: string): string {
+  const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+  fs.mkdirSync(projectDir, { recursive: true });
+  const filePath = path.join(projectDir, `${sessionId}.jsonl`);
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date().toISOString(),
+      sessionId,
+      message: {
+        model: "test-model",
+        usage: { input_tokens: 2_000_000, output_tokens: 0 },
+      },
+    }) + "\n",
+  );
+  return filePath;
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-pipeline-"));
   originalHome = process.env["HOME"];
@@ -125,6 +161,7 @@ beforeEach(() => {
   process.env["HOME"] = tmpDir;
   process.env["XDG_CACHE_HOME"] = tmpDir;
   writeTranscript("session-a");
+  vi.mocked(parseJsonlFile).mockClear();
 });
 
 afterEach(() => {
@@ -224,7 +261,7 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       settingsWith("calculated"),
     );
 
-    expect(context.metrics.session).toEqual({
+    expect(context.metrics.totals).toEqual({
       inputTokens: EXPECTED_INPUT,
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
@@ -232,8 +269,8 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
     });
 
     // Guard the two wrong rules explicitly.
-    expect(context.metrics.session.outputTokens).not.toBe(5 + 107 + 296 + 12 + 340 + 981);
-    expect(context.metrics.session.outputTokens).not.toBe(5 + 12);
+    expect(context.metrics.totals.outputTokens).not.toBe(5 + 107 + 296 + 12 + 340 + 981);
+    expect(context.metrics.totals.outputTokens).not.toBe(5 + 12);
 
     expect(context.metrics.byModel.get("test-model")).toEqual({
       inputTokens: EXPECTED_INPUT,
@@ -372,5 +409,80 @@ describe("unpriced models", () => {
     );
 
     expect(context.sessionCostUncertain).toBe(true);
+  });
+});
+
+describe("today's transcripts are read only when they are used (#94)", () => {
+  const stdinWithCost: StatusJson = {
+    session_id: "sess-current",
+    cost: { total_cost_usd: 3.0 },
+  } as StatusJson;
+
+  it("does not read other sessions' transcripts under costSource auto", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    await buildRenderContext(stdinWithCost, settingsWith("auto"));
+
+    expect(parsedPaths()).not.toContain(other);
+  });
+
+  it("does not read other sessions' transcripts under costSource stdin", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    await buildRenderContext(stdinWithCost, settingsWith("stdin"));
+
+    expect(parsedPaths()).not.toContain(other);
+  });
+
+  // The gate is the SETTING, not the resolved source. "auto" with no stdin
+  // cost resolves the *session* source to calculated (pipeline.ts:63) while
+  // today's spend still comes from the daily store, so today's transcripts are
+  // still not needed.
+  it("does not read them under auto even when stdin carries no cost", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    await buildRenderContext(
+      { session_id: "sess-current" } as StatusJson,
+      settingsWith("auto"),
+    );
+
+    expect(parsedPaths()).not.toContain(other);
+  });
+
+  it("does read them under costSource calculated", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    const ctx = await buildRenderContext(stdinWithCost, settingsWith("calculated"));
+
+    expect(parsedPaths()).toContain(other);
+    // $1.00 from the shared beforeEach's "session-a" transcript (also
+    // today-dated) + $1.00 from the current session + $2.00 from the other
+    // one. Calculated mode sums every today transcript, not just this
+    // session's and the "other" one named in this test.
+    expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
+  });
+
+  it("does not re-parse unchanged transcripts on a second calculated render", async () => {
+    writeTranscript("sess-current");
+    const other = writeOtherSessionTranscript("sess-other");
+
+    await buildRenderContext(stdinWithCost, settingsWith("calculated"));
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const ctx = await buildRenderContext(stdinWithCost, settingsWith("calculated"));
+
+    // The session transcript is still read every render — it feeds byModel,
+    // session totals and the start timestamp. Today's OTHER transcripts come
+    // from the cache.
+    expect(parsedPaths()).not.toContain(other);
+    // $1.00 from the shared beforeEach's "session-a" transcript + $1.00 from
+    // the current session + $2.00 from the other one — same arithmetic as
+    // "does read them under costSource calculated" above, since both calls
+    // to buildRenderContext see the same three today-dated transcripts.
+    expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
   });
 });

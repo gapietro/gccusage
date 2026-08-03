@@ -1,4 +1,4 @@
-import type { AggregatedMetrics, TokenMetrics } from "../../../types/token-metrics.js";
+import type { TokenMetrics } from "../../../types/token-metrics.js";
 import type { BlockMetrics } from "../../../types/block-metrics.js";
 import type { BurnRate } from "../../../types/burn-rate.js";
 
@@ -37,8 +37,20 @@ export interface RealPayloadFixture {
    * the fixture.
    */
   derived: {
-    /** AggregatedMetrics as recorded, except byModel is entries (Maps don't survive JSON). */
-    metrics: Omit<AggregatedMetrics, "byModel"> & { byModel: [string, TokenMetrics][] };
+    /**
+     * The metrics as RECORDED at capture time, declared explicitly rather than
+     * derived from the live `AggregatedMetrics`. These fixtures are a recording
+     * of what the pipeline produced then, and the live type has since changed
+     * (`session` -> `totals`, `today` dropped in #94). `context-from-fixture.ts`
+     * adapts the recording to the current type; re-capturing to chase a type
+     * rename would throw away the "real payload" property they exist for.
+     * `byModel` is entries, not a Map, because Maps don't survive JSON.
+     */
+    metrics: {
+      byModel: [string, TokenMetrics][];
+      session: TokenMetrics;
+      today: TokenMetrics;
+    };
     sessionCostUsd: number;
     todayCostUsd: number;
     /** Map is not JSON-serialisable; stored as entries. */

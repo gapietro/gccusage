@@ -1,12 +1,13 @@
 import type { StatusJson } from "../types/status-json.js";
 import type { Settings } from "../config/schema.js";
 import type { RenderContext } from "../types/render-context.js";
-import { findSessionJsonlFiles, findTodayJsonlFiles } from "../utils/paths.js";
-import { parseJsonlFile, filterTodayEntries } from "./jsonl-reader.js";
+import { findSessionJsonlFiles } from "../utils/paths.js";
+import { parseJsonlFile } from "./jsonl-reader.js";
 import { aggregateTokens, getFirstTimestamp } from "./token-aggregator.js";
 import { detectBlock } from "./block-tracker.js";
 import { getPricingForRender } from "./pricing-fetcher.js";
 import { maybeSpawnPricingRefresh } from "./pricing-refresh.js";
+import { getTodayAggregate } from "../cache/today-aggregate-cache.js";
 import {
   calculateCostByModel,
   calculateTotalCost,
@@ -34,15 +35,13 @@ export async function buildRenderContext(
   stdin: StatusJson,
   settings: Settings,
 ): Promise<RenderContext> {
-  // Read JSONL files
+  // Read this session's transcript. Today's transcripts are read further down,
+  // and only when `costSource` is "calculated" — the sole setting that
+  // consumes them (#94).
   const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-  const todayFiles = findTodayJsonlFiles();
-
   const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-  const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
 
-  // Aggregate tokens
-  const metrics = aggregateTokens(sessionEntries, todayEntries);
+  const metrics = aggregateTokens(sessionEntries);
 
   // Get pricing — cache-or-fallback only. Refreshing happens in a detached
   // child so the bar never waits on the network (#84).
@@ -53,8 +52,6 @@ export async function buildRenderContext(
   const session = calculateCostByModel(metrics.byModel, pricing);
   const costByModel = session.costs;
   const calculatedSessionCost = calculateTotalCost(costByModel);
-  const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
-  const calculatedTodayCost = calculateTotalCost(today.costs);
 
   // Determine cost source (cost.total_cost_usd works for both formats)
   const stdinCost = stdin.cost?.total_cost_usd;
@@ -69,6 +66,20 @@ export async function buildRenderContext(
     sessionCostSource = "stdin";
   }
 
+  // Today's transcripts are read only for the one setting that displays a
+  // JSONL-derived today figure. Everywhere else `todayCostUsd` comes from the
+  // daily store, and reading them was 33 MB of work per cache miss whose
+  // result was discarded (#94).
+  //
+  // The condition is the SETTING, not `sessionCostSource`: "auto" with no
+  // stdin cost resolves the session source to "calculated" while today's spend
+  // still comes from the store, so gating on the resolved source would put the
+  // read back.
+  const today =
+    settings.costSource === "calculated"
+      ? calculateCostByModel(getTodayAggregate().byModel, pricing)
+      : null;
+
   // Today's cost: JSONL-calculated when the user forces calculated costs,
   // otherwise our per-session daily tracker. In forced-calculated mode the
   // tracked total is never displayed, so we don't touch the store at all —
@@ -77,8 +88,8 @@ export async function buildRenderContext(
   // tracker is told which source fed it so a source switch isn't read as a
   // restart.
   const todayCostUsd =
-    settings.costSource === "calculated"
-      ? calculatedTodayCost
+    today !== null
+      ? calculateTotalCost(today.costs)
       : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 
   // A missing price can only understate a figure the pricing table produced.
@@ -86,7 +97,7 @@ export async function buildRenderContext(
   // be a false alarm — and a bar that cries uncertain on every render is a
   // bar nobody reads.
   const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-  const todayCostUncertain = settings.costSource === "calculated" && today.unpriced.length > 0;
+  const todayCostUncertain = today !== null && today.unpriced.length > 0;
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
@@ -103,7 +114,7 @@ export async function buildRenderContext(
   const modelId = typeof stdin.model === "string"
     ? stdin.model
     : stdin.model?.id;
-  const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+  const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
   const burnRate =
     sessionCostSource === "stdin" ? (getStdinBurnRate(stdin) ?? jsonlBurnRate) : jsonlBurnRate;
 

@@ -8,6 +8,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
+import * as path$11 from "node:path";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -582,6 +583,54 @@ function string(message$1) {
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "string") dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function tuple(items, message$1) {
+	return {
+		kind: "schema",
+		type: "tuple",
+		reference: tuple,
+		expects: "Array",
+		async: false,
+		items,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			const input = dataset.value;
+			if (Array.isArray(input)) {
+				dataset.typed = true;
+				dataset.value = [];
+				for (let key = 0; key < this.items.length; key++) {
+					const value$1 = input[key];
+					const itemDataset = this.items[key]["~run"]({ value: value$1 }, config$1);
+					if (itemDataset.issues) {
+						const pathItem = {
+							type: "array",
+							origin: "value",
+							input,
+							key,
+							value: value$1
+						};
+						for (const issue of itemDataset.issues) {
+							if (issue.path) issue.path.unshift(pathItem);
+							else issue.path = [pathItem];
+							dataset.issues?.push(issue);
+						}
+						if (!dataset.issues) dataset.issues = itemDataset.issues;
+						if (config$1.abortEarly) {
+							dataset.typed = false;
+							break;
+						}
+					}
+					if (!itemDataset.typed) dataset.typed = false;
+					dataset.value.push(itemDataset.value);
+				}
+			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -1483,11 +1532,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$11.join(xdg, "gccusage");
+	return path$11.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$10.join(getConfigDir(), "settings.json");
+	return path$11.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1582,23 +1631,23 @@ function formatStdinError(error) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$9.isAbsolute(home)) return home;
+	if (path$10.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$10.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$9.join(getHomeDir(), ".claude");
+	return path$10.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$9.join(getClaudeDataDir(), "projects");
+	return path$10.join(getClaudeDataDir(), "projects");
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$9.join(xdg, "gccusage");
-	return path$9.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
 	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
@@ -1606,7 +1655,7 @@ function ensureDir(dir) {
 function findJsonlFiles(dir) {
 	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$10.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1618,16 +1667,22 @@ function findSessionJsonlFiles(sessionId) {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
+			const fullPath = path$10.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$10.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
 }
-function findTodayJsonlFiles() {
+/**
+* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
+* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
+* pair, and re-statting to get it would double the syscalls the cache exists
+* to avoid.
+*/
+function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
 	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
@@ -1636,12 +1691,16 @@ function findTodayJsonlFiles() {
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
+			const fullPath = path$10.join(projectsDir, projectDir);
 			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
 				const fstat = fs$6.statSync(f);
-				if (fstat.mtimeMs >= todayMs) files.push(f);
+				if (fstat.mtimeMs >= todayMs) files.push({
+					path: f,
+					mtimeMs: fstat.mtimeMs,
+					size: fstat.size
+				});
 			}
 		}
 	} catch {}
@@ -1748,7 +1807,7 @@ function filterTodayEntries(entries, now = new Date()) {
 
 //#endregion
 //#region src/data/token-aggregator.ts
-function emptyMetrics() {
+function emptyMetrics$1() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -1763,30 +1822,24 @@ function addUsage(target, entry) {
 	target.cacheCreationTokens += entry.usage.cache_creation_input_tokens ?? 0;
 	target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
 }
-function aggregateTokens(sessionEntries, todayEntries) {
+function aggregateTokens(entries) {
 	const byModel = new Map();
-	const session = emptyMetrics();
-	const today = emptyMetrics();
-	for (const entry of sessionEntries) {
+	const totals = emptyMetrics$1();
+	for (const entry of entries) {
 		if (!entry.usage) continue;
-		addUsage(session, entry);
+		addUsage(totals, entry);
 		if (entry.model) {
 			let model = byModel.get(entry.model);
 			if (!model) {
-				model = emptyMetrics();
+				model = emptyMetrics$1();
 				byModel.set(entry.model, model);
 			}
 			addUsage(model, entry);
 		}
 	}
-	for (const entry of todayEntries) {
-		if (!entry.usage) continue;
-		addUsage(today, entry);
-	}
 	return {
 		byModel,
-		session,
-		today
+		totals
 	};
 }
 function getFirstTimestamp(entries) {
@@ -1811,7 +1864,7 @@ let counter = 0;
 * trailing newline rather than the compact encoding `writeJsonAtomic` emits.
 */
 function writeFileAtomic(filePath, contents) {
-	const dir = path$8.dirname(filePath);
+	const dir = path$9.dirname(filePath);
 	ensureDir(dir);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 	fs$4.writeFileSync(tmpPath, contents, "utf-8");
@@ -1867,24 +1920,24 @@ function readJsonValidated(filePath, schema) {
 //#region src/cache/block-cache.ts
 const BlockCacheSchema = object({ blockStartTime: number() });
 function getBlockCachePath() {
-	return path$7.join(getCacheDir(), "blocks", "current.json");
+	return path$8.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
-	const cachePath = getBlockCachePath();
-	const data = readJsonValidated(cachePath, BlockCacheSchema);
+	const cachePath$1 = getBlockCachePath();
+	const data = readJsonValidated(cachePath$1, BlockCacheSchema);
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
 		try {
-			fs$3.unlinkSync(cachePath);
+			fs$3.unlinkSync(cachePath$1);
 		} catch {}
 		return null;
 	}
 	return data;
 }
 function saveBlockCache(data) {
-	const cachePath = getBlockCachePath();
+	const cachePath$1 = getBlockCachePath();
 	try {
-		writeJsonAtomic(cachePath, data);
+		writeJsonAtomic(cachePath$1, data);
 	} catch {}
 }
 
@@ -2162,7 +2215,7 @@ const PricingCacheSchema = object({
 	data: record(string(), unknown())
 });
 function getCachePath$1() {
-	return path$6.join(getCacheDir(), "pricing.json");
+	return path$7.join(getCacheDir(), "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -2187,13 +2240,13 @@ function loadPricingCache(ttlMs) {
 	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
-	const cachePath = getCachePath$1();
+	const cachePath$1 = getCachePath$1();
 	try {
 		const cache = {
 			timestamp: Date.now(),
 			data
 		};
-		writeJsonAtomic(cachePath, cache);
+		writeJsonAtomic(cachePath$1, cache);
 	} catch {}
 }
 
@@ -2319,7 +2372,7 @@ async function fetchPricing(ttlMs) {
 */
 const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 function stampPath() {
-	return path$5.join(getCacheDir(), "pricing-refresh-attempt.json");
+	return path$6.join(getCacheDir(), "pricing-refresh-attempt.json");
 }
 function attemptedRecently() {
 	try {
@@ -2356,6 +2409,118 @@ function maybeSpawnPricingRefresh(stale) {
 		});
 		child.unref();
 	} catch {}
+}
+
+//#endregion
+//#region src/cache/today-aggregate-cache.ts
+const TokenMetricsSchema = object({
+	inputTokens: number(),
+	outputTokens: number(),
+	cacheCreationTokens: number(),
+	cacheReadTokens: number()
+});
+/**
+* `byModel` is entries rather than an object because a Map does not survive
+* JSON; `totals` is stored alongside it because entries carrying usage but no
+* `model` count toward the totals and toward no bucket, so the totals cannot
+* be reconstructed by summing `byModel`.
+*/
+const FileAggregateSchema = object({
+	mtimeMs: number(),
+	size: number(),
+	byModel: array(tuple([string(), TokenMetricsSchema])),
+	totals: TokenMetricsSchema
+});
+const TodayAggregateCacheSchema = object({
+	date: string(),
+	files: record(string(), FileAggregateSchema)
+});
+function cachePath() {
+	return path$5.join(getCacheDir(), "today-aggregates.json");
+}
+/** Local date, matching how `filterTodayEntries` picks its midnight. */
+function localDateKey(now) {
+	const month = String(now.getMonth() + 1).padStart(2, "0");
+	const day = String(now.getDate()).padStart(2, "0");
+	return `${now.getFullYear()}-${month}-${day}`;
+}
+function emptyMetrics() {
+	return {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheCreationTokens: 0,
+		cacheReadTokens: 0
+	};
+}
+function addInto(target, source) {
+	target.inputTokens += source.inputTokens;
+	target.outputTokens += source.outputTokens;
+	target.cacheCreationTokens += source.cacheCreationTokens;
+	target.cacheReadTokens += source.cacheReadTokens;
+}
+/**
+* Today's token usage across every transcript, aggregated per file and cached.
+*
+* A cached per-file aggregate is reused only when the file's `mtimeMs` AND
+* `size` both still match, so the returned figure is always assembled from
+* entries that were verified against the live files during this call. Two
+* statuslines racing on the write can therefore cost one extra re-parse on a
+* later render, but neither can serve a wrong total — the same no-lock posture
+* as the daily cost store.
+*
+* Whole files are re-parsed when they change, rather than resuming from a byte
+* offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
+* straddling an offset boundary would need that map carried across renders.
+* The only file that changes mid-day is the active transcript, and re-parsing
+* it whole is still flat with respect to the day's total volume (#94).
+*/
+function getTodayAggregate(now = new Date()) {
+	const files = findTodayJsonlFileStats();
+	const date = localDateKey(now);
+	const cached = readJsonValidated(cachePath(), TodayAggregateCacheSchema);
+	const previous = cached && cached.date === date ? cached.files : {};
+	const next = {};
+	let changed = Object.keys(previous).length !== files.length;
+	for (const file of files) {
+		const hit = previous[file.path];
+		if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
+			next[file.path] = hit;
+			continue;
+		}
+		const entries = filterTodayEntries(parseJsonlFile(file.path), now);
+		const aggregate = aggregateTokens(entries);
+		next[file.path] = {
+			mtimeMs: file.mtimeMs,
+			size: file.size,
+			byModel: [...aggregate.byModel],
+			totals: aggregate.totals
+		};
+		changed = true;
+	}
+	if (changed) try {
+		writeJsonAtomic(cachePath(), {
+			date,
+			files: next
+		});
+	} catch {}
+	const byModel = new Map();
+	const totals = emptyMetrics();
+	for (const aggregate of Object.values(next)) {
+		addInto(totals, aggregate.totals);
+		for (const [model, metrics] of aggregate.byModel) {
+			let bucket = byModel.get(model);
+			if (!bucket) {
+				bucket = emptyMetrics();
+				byModel.set(model, bucket);
+			}
+			addInto(bucket, metrics);
+		}
+	}
+	return {
+		byModel,
+		totals,
+		fileCount: files.length
+	};
 }
 
 //#endregion
@@ -2694,17 +2859,13 @@ function getStdinBurnRate(stdin) {
 }
 async function buildRenderContext(stdin, settings) {
 	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-	const todayFiles = findTodayJsonlFiles();
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-	const todayEntries = filterTodayEntries(todayFiles.flatMap(parseJsonlFile));
-	const metrics = aggregateTokens(sessionEntries, todayEntries);
+	const metrics = aggregateTokens(sessionEntries);
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
 	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
 	const costByModel = session.costs;
 	const calculatedSessionCost = calculateTotalCost(costByModel);
-	const today = calculateCostByModel(aggregateTokens(todayEntries, []).byModel, pricing);
-	const calculatedTodayCost = calculateTotalCost(today.costs);
 	const stdinCost = stdin.cost?.total_cost_usd;
 	let sessionCostUsd;
 	let sessionCostSource;
@@ -2715,13 +2876,14 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostUsd = stdinCost;
 		sessionCostSource = "stdin";
 	}
-	const todayCostUsd = settings.costSource === "calculated" ? calculatedTodayCost : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
+	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
+	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-	const todayCostUncertain = settings.costSource === "calculated" && today.unpriced.length > 0;
+	const todayCostUncertain = today !== null && today.unpriced.length > 0;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const jsonlBurnRate = calculateBurnRate(metrics.session, sessionStartTime, pricing, modelId);
+	const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
 	const burnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) ?? jsonlBurnRate : jsonlBurnRate;
 	return {
 		stdin,
@@ -3151,7 +3313,7 @@ const gitChangesWidget = { render(context, config) {
 //#region src/widgets/tokens-input.ts
 const tokensInputWidget = { render(context, config) {
 	const label = config.label ?? "In:";
-	const text = `${label} ${formatTokens(context.metrics.session.inputTokens)}`;
+	const text = `${label} ${formatTokens(context.metrics.totals.inputTokens)}`;
 	return {
 		text,
 		fg: config.fg,
@@ -3163,7 +3325,7 @@ const tokensInputWidget = { render(context, config) {
 //#region src/widgets/tokens-output.ts
 const tokensOutputWidget = { render(context, config) {
 	const label = config.label ?? "Out:";
-	const text = `${label} ${formatTokens(context.metrics.session.outputTokens)}`;
+	const text = `${label} ${formatTokens(context.metrics.totals.outputTokens)}`;
 	return {
 		text,
 		fg: config.fg,
@@ -3174,7 +3336,7 @@ const tokensOutputWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/tokens-cached.ts
 const tokensCachedWidget = { render(context, config) {
-	const cached = context.metrics.session.cacheCreationTokens + context.metrics.session.cacheReadTokens;
+	const cached = context.metrics.totals.cacheCreationTokens + context.metrics.totals.cacheReadTokens;
 	const label = config.label ?? "Cached:";
 	const text = `${label} ${formatTokens(cached)}`;
 	return {
@@ -3419,7 +3581,7 @@ const apiLatencyWidget = { render(context, config) {
 /**
 * Session input and output tokens in one segment.
 *
-* Reads `metrics.session`, the JSONL-derived cumulative totals — the same
+* Reads `metrics.totals`, the JSONL-derived cumulative totals — the same
 * source `tokens-input` and `tokens-output` read, so the three agree about
 * one session rather than contradicting each other on the same bar (#58).
 *
@@ -3431,8 +3593,8 @@ const apiLatencyWidget = { render(context, config) {
 * misreading before PR #38.
 */
 const tokenBreakdownWidget = { render(context, config) {
-	const input = context.metrics.session.inputTokens;
-	const output = context.metrics.session.outputTokens;
+	const input = context.metrics.totals.inputTokens;
+	const output = context.metrics.totals.outputTokens;
 	if (input === 0 && output === 0) return null;
 	const text = `In:${formatTokens(input)} Out:${formatTokens(output)}`;
 	return {
@@ -4115,14 +4277,14 @@ function checkCache(ttlMs, key) {
 	return entry.output;
 }
 function writeCache(output, key) {
-	const cachePath = getCachePath();
+	const cachePath$1 = getCachePath();
 	try {
 		const entry = {
 			output,
 			timestamp: Date.now(),
 			key
 		};
-		writeJsonAtomic(cachePath, entry);
+		writeJsonAtomic(cachePath$1, entry);
 	} catch {}
 }
 
@@ -4294,20 +4456,18 @@ async function runCli(args) {
 	}
 }
 async function reportToday() {
-	const files = findTodayJsonlFiles();
-	const entries = filterTodayEntries(files.flatMap(parseJsonlFile));
-	const metrics = aggregateTokens(entries, entries);
+	const { byModel, totals, fileCount } = getTodayAggregate();
 	const pricing = await fetchPricing(864e5);
-	const { costs: costByModel, unpriced } = calculateCostByModel(metrics.byModel, pricing);
+	const { costs: costByModel, unpriced } = calculateCostByModel(byModel, pricing);
 	const totalCost = calculateTotalCost(costByModel);
 	console.log("=== Today's Usage ===\n");
 	console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
-	console.log(`Total Tokens: ${formatTokens(metrics.today.inputTokens + metrics.today.outputTokens)}`);
+	console.log(`Total Tokens: ${formatTokens(totals.inputTokens + totals.outputTokens)}`);
 	console.log();
 	if (costByModel.size > 0) {
 		console.log("By Model:");
 		for (const [model, cost] of costByModel) {
-			const tokens = metrics.byModel.get(model);
+			const tokens = byModel.get(model);
 			const total = tokens ? tokens.inputTokens + tokens.outputTokens : 0;
 			console.log(`  ${formatModelName(model)}: ${formatDollars(cost)} (${formatTokens(total)} tokens)`);
 		}
@@ -4316,7 +4476,7 @@ async function reportToday() {
 		console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
 		console.log("Run `npm run pricing` to refresh the offline table.");
 	}
-	console.log(`\nSessions analyzed: ${files.length} files`);
+	console.log(`\nSessions analyzed: ${fileCount} files`);
 }
 /** POSIX shell single-quote escaping: ' becomes '\'' */
 function shellQuote(p) {

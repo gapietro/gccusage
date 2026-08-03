@@ -6,7 +6,7 @@ import { formatTokens } from "../utils/format.js";
 export const tokensOutputWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
     const label = config.label ?? "Out:";
-    const text = `${label} ${formatTokens(context.metrics.session.outputTokens)}`;
+    const text = `${label} ${formatTokens(context.metrics.totals.outputTokens)}`;
     return { text, fg: config.fg, bg: config.bg };
   },
 };

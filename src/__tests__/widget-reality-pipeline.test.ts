@@ -51,8 +51,8 @@ describe("real payload through the real pipeline", () => {
     for (const key of Object.keys(reconstructed)) {
       expect(ctx, `pipeline context is missing ${key}`).toHaveProperty(key);
     }
-    expect(ctx.metrics.session).toHaveProperty("inputTokens");
-    expect(ctx.metrics.session).toHaveProperty("cacheReadTokens");
+    expect(ctx.metrics.totals).toHaveProperty("inputTokens");
+    expect(ctx.metrics.totals).toHaveProperty("cacheReadTokens");
     expect(ctx.costByModel).toBeInstanceOf(Map);
     // No transcripts exist under the tmp HOME, so session metrics are zero here.
     // The assertion is about SHAPE; the recorded fixture supplies the values.
