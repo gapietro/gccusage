@@ -502,7 +502,7 @@ git commit -m "Bound and anchor the above-200k tier (#103)"
 **Files:**
 - Modify: `src/types/token-metrics.ts`
 - Modify: `src/data/token-aggregator.ts`
-- Create: `src/__tests__/token-aggregator.test.ts`
+- Modify: `src/__tests__/token-aggregator.test.ts` — the file already exists and covers totals / byModel / model-less usage. Append a new `describe`; do not rewrite what is there.
 
 **Interfaces:**
 - Consumes: `PREMIUM_PROMPT_THRESHOLD` (Task 1).
@@ -513,13 +513,9 @@ git commit -m "Bound and anchor the above-200k tier (#103)"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `src/__tests__/token-aggregator.test.ts`:
+Append to the existing `src/__tests__/token-aggregator.test.ts`. It already imports `aggregateTokens` and `JsonlEntry`, so add only the local helper and the new `describe`:
 
 ```ts
-import { describe, it, expect } from "vitest";
-import { aggregateTokens } from "../data/token-aggregator.js";
-import type { JsonlEntry } from "../data/jsonl-reader.js";
-
 function entry(
   model: string,
   usage: {
@@ -1010,7 +1006,7 @@ git commit -m "Charge the above-200k tier and report approximated models (#103)"
 
 **Files:**
 - Modify: `src/cache/today-aggregate-cache.ts`
-- Test: `src/__tests__/cache-validation.test.ts`
+- Test: `src/__tests__/today-aggregate-cache.test.ts` (append to its existing `describe("getTodayAggregate", ...)`)
 
 **Interfaces:**
 - Consumes: `TokenCounts` (Task 3), and `aggregateTokens` always emitting `premium`.
@@ -1020,74 +1016,60 @@ git commit -m "Charge the above-200k tier and report approximated models (#103)"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `src/__tests__/cache-validation.test.ts`. That file's `beforeEach` already stubs `HOME` and `XDG_CACHE_HOME` to a fresh `tmpDir` and creates `tmpDir/gccusage`, and it has a `write(name, contents)` helper that writes into that directory — use them.
+Append inside the existing `describe("getTodayAggregate", ...)` in `src/__tests__/today-aggregate-cache.test.ts`. Reuse that file's helpers — `write(name, lines)` (writes a transcript, returns its path), `line(model, input, when)`, `parsedPaths()` (the re-parse spy), and the `NOW` / `EARLIER_TODAY` constants.
 
-**The cache entry must point at a real transcript file whose `mtimeMs` and `size` match.** `getTodayAggregate` rebuilds its result from the files that exist *now*, so an entry keyed on a path that is gone contributes nothing whether it validated or not — the test would pass without the schema change and prove nothing. The stale entry therefore claims a wildly different token count for a file that really is there: honouring it returns the bogus figure, discarding it returns the file's true one.
-
-Add the import `import { getTodayAggregate } from "../cache/today-aggregate-cache.js";` and append:
+**The stale cache entry must point at a real transcript whose `mtimeMs` and `size` match.** `getTodayAggregate` rebuilds its result from the files that exist *now*, so an entry keyed on a vanished path contributes nothing whether it validated or not — such a test passes without the schema change and proves nothing. The entry therefore claims a wildly different count for a file that really is there: honouring it returns the bogus figure, discarding it returns the file's true one.
 
 ```ts
-describe("today-aggregate cache premium migration (#103)", () => {
-  // The module keys on the LOCAL date, not UTC — a UTC key makes this pass or
-  // fail depending on the machine's timezone and the hour it runs.
-  function localDateKey(): string {
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${now.getFullYear()}-${month}-${day}`;
-  }
+  it("discards a pre-upgrade cache entry that has no premium bucket (#103)", () => {
+    const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
 
-  it("discards a pre-upgrade entry that has no premium bucket", () => {
-    const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
-    fs.mkdirSync(projectDir, { recursive: true });
-    const transcript = path.join(projectDir, "session-migrate.jsonl");
-    fs.writeFileSync(
-      transcript,
-      JSON.stringify({
-        type: "assistant",
-        timestamp: new Date().toISOString(),
-        sessionId: "session-migrate",
-        message: { model: "claude-opus-4-5", usage: { input_tokens: 10, output_tokens: 0 } },
-      }) + "\n",
-    );
-
-    // Matching mtime and size, so the entry is a cache HIT if it validates.
-    const stat = fs.statSync(transcript);
+    // Prime the cache, then rewrite it in the PRE-UPGRADE shape (no `premium`)
+    // with a bogus count, keyed on the live file's real mtime and size so it
+    // would be a cache HIT if the schema still accepted it.
+    getTodayAggregate(NOW);
+    const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
+    const stat = fs.statSync(filePath);
     const bogus = {
       inputTokens: 999_999,
       outputTokens: 0,
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     };
-    write(
-      "today-aggregates.json",
+    fs.writeFileSync(
+      cacheFile,
       JSON.stringify({
-        date: localDateKey(),
+        // Reuse the primed file's own date key rather than recomputing it: the
+        // module keys on the LOCAL date, and a hand-rolled UTC key makes this
+        // pass or fail depending on timezone and hour.
+        date: primed.date,
         files: {
-          [transcript]: {
+          [filePath]: {
             mtimeMs: stat.mtimeMs,
             size: stat.size,
-            byModel: [["claude-opus-4-5", bogus]],
+            byModel: [["opus", bogus]],
             totals: bogus,
           },
         },
       }),
     );
+    vi.mocked(parseJsonlFile).mockClear();
 
-    const aggregate = getTodayAggregate();
+    const result = getTodayAggregate(NOW);
 
-    // 10, not 999_999: the pre-upgrade shape was rejected and the transcript
+    // 100, not 999_999: the pre-upgrade shape was rejected and the transcript
     // re-parsed.
-    expect(aggregate.totals.inputTokens).toBe(10);
-    expect(aggregate.totals.premium).toBeDefined();
+    expect(parsedPaths()).toHaveLength(1);
+    expect(result.totals.inputTokens).toBe(100);
+    expect(result.totals.premium).toBeDefined();
   });
-});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run src/__tests__/cache-validation.test.ts -t "#103"`
-Expected: FAIL — the stale entry validates today, so `inputTokens` is 20.
+Run: `npx vitest run src/__tests__/today-aggregate-cache.test.ts -t "#103"`
+Expected: FAIL — the stale entry validates today, so `inputTokens` is 999999 and nothing was re-parsed.
 
 - [ ] **Step 3: Require premium in the schema**
 
@@ -1143,7 +1125,7 @@ Update the type import to `import type { TokenCounts, TokenMetrics } from "../ty
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx vitest run src/__tests__/cache-validation.test.ts src/__tests__/today-read-flatness.test.ts src/__tests__/pipeline.test.ts`
+Run: `npx vitest run src/__tests__/today-aggregate-cache.test.ts src/__tests__/cache-validation.test.ts src/__tests__/today-read-flatness.test.ts src/__tests__/pipeline.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Prove the test is not vacuous**
@@ -1154,7 +1136,7 @@ Temporarily change `premium: TokenCountsSchema` to `premium: v.optional(TokenCou
 
 ```bash
 npm test && npm run typecheck && npm run build
-git add src/cache/today-aggregate-cache.ts src/__tests__/cache-validation.test.ts
+git add src/cache/today-aggregate-cache.ts src/__tests__/today-aggregate-cache.test.ts
 git add -f dist/index.js
 git commit -m "Require the premium bucket in the today-aggregate cache (#103)"
 ```
