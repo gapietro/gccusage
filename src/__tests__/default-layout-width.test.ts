@@ -221,4 +221,54 @@ describe("default layout width against real payloads", () => {
       }
     });
   });
+
+  describe("wide characters (issue #86)", () => {
+    // The issue's exact reproduction: a project directory named with 17 CJK
+    // glyphs. String.length reports 17, the terminal draws 34 columns, so the
+    // bar overflowed a 45-column terminal by 7 without ever registering that
+    // it had. `compact.mode: "never"` keeps the full two-line layout rather
+    // than collapsing to the single compacted line at this width.
+    const CJK_PROJECT = "日本語プロジェクト名前テストの長い";
+    const NARROW_WIDTH = 45;
+
+    function cjkContext() {
+      const fx = midFixture as unknown as RealPayloadFixture;
+      const base = contextFromFixture(fx, "/home/testuser");
+      return {
+        ...base,
+        stdin: {
+          ...base.stdin,
+          workspace: {
+            ...base.stdin.workspace,
+            project_dir: `/home/testuser/projects/${CJK_PROJECT}`,
+          },
+        },
+      } as typeof base;
+    }
+
+    it("measures the CJK project name at two columns per glyph", () => {
+      expect(CJK_PROJECT.length).toBe(17);
+      expect(visibleLength(CJK_PROJECT)).toBe(34);
+    });
+
+    it("keeps every line within the terminal width", () => {
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        compact: { ...DEFAULT_SETTINGS.compact, mode: "never" as const },
+      };
+      const output = renderStatusline(
+        { ...cjkContext(), terminalWidth: NARROW_WIDTH },
+        settings,
+      );
+
+      const lines = stripAnsi(output).split("\n");
+      // Guard against a vacuous pass: the project segment must actually be
+      // present (possibly truncated), or this asserts nothing about CJK at all.
+      expect(lines.some((line) => line.includes(CJK_PROJECT.slice(0, 2)))).toBe(true);
+
+      for (const line of lines) {
+        expect(visibleLength(line)).toBeLessThanOrEqual(NARROW_WIDTH);
+      }
+    });
+  });
 });
