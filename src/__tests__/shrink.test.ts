@@ -64,11 +64,12 @@ describe("shrinkOutputs", () => {
     ]);
   });
 
-  it("slices by code points so an astral character is never split", () => {
-    // Each rocket is one code point but TWO UTF-16 code units, and
-    // visibleLength counts code units — so 20 rockets measure as 40 columns.
-    // The overflow must exceed 20 to force an actual trim; a smaller one
-    // leaves the text untouched and the test proves nothing.
+  it("slices by grapheme cluster so an astral character is never split", () => {
+    // Each rocket is a single grapheme cluster (and a single code point),
+    // but it is East_Asian_Width Wide, so it costs 2 terminal columns — 20
+    // rockets measure as 40 columns, not 20. The overflow must exceed 20 to
+    // force an actual trim; a smaller one leaves the text untouched and the
+    // test proves nothing.
     const after = shrinkOutputs([shrinkable("\u{1F680}".repeat(20))], 25);
 
     // Trimming really happened.
@@ -88,12 +89,13 @@ describe("shrinkOutputs", () => {
   });
 
   describe("the floor invariant under astral (surrogate-pair) text", () => {
-    // A rocket is one code point but TWO UTF-16 code units, and visibleLength
-    // counts code units. That mismatch is exactly what let a naive `trimTo`
-    // step straight past MIN_SHRUNK_TEXT: removing one rocket removes two
-    // columns, so a segment sitting at 9 columns can jump to 7 in a single
-    // removal with nothing between. These tests pin the floor for text built
-    // entirely (or partly) from such characters, not just single-column ASCII.
+    // A rocket is a single grapheme cluster, but it is East_Asian_Width
+    // Wide, so trimTo removes 2 columns for it, not 1. That is exactly what
+    // let a naive `trimTo` step straight past MIN_SHRUNK_TEXT: removing one
+    // rocket removes two columns, so a segment sitting at 9 columns can jump
+    // to 7 in a single removal with nothing between. These tests pin the
+    // floor for text built entirely (or partly) from such two-column
+    // clusters, not just single-column ASCII.
 
     it("never drops emoji-only text below the floor under a huge overflow", () => {
       // 20 rockets measure 40 columns. An overflow of 10,000 forces the
@@ -168,11 +170,12 @@ describe("shrinkOutputs", () => {
     // second shrinkable segment still has room left to give. This is that
     // case.
     //
-    // 20 rockets (2 columns/code-unit each) cannot land exactly on
-    // MIN_SHRUNK_TEXT (8): repro 1 above already pins that, alone, it parks
-    // one column short, at width 9 -- "\u{1F680}\u{1F680}\u{1F680}\u{1F680}…".
-    // A plain-ASCII segment moves 1 column per removed character, so it CAN
-    // land exactly on 8.
+    // 20 rockets (2 columns per grapheme cluster, since each is
+    // East_Asian_Width Wide) cannot land exactly on MIN_SHRUNK_TEXT (8):
+    // repro 1 above already pins that, alone, it parks one column short, at
+    // width 9 -- "\u{1F680}\u{1F680}\u{1F680}\u{1F680}…". A plain-ASCII
+    // segment moves 1 column per removed character, so it CAN land exactly
+    // on 8.
     //
     // Widths below were derived by hand-tracing shrinkOutputs/trimTo (both
     // widest-first selection and trimTo's floor peek-ahead), not by running
@@ -212,5 +215,41 @@ describe("shrinkOutputs", () => {
       expect(after[1]!.text).toBe("abcdefg…");
       expect(visibleLength(after[1]!.text)).toBe(MIN_SHRUNK_TEXT);
     });
+  });
+
+  it("never strips the variation selector off an emoji-presentation heart when trimming", () => {
+    // "❤️" is U+2764 (a text-presentation heart on its own, narrow) followed
+    // by VS16 (U+FE0F), which requests the wide emoji presentation. Code-point
+    // slicing removes the trailing "z" first, then reaches the VS16 and strips
+    // it alone, leaving a bare U+2764 — a real corruption: the glyph flips
+    // from a red emoji heart to a monochrome text heart.
+    //
+    // The trailing "z" is load-bearing here: it's what gives the code-point
+    // loop a stopping point right after the VS16 is gone but before the base
+    // heart is touched. A trailing character measures 1 column, so removing
+    // it changes `visibleLength` by exactly 1 — a real, distinct width the
+    // loop can stop on.
+    //
+    // A cluster with nothing after it (e.g. the ZWJ family or a flag,
+    // exercised elsewhere in this file) can NOT distinguish cluster-slicing
+    // from code-point-slicing at any overflow: `visibleLength` re-segments on
+    // every call, and any partial remnant of the trailing cluster re-merges
+    // (ZWJ) or measures the same (Regional Indicator pairs are typically
+    // removed together) as the intact cluster, so the width never changes
+    // until the whole cluster is gone — the code-point loop never gets a
+    // reason to stop mid-cluster. Do not "simplify" this test back to a
+    // trailing multi-part emoji with nothing after it; that shape cannot
+    // fail under the code-point-slicing regression this test exists to catch.
+    const heart = "\u{2764}\u{FE0F}";
+    const outputs = [shrinkable(`feature/x${heart}z`)];
+
+    const after1 = shrinkOutputs(outputs, 1)[0]!.text;
+    expect(after1).toBe("feature/x…");
+
+    const after2 = shrinkOutputs(outputs, 2)[0]!.text;
+    expect(after2).toBe("feature/x…");
+
+    const after3 = shrinkOutputs(outputs, 3)[0]!.text;
+    expect(after3).toBe("feature/…");
   });
 });

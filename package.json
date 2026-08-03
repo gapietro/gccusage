@@ -45,6 +45,7 @@
   "author": "gapietro",
   "dependencies": {
     "chalk": "^5.4.1",
+    "get-east-asian-width": "^1.6.0",
     "valibot": "^1.0.0"
   },
   "devDependencies": {
