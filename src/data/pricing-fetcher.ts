@@ -5,7 +5,7 @@ import {
   savePricingCache,
 } from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
-import { anchorToSnapshot, isSaneModelPricing } from "./pricing-validation.js";
+import { anchorToSnapshot, sanitiseModelPricing } from "./pricing-validation.js";
 import { TIER_FIELDS } from "./pricing-tiers.js";
 
 export const LITELLM_URL =
@@ -126,13 +126,15 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
 
     // Bounds before storage, so an absurd or zero price never reaches the
     // cache, the bar, or the regenerated snapshot (#91). Per entry: one
-    // poisoned model must not discard the two dozen good ones.
-    if (!isSaneModelPricing(pricing)) continue;
+    // poisoned model must not discard the two dozen good ones — and one
+    // poisoned TIER must not discard its model (#103).
+    const sane = sanitiseModelPricing(pricing);
+    if (!sane) continue;
 
     // Store with the raw key (e.g. "claude/claude-sonnet-4-20250514" and also the model id)
     const modelId = key.includes("/") ? key.split("/").pop()! : key;
-    table[modelId] = pricing;
-    if (key !== modelId) table[key] = pricing;
+    table[modelId] = sane;
+    if (key !== modelId) table[key] = sane;
   }
 
   return table;

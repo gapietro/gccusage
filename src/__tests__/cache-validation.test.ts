@@ -324,6 +324,38 @@ describe("pricing cache validation", () => {
   });
 });
 
+describe("pricing cache tier validation (#103)", () => {
+  it("keeps a cached model whose tier is malformed, minus the tier", () => {
+    write(
+      "pricing.json",
+      JSON.stringify({
+        timestamp: Date.now(),
+        data: {
+          "claude-opus-4-5": {
+            inputCostPerToken: 0.000005,
+            outputCostPerToken: 0.000025,
+            cacheCreationCostPerToken: 0.00000625,
+            cacheReadCostPerToken: 0.0000005,
+            // Premium below standard: not a price.
+            above200k: {
+              inputCostPerToken: 0.0000001,
+              outputCostPerToken: 0.0000002,
+              cacheCreationCostPerToken: 0.0000003,
+              cacheReadCostPerToken: 0.0000004,
+            },
+          },
+        },
+      }),
+    );
+
+    const entry = loadPricingCacheEntry();
+
+    expect(entry!.data["claude-opus-4-5"]).toBeDefined();
+    expect(entry!.data["claude-opus-4-5"]!.inputCostPerToken).toBe(0.000005);
+    expect(entry!.data["claude-opus-4-5"]!.above200k).toBeUndefined();
+  });
+});
+
 describe("block cache validation", () => {
   function writeBlockCache(contents: string): void {
     const dir = path.join(tmpDir, "gccusage", "blocks");

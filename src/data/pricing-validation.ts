@@ -1,4 +1,4 @@
-import type { ModelPricing, PricingTable } from "../types/pricing.js";
+import type { ModelPricing, PricingTable, RateSet } from "../types/pricing.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
 
 /**
@@ -42,11 +42,40 @@ export function isSaneModelPricing(value: unknown): value is ModelPricing {
   return (record["inputCostPerToken"] as number) > 0;
 }
 
+/**
+ * Bounds a whole entry, tier included. A failing TIER strips the tier and
+ * keeps the model; a failing BASE drops the model, as before. The asymmetry
+ * is deliberate: this runs on cache reads as well as on fetches, and losing a
+ * model over a bad premium would regress the per-entry posture of #92. A
+ * model without a tier prices at standard rates and is flagged approximate.
+ */
+export function sanitiseModelPricing(value: unknown): ModelPricing | null {
+  if (!isSaneModelPricing(value)) return null;
+  const pricing = value as ModelPricing;
+  if (pricing.above200k === undefined) return pricing;
+  if (isSaneTier(pricing.above200k, pricing)) return pricing;
+
+  const { above200k: _rejected, ...withoutTier } = pricing;
+  return withoutTier;
+}
+
+/**
+ * A premium rate below its standard counterpart is not a price, it is a
+ * corrupted or poisoned record — the tier exists to charge MORE. Bounds alone
+ * would admit it.
+ */
+function isSaneTier(tier: unknown, base: RateSet): boolean {
+  if (!isSaneModelPricing(tier)) return false;
+  const rates = tier as RateSet;
+  return COST_KEYS.every((key) => rates[key] >= base[key]);
+}
+
 /** Drop the entries that fail bounds, keep the rest. Never all-or-nothing. */
 export function sanitisePricingTable(table: Record<string, unknown>): PricingTable {
   const out: PricingTable = {};
   for (const [key, value] of Object.entries(table)) {
-    if (isSaneModelPricing(value)) out[key] = value;
+    const pricing = sanitiseModelPricing(value);
+    if (pricing) out[key] = pricing;
   }
   return out;
 }
@@ -77,7 +106,10 @@ export function anchorToSnapshot(
       out[key] = value;
       continue;
     }
-    if (COST_KEYS.every((k) => withinDeviation(value[k], known[k]))) {
+    if (
+      COST_KEYS.every((k) => withinDeviation(value[k], known[k])) &&
+      tierWithinDeviation(value, known)
+    ) {
       out[key] = value;
     }
   }
@@ -95,4 +127,17 @@ function withinDeviation(fetched: number, known: number): boolean {
   if (known === 0) return fetched === 0;
   const ratio = fetched / known;
   return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
+}
+
+/**
+ * A tier the snapshot has no counterpart for passes on bounds alone, exactly
+ * as a model absent from the snapshot does. That is the path by which a
+ * newly published tier reaches users — blocking it would defeat the point of
+ * consuming the feed.
+ */
+function tierWithinDeviation(fetched: ModelPricing, known: ModelPricing): boolean {
+  if (!fetched.above200k || !known.above200k) return true;
+  const f = fetched.above200k;
+  const k = known.above200k;
+  return COST_KEYS.every((key) => withinDeviation(f[key], k[key]));
 }
