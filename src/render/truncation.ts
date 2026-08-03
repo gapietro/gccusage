@@ -1,8 +1,9 @@
-import { visibleLength } from "../utils/terminal.js";
+import { visibleLength, escapeLengthAt, isZeroWidthControl } from "../utils/terminal.js";
 import { graphemeWidth, splitGraphemes } from "../utils/display-width.js";
 
 const ELLIPSIS = "…";
-const RESET = "\u001b[0m";
+const ESC = "\u001b";
+const RESET = `${ESC}[0m`;
 
 /**
  * `str` cut to at most `maxWidth` terminal columns, ending in an ellipsis.
@@ -36,30 +37,40 @@ export function truncateAnsi(str: string, maxWidth: number | undefined): string 
   let i = 0;
 
   while (i < str.length) {
-    // SGR escapes are copied verbatim and cost no columns.
-    if (str[i] === "\u001b" && str[i + 1] === "[") {
-      const end = str.indexOf("m", i);
-      if (end !== -1) {
-        result.push(str.slice(i, end + 1));
-        i = end + 1;
-        continue;
-      }
+    // Escapes are copied verbatim and cost no columns. The recogniser is
+    // `terminal.ts`'s — the same one `visibleLength` measures with. This used
+    // to be a private `indexOf("m", i)` scan, and the two disagreeing was half
+    // of #113: that scan read the `m` of `home` as an SGR terminator, so
+    // `ESC[2Jhome` came back as the whole input plus an ellipsis — three
+    // columns of visible text charged nothing, and a string longer than the
+    // one it was asked to shorten. It could also cut inside an OSC-8 URL,
+    // emitting a sequence the terminal never finds a terminator for.
+    const escapeLength = escapeLengthAt(str, i);
+    if (escapeLength > 0) {
+      result.push(str.slice(i, i + escapeLength));
+      i += escapeLength;
+      continue;
     }
 
     // The run of text up to the next escape. Searching from `i + 1` matters:
-    // a lone ESC that is not a valid SGR sequence reaches here, and searching
-    // from `i` would find it again, yielding an empty run and spinning
-    // forever. Included in the run instead, it costs one column — exactly what
-    // the previous implementation charged it.
+    // an ESC that opens no sequence the grammar recognises reaches here, and
+    // searching from `i` would find it again, yielding an empty run and
+    // spinning forever. Included in the run instead, it costs one column —
+    // exactly what `visibleLength` charges it, ESC being deliberately excluded
+    // from the zero-width control class for that reason.
     //
     // Segmenting per run means a cluster split ACROSS an escape (`a`, ESC[31m,
     // U+0301) is not rejoined. chalk wraps whole segments, so this does not
     // arise in practice; it is stated rather than papered over.
-    let runEnd = str.indexOf("\u001b", i + 1);
+    let runEnd = str.indexOf(ESC, i + 1);
     if (runEnd === -1) runEnd = str.length;
 
     for (const cluster of splitGraphemes(str.slice(i, runEnd))) {
-      const width = graphemeWidth(cluster);
+      // A control that drives the terminal without drawing — CR, BEL, BS —
+      // costs no columns, matching `visibleLength`. Copied through rather than
+      // dropped: this function truncates, it does not sanitise, which is the
+      // same posture it takes towards the escapes above.
+      const width = isZeroWidthControl(cluster) ? 0 : graphemeWidth(cluster);
       // Stop BEFORE a cluster that would straddle the budget. A wide cluster
       // at the boundary leaves the result one column short of maxWidth, which
       // is correct: never overflow.
@@ -74,13 +85,16 @@ export function truncateAnsi(str: string, maxWidth: number | undefined): string 
     i = runEnd;
   }
 
-  // Reachable: a malformed escape that `stripAnsi`'s SGR regex does not
-  // recognise (e.g. `"\x1b[" + "x".repeat(30) + "m"`, whose body is
-  // non-digit) is still swallowed whole by this walk's own `indexOf("m", i)`
-  // scan and charged 0 columns, so the loop can exhaust `str` and fall
-  // through here even though the emitted string overflows `maxWidth`. That
-  // is a defect in non-SGR escape handling, tracked as issue #113 — not
-  // something to fix by tightening this function's own guard.
+  // Defensive, and no longer the known-defective path it was before #113.
+  //
+  // Reaching here means the walk charged the whole string at most `budget`
+  // columns while the `visibleLength` check at the top said it needed more
+  // than `maxWidth`. Both now share a recogniser, so the only way they can
+  // still disagree is the run-boundary cluster split noted above, and that
+  // direction over-charges rather than under-charges. The ellipsis is appended
+  // regardless: `used <= budget` holds, so the result is inside `maxWidth`
+  // either way, and the contract is a ceiling rather than a promise that an
+  // ellipsis means something was dropped.
   result.push(ELLIPSIS, RESET);
   return result.join("");
 }
