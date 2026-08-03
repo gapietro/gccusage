@@ -3450,8 +3450,101 @@ function getTerminalWidth() {
 	if (!Number.isInteger(parsed) || parsed <= 0) return void 0;
 	return parsed;
 }
+/**
+* One complete ANSI escape sequence, as a source string.
+*
+* This used to match SGR alone (`\x1b\[[0-9;]*m`), so every other sequence a
+* terminal recognises was counted as visible text — an OSC-8 hyperlink
+* measured 37 columns for the 4 it draws, and the bar truncated itself early
+* to make room for bytes nothing renders. Issue #113. Reachable through
+* `custom-command`, which puts arbitrary shell output in the bar.
+*
+* The alternatives, in order:
+*
+* - `CSI` — `ESC [`, parameter bytes, intermediate bytes, one final byte.
+*   SGR is simply the case whose final byte is `m`.
+* - `OSC` — `ESC ]` up to a BEL or a String Terminator. Window titles and
+*   hyperlinks.
+* - `DCS` / `SOS` / `PM` / `APC` — string sequences, ST-terminated.
+* - `nF` — `ESC` plus intermediates plus a final byte, e.g. `ESC ( B`.
+* - Two-character escapes, e.g. `ESC c` (full reset), `ESC 7` (save cursor).
+*
+* **The lookahead is load-bearing; the alternation order is not.** `[0-~]`
+* spans `[`, `]`, `P`, `X`, `^` and `_`, so without the exclusion the
+* two-character alternative would match the opener of a CSI or a string
+* sequence and leave its body as visible text. It bites hardest when a
+* sequence is *unterminated*: the OSC alternative fails, and `ESC ]` would
+* then be consumed as a two-character escape, making the unmatched remainder
+* look like ordinary text at a two-byte discount. None of those six bytes is
+* ever a standalone escape, so excluding them is a correction, not a
+* workaround.
+*
+* Ordering was originally documented here as the mechanism. It is not — moving
+* the two-character alternative first leaves every test green, because the
+* lookahead already prevents the overlap. Listing it last is readability only.
+*
+* Every alternative is linear with no nested quantifier, so this cannot
+* backtrack catastrophically. That matters more here than usual: the input is
+* arbitrary shell output, and `ansi-regex` — the obvious dependency to reach
+* for instead — carried a ReDoS advisory (GHSA-93q8-gq69-wqmw) on this exact
+* shape of pattern. The grammar is frozen (ECMA-48), unlike the Unicode width
+* data that justified taking `get-east-asian-width` as a dependency in #86.
+*/
+const ESCAPE_SEQUENCE = String.raw`\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[PX^_][^\u001b]*\u001b\\|[ -/]+[0-~]|(?![[\]PX^_])[0-~])`;
+const ESCAPE_ANYWHERE = new RegExp(ESCAPE_SEQUENCE, "g");
+const ESCAPE_AT = new RegExp(ESCAPE_SEQUENCE, "y");
+/**
+* C0 control characters that drive the terminal without drawing anything.
+*
+* Same defect as the escapes above, one step out: a `CR` or `BEL` in a
+* command's output counted as a column it never occupies.
+*
+* Three deliberate holes:
+*
+* - **TAB** (0x09), because its width depends on the cursor's position against
+*   the next tab stop, which is not knowable statically. Counting it as 1 is a
+*   floor, and a floor can only over-measure, never overflow.
+* - **LF** (0x0A), because the bar is two lines and callers `split("\n")` the
+*   output of `stripAnsi`. It is a structural separator here, not decoration —
+*   removing it collapsed the two-line bar into one 90-column line and turned
+*   four assertions in `default-layout-width.test.ts` vacuous by leaving them
+*   comparing against an empty second line. Width is measured per line, so a
+*   separator never needs a column. CR is *not* excluded: nothing in this
+*   codebase's output uses it structurally.
+* - **ESC** (0x1B), so that a sequence the grammar above does not recognise
+*   stays visible text rather than silently costing nothing. That recogniser
+*   is the only thing allowed to consume an ESC.
+*/
+const ZERO_WIDTH_CONTROL_CLASS = String.raw`[\u0000-\u0008\u000b-\u001a\u001c-\u001f\u007f]`;
+const ZERO_WIDTH_CONTROLS = new RegExp(ZERO_WIDTH_CONTROL_CLASS, "g");
+const ZERO_WIDTH_CONTROL_ONLY = new RegExp(`^${ZERO_WIDTH_CONTROL_CLASS}$`);
+/** `str` with every complete escape sequence and zero-width control removed. */
 function stripAnsi(str) {
-	return str.replace(/\x1b\[[0-9;]*m/g, "");
+	return str.replace(ESCAPE_ANYWHERE, "").replace(ZERO_WIDTH_CONTROLS, "");
+}
+/**
+* Length of the complete escape sequence starting at `index`, or 0 if none is.
+*
+* The seam that keeps `truncateAnsi` measuring the same string the same way
+* `visibleLength` does. It used to carry its own private recogniser — an
+* `indexOf("m")` scan — and the two disagreeing was half of #113: the scan read
+* the `m` of `home` as an SGR terminator and charged three columns of visible
+* text nothing at all.
+*/
+function escapeLengthAt(str, index) {
+	ESCAPE_AT.lastIndex = index;
+	const match = ESCAPE_AT.exec(str);
+	return match === null ? 0 : match[0].length;
+}
+/**
+* Whether a grapheme cluster is a control that drives the terminal but draws nothing.
+*
+* Tests against the anchored, non-global copy of the class deliberately.
+* `.test()` on the `g`-flagged one advances its `lastIndex` and would return
+* false on every second call for the same character.
+*/
+function isZeroWidthControl(cluster) {
+	return ZERO_WIDTH_CONTROL_ONLY.test(cluster);
 }
 /**
 * Terminal columns `str` occupies, ignoring ANSI colour codes.
@@ -3461,8 +3554,10 @@ function stripAnsi(str) {
 * every width decision built on this (shrink, truncate, compact-fit)
 * under-measured by half and overflowed the terminal. Issue #86.
 *
-* `stripAnsi` only removes SGR sequences; any other escape is still counted as
-* visible text. Reachable via the `custom-command` widget, tracked separately.
+* Escapes and zero-width controls cost nothing, per `stripAnsi`. This once
+* removed SGR alone, so an OSC-8 hyperlink from a `custom-command` measured 37
+* columns for the 4 it draws and the bar truncated early to make room for
+* bytes nothing renders. Issue #113.
 */
 function visibleLength(str) {
 	return displayWidth(stripAnsi(str));
@@ -4865,7 +4960,8 @@ function applyFlex(segments, totalWidth, mode) {
 //#endregion
 //#region src/render/truncation.ts
 const ELLIPSIS$1 = "…";
-const RESET = "\x1B[0m";
+const ESC = "\x1B";
+const RESET = `${ESC}[0m`;
 /**
 * `str` cut to at most `maxWidth` terminal columns, ending in an ellipsis.
 *
@@ -4887,18 +4983,16 @@ function truncateAnsi(str, maxWidth) {
 	let used = 0;
 	let i = 0;
 	while (i < str.length) {
-		if (str[i] === "\x1B" && str[i + 1] === "[") {
-			const end = str.indexOf("m", i);
-			if (end !== -1) {
-				result.push(str.slice(i, end + 1));
-				i = end + 1;
-				continue;
-			}
+		const escapeLength = escapeLengthAt(str, i);
+		if (escapeLength > 0) {
+			result.push(str.slice(i, i + escapeLength));
+			i += escapeLength;
+			continue;
 		}
-		let runEnd = str.indexOf("\x1B", i + 1);
+		let runEnd = str.indexOf(ESC, i + 1);
 		if (runEnd === -1) runEnd = str.length;
 		for (const cluster of splitGraphemes(str.slice(i, runEnd))) {
-			const width = graphemeWidth(cluster);
+			const width = isZeroWidthControl(cluster) ? 0 : graphemeWidth(cluster);
 			if (used + width > budget) {
 				result.push(ELLIPSIS$1, RESET);
 				return result.join("");
