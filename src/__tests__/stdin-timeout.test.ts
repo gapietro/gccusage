@@ -46,14 +46,16 @@ describe("readStdin", () => {
     stream.end(payload);
 
     const started = Date.now();
-    const result = await readStdin(stream, 5000);
+    const result = await readStdin(stream, 1000);
     const elapsed = Date.now() - started;
 
     expect(result.timedOut).toBe(false);
     expect(result.raw).toBe(payload);
     // Guards against the timer quietly becoming the resolution path: if `end`
-    // stopped settling the promise, this would take 5s instead of ~0ms.
-    expect(elapsed).toBeLessThan(1000);
+    // stopped settling the promise, this would take 1s instead of ~0ms. Kept
+    // well below the 1000ms deadline (and vitest's own default test timeout)
+    // so a regression here fails on the assertion, not an ambiguous timeout.
+    expect(elapsed).toBeLessThan(500);
   });
 
   it("rejects when the stream errors", async () => {
@@ -61,7 +63,7 @@ describe("readStdin", () => {
     const failure = new Error("boom");
     queueMicrotask(() => stream.destroy(failure));
 
-    await expect(readStdin(stream, 5000)).rejects.toThrow("boom");
+    await expect(readStdin(stream, 1000)).rejects.toThrow("boom");
   });
 });
 
@@ -85,17 +87,28 @@ describe("resolveTimeoutMs", () => {
     expect(resolveTimeoutMs()).toBe(200);
   });
 
-  it.each(["", "   ", "abc", "0", "-1", "1.5", "Infinity"])(
-    "falls back to the default on the unusable value %j",
-    (value) => {
-      process.env[KEY] = value;
-      // A coerced NaN would make setTimeout fire immediately and turn every
-      // single render into the degraded line — the loudest possible failure
-      // from the quietest possible typo. Same posture as getTerminalWidth's
-      // handling of a bad COLUMNS (src/utils/terminal.ts:28-32).
-      expect(resolveTimeoutMs()).toBe(DEFAULT_STDIN_TIMEOUT_MS);
-    },
-  );
+  it.each([
+    "",
+    "   ",
+    "abc",
+    "0",
+    "-1",
+    "1.5",
+    "Infinity",
+    // Just over setTimeout's 2^31-1 ms ceiling.
+    "2147483648",
+    // The reviewer's realistic typo case: past the ceiling, Node clamps the
+    // delay to 1ms instead of throwing, so an uncaught overflow here turns
+    // every render into the degraded line.
+    "99999999999",
+  ])("falls back to the default on the unusable value %j", (value) => {
+    process.env[KEY] = value;
+    // A coerced NaN would make setTimeout fire immediately and turn every
+    // single render into the degraded line — the loudest possible failure
+    // from the quietest possible typo. Same posture as getTerminalWidth's
+    // handling of a bad COLUMNS (src/utils/terminal.ts:28-32).
+    expect(resolveTimeoutMs()).toBe(DEFAULT_STDIN_TIMEOUT_MS);
+  });
 });
 
 // package.json sets "type": "module", so __dirname does not exist here.
@@ -165,15 +178,25 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
         stdout += chunk;
       });
       child.on("error", reject);
-      child.on("close", (status) => resolve({ stdout, status }));
+      child.on("close", (status) => {
+        // The delayed write below is scheduled independently of child
+        // lifecycle; if it hasn't fired yet when the child closes, clear it
+        // so it can't land — and write into a since-reused stdin — during a
+        // later test.
+        clearTimeout(writeTimer);
+        resolve({ stdout, status });
+      });
 
       // On the timeout path the child has already destroyed its stdin by the
       // time we write, so the pipe is gone and the write raises EPIPE. That is
-      // the expected outcome of the feature, not a failure — without this
-      // handler it surfaces as an unhandled 'error' event and kills the runner.
-      child.stdin.on("error", () => {});
+      // the expected outcome of the feature, not a failure. Any other error
+      // code is unexpected and should still fail the test rather than being
+      // swallowed.
+      child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code !== "EPIPE") reject(err);
+      });
 
-      setTimeout(() => {
+      const writeTimer = setTimeout(() => {
         if (opts.payload === null) child.stdin.end();
         else child.stdin.end(opts.payload);
       }, opts.writeAfterMs);
@@ -183,7 +206,11 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
   it("shows the degraded line instead of a zeroed bar when the writer is slow", async () => {
     const { stdout, status } = await run({
       payload: PAYLOAD,
-      writeAfterMs: 500,
+      // Well past the 200ms deadline; the promise resolves on child close
+      // (~250ms after the timeout fires), not on this write, so widening the
+      // margin here doesn't slow the test — it only buys headroom against
+      // slow CI runners for the spawn + Node startup + bundle load budget.
+      writeAfterMs: 1500,
       timeoutMs: 200,
     });
 

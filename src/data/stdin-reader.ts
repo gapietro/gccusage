@@ -18,13 +18,20 @@ export const DEFAULT_STDIN_TIMEOUT_MS = 5000;
  *
  * A malformed value degrades to the default rather than being coerced: a NaN
  * deadline makes `setTimeout` fire immediately, which would turn every render
- * into the degraded line.
+ * into the degraded line. The same failure is reachable from the OTHER end of
+ * the range — `setTimeout`'s delay is capped at 2^31-1 ms; past that, Node
+ * emits `TimeoutOverflowWarning` on stderr (invisible in statusline mode) and
+ * silently clamps the delay to 1ms, so an oversized value degrades exactly
+ * like a NaN one: every render times out immediately. Both ends are rejected
+ * by the same clause.
  */
 export function resolveTimeoutMs(): number {
   const raw = process.env["GCCUSAGE_STDIN_TIMEOUT_MS"];
   if (raw === undefined || raw.trim() === "") return DEFAULT_STDIN_TIMEOUT_MS;
   const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_STDIN_TIMEOUT_MS;
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2_147_483_647) {
+    return DEFAULT_STDIN_TIMEOUT_MS;
+  }
   return parsed;
 }
 
