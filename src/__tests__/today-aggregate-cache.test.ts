@@ -147,6 +147,25 @@ describe("getTodayAggregate", () => {
     expect(result.fileCount).toBe(1);
   });
 
+  // The returned totals are rebuilt from the live file list every call, so
+  // they are correct whether or not the cache is rewritten. What needs
+  // guarding is the persisted file: without the length check that sets
+  // `changed`, a dropped file leaves a dead entry behind until midnight.
+  it("prunes a departed file from the persisted cache, not just the return value", () => {
+    write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const b = write("b", [line("opus", 200, EARLIER_TODAY)]);
+    getTodayAggregate(NOW);
+
+    fs.rmSync(b);
+    getTodayAggregate(NOW);
+
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+    const persisted = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    expect(Object.keys(persisted.files)).toEqual([path.join(projectDir(), "a.jsonl")]);
+  });
+
   it("recomputes correctly from a corrupt cache file", () => {
     write("a", [line("opus", 100, EARLIER_TODAY)]);
     getTodayAggregate(NOW);
