@@ -48,7 +48,7 @@ describe("gccusage today", () => {
   let lines: string[];
   let logSpy: ReturnType<typeof vi.spyOn>;
 
-  function writeEntry(model: string, inputTokens: number): void {
+  function writeEntry(model: string, inputTokens: number, outputTokens = 0): void {
     const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.appendFileSync(
@@ -57,7 +57,7 @@ describe("gccusage today", () => {
         type: "assistant",
         timestamp: new Date().toISOString(),
         sessionId: model,
-        message: { model, usage: { input_tokens: inputTokens, output_tokens: 0 } },
+        message: { model, usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
       }) + "\n",
     );
   }
@@ -100,6 +100,48 @@ describe("gccusage today", () => {
     await runCli(["today"]);
 
     expect(lines.join("\n")).not.toMatch(/no pricing/i);
+  });
+
+  // #103: distinct from the unpriced case above. Two turns on purpose — one
+  // under the 200k threshold (10k in / 5k out, standard rate), one over it
+  // (250k in / 1k out, premium rate the mocked table doesn't publish). A
+  // naive implementation that reported the model's WHOLE token count instead
+  // of just its premium-band tokens would print 266.0k here; the correct
+  // figure is 251.0k (the premium turn alone). A single-turn fixture could
+  // not tell those two behaviours apart.
+  it("marks the total approximate and reports the premium-band tokens, not the session total", async () => {
+    writeEntry("claude-priced-test", 10_000, 5_000);
+    writeEntry("claude-priced-test", 250_000, 1_000);
+
+    await runCli(["today"]);
+
+    const report = lines.join("\n");
+
+    // 1. (approximate), not (partial) — nothing here is unpriced.
+    expect(report).toContain("(approximate)");
+    expect(report).not.toContain("(partial)");
+
+    // 2. Names the model, states the standard-rate costing and that the real
+    // total is higher — and does NOT reuse the unpriced sentence, which would
+    // be false: this model's usage IS in the total.
+    expect(report).toContain("claude-priced-test");
+    expect(report).toMatch(/costed at the standard rate/);
+    expect(report).toMatch(/real total is higher/);
+    expect(report).not.toMatch(/their usage is missing from the total/);
+
+    // 3. The premium-band total (251.0k), not the session's whole token
+    // count for the model (266.0k, which legitimately appears elsewhere in
+    // the report — in "Total Tokens" and the "By Model" line — so the check
+    // must be scoped to the approximated sentence itself, not the report as
+    // a whole).
+    const approximatedLine = lines.find((l) => l.includes("billed"));
+    expect(approximatedLine, `no approximated sentence found:\n${report}`).toBeDefined();
+    expect(approximatedLine).toContain("251.0k");
+    expect(approximatedLine).not.toContain("266.0k");
+
+    // The threshold is a fixed constant, rendered as a plain literal, not run
+    // through formatTokens (which would print "200.0k").
+    expect(approximatedLine).toContain("200k threshold");
   });
 });
 

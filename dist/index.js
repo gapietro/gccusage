@@ -5799,7 +5799,7 @@ async function reportToday() {
 	}
 	if (approximated.length > 0) {
 		const premiumTokens = approximated.reduce((sum, model) => sum + premiumTokenTotal(byModel.get(model)), 0);
-		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ${formatTokens(PREMIUM_PROMPT_THRESHOLD)} threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
+		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ${PREMIUM_PROMPT_THRESHOLD / 1e3}k threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
 	}
 	console.log(`\nSessions analyzed: ${fileCount} files`);
 }

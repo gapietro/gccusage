@@ -81,9 +81,13 @@ async function reportToday(): Promise<void> {
       (sum, model) => sum + premiumTokenTotal(byModel.get(model)),
       0,
     );
+    // PREMIUM_PROMPT_THRESHOLD is a fixed constant, not a measured quantity —
+    // formatTokens is for humanising the latter, and would render this as
+    // "200.0k" for no benefit. The measured premium token count above DOES
+    // want formatTokens.
     console.log(
       `\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ` +
-        `${formatTokens(PREMIUM_PROMPT_THRESHOLD)} threshold; no premium rate is published for ` +
+        `${PREMIUM_PROMPT_THRESHOLD / 1000}k threshold; no premium rate is published for ` +
         `them, so those tokens are costed at the standard rate. The real total is higher.`,
     );
   }
