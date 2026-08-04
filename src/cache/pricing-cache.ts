@@ -6,14 +6,29 @@ import { sanitisePricingTable } from "../data/pricing-validation.js";
 import type { PricingTable } from "../types/pricing.js";
 
 interface PricingCacheFile {
+  version: number;
   timestamp: number;
   data: PricingTable;
 }
 
+/**
+ * Bumped whenever the cached envelope's meaning changes in a way an OLD
+ * reader would misinterpret and a NEW reader must not accept from an old
+ * file. #103 added the above-200k tier to every parser and to the snapshot
+ * this cache falls back to; a pre-tier file merged whole-entry over that
+ * snapshot would shadow the new tier for up to the cache's full TTL. Exported
+ * so a test can pin the exact value rather than restating it.
+ */
+export const PRICING_CACHE_VERSION = 1;
+
 // The envelope is validated as a whole; `data` is left as unknown values and
 // filtered per entry below, so one corrupted price drops one model rather than
-// the whole table (#92).
+// the whole table (#92). `version` is required and pinned to the current
+// value: a missing or stale version is rejected here rather than merely
+// ignored, so a pre-upgrade cache degrades to FALLBACK_PRICING (which now
+// carries the tiers) instead of silently shadowing it.
 const PricingCacheSchema = v.object({
+  version: v.literal(PRICING_CACHE_VERSION),
   timestamp: v.number(),
   data: v.record(v.string(), v.unknown()),
 });
@@ -57,7 +72,7 @@ export function loadPricingCache(ttlMs: number): PricingTable | null {
 export function savePricingCache(data: PricingTable): void {
   const cachePath = getCachePath();
   try {
-    const cache: PricingCacheFile = { timestamp: Date.now(), data };
+    const cache: PricingCacheFile = { version: PRICING_CACHE_VERSION, timestamp: Date.now(), data };
     writeJsonAtomic(cachePath, cache);
   } catch {
     // ignore

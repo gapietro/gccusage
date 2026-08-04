@@ -48,19 +48,37 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
-    "cacheReadCostPerToken": 3e-7
+    "cacheReadCostPerToken": 3e-7,
+    "above200k": {
+      "inputCostPerToken": 0.000006,
+      "outputCostPerToken": 0.0000225,
+      "cacheCreationCostPerToken": 0.0000075,
+      "cacheReadCostPerToken": 6e-7
+    }
   },
   "claude-sonnet-4-5": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
-    "cacheReadCostPerToken": 3e-7
+    "cacheReadCostPerToken": 3e-7,
+    "above200k": {
+      "inputCostPerToken": 0.000006,
+      "outputCostPerToken": 0.0000225,
+      "cacheCreationCostPerToken": 0.0000075,
+      "cacheReadCostPerToken": 6e-7
+    }
   },
   "claude-sonnet-4-5-20250929": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
-    "cacheReadCostPerToken": 3e-7
+    "cacheReadCostPerToken": 3e-7,
+    "above200k": {
+      "inputCostPerToken": 0.000006,
+      "outputCostPerToken": 0.0000225,
+      "cacheCreationCostPerToken": 0.0000075,
+      "cacheReadCostPerToken": 6e-7
+    }
   },
   "claude-sonnet-5": {
     "inputCostPerToken": 0.000002,
@@ -78,7 +96,13 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
-    "cacheReadCostPerToken": 3e-7
+    "cacheReadCostPerToken": 3e-7,
+    "above200k": {
+      "inputCostPerToken": 0.000006,
+      "outputCostPerToken": 0.0000225,
+      "cacheCreationCostPerToken": 0.0000075,
+      "cacheReadCostPerToken": 6e-7
+    }
   },
   "claude-opus-4-1": {
     "inputCostPerToken": 0.000015,
@@ -156,6 +180,12 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
-    "cacheReadCostPerToken": 3e-7
+    "cacheReadCostPerToken": 3e-7,
+    "above200k": {
+      "inputCostPerToken": 0.000006,
+      "outputCostPerToken": 0.0000225,
+      "cacheCreationCostPerToken": 0.0000075,
+      "cacheReadCostPerToken": 6e-7
+    }
   }
 };

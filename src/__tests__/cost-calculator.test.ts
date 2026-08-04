@@ -269,3 +269,152 @@ describe("findPricing forward/reverse direction preference (#108)", () => {
     expect(findPricing("opus-4-5", table)).toBe(onlyPricing);
   });
 });
+
+describe("calculateCost above-200k tier (#103)", () => {
+  const tiered: ModelPricing = {
+    inputCostPerToken: 3 / 1_000_000,
+    outputCostPerToken: 15 / 1_000_000,
+    cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheReadCostPerToken: 0.3 / 1_000_000,
+    above200k: {
+      inputCostPerToken: 6 / 1_000_000,
+      outputCostPerToken: 22.5 / 1_000_000,
+      cacheCreationCostPerToken: 7.5 / 1_000_000,
+      cacheReadCostPerToken: 0.6 / 1_000_000,
+    },
+  };
+
+  it("charges standard and premium tokens at their own rates", () => {
+    // 300k input total, 250k of it premium; 1000 output total, 800 premium.
+    const metrics: TokenMetrics = {
+      inputTokens: 300_000,
+      outputTokens: 1_000,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      premium: {
+        inputTokens: 250_000,
+        outputTokens: 800,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+    };
+
+    const expected =
+      50_000 * (3 / 1_000_000) +
+      200 * (15 / 1_000_000) +
+      250_000 * (6 / 1_000_000) +
+      800 * (22.5 / 1_000_000);
+
+    expect(calculateCost(metrics, tiered)).toBeCloseTo(expected, 10);
+  });
+
+  it("prices premium tokens at the standard rate when no tier is published", () => {
+    const metrics: TokenMetrics = {
+      inputTokens: 300_000,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      premium: {
+        inputTokens: 300_000,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+    };
+    const untiered: ModelPricing = { ...tiered, above200k: undefined };
+
+    expect(calculateCost(metrics, untiered)).toBeCloseTo(300_000 * (3 / 1_000_000), 10);
+  });
+
+  it("is unchanged for metrics carrying no premium bucket", () => {
+    const metrics: TokenMetrics = {
+      inputTokens: 1_000,
+      outputTokens: 500,
+      cacheCreationTokens: 200,
+      cacheReadTokens: 100,
+    };
+
+    const expected =
+      1_000 * (3 / 1_000_000) +
+      500 * (15 / 1_000_000) +
+      200 * (3.75 / 1_000_000) +
+      100 * (0.3 / 1_000_000);
+
+    expect(calculateCost(metrics, tiered)).toBeCloseTo(expected, 10);
+  });
+});
+
+describe("calculateCostByModel approximated models (#103)", () => {
+  const untiered: ModelPricing = {
+    inputCostPerToken: 5 / 1_000_000,
+    outputCostPerToken: 25 / 1_000_000,
+    cacheCreationCostPerToken: 6.25 / 1_000_000,
+    cacheReadCostPerToken: 0.5 / 1_000_000,
+  };
+  const tiered: ModelPricing = {
+    ...untiered,
+    above200k: {
+      inputCostPerToken: 10 / 1_000_000,
+      outputCostPerToken: 50 / 1_000_000,
+      cacheCreationCostPerToken: 12.5 / 1_000_000,
+      cacheReadCostPerToken: 1 / 1_000_000,
+    },
+  };
+
+  function premiumMetrics(): TokenMetrics {
+    return {
+      inputTokens: 300_000,
+      outputTokens: 100,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      premium: {
+        inputTokens: 300_000,
+        outputTokens: 100,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+    };
+  }
+
+  it("flags a model with premium usage and no published tier, and still costs it", () => {
+    const byModel = new Map([["claude-opus-5[1m]", premiumMetrics()]]);
+    const result = calculateCostByModel(byModel, { "claude-opus-5": untiered });
+
+    expect(result.approximated).toEqual(["claude-opus-5[1m]"]);
+    expect(result.unpriced).toEqual([]);
+    expect(result.costs.get("claude-opus-5[1m]")).toBeGreaterThan(0);
+  });
+
+  it("does not flag a model whose tier is published", () => {
+    const byModel = new Map([["claude-sonnet-4-5", premiumMetrics()]]);
+    const result = calculateCostByModel(byModel, { "claude-sonnet-4-5": tiered });
+
+    expect(result.approximated).toEqual([]);
+  });
+
+  it("does not flag a model that never crossed the threshold", () => {
+    const byModel = new Map([
+      [
+        "claude-opus-5",
+        {
+          inputTokens: 1_000,
+          outputTokens: 100,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          premium: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+        },
+      ],
+    ]);
+    const result = calculateCostByModel(byModel, { "claude-opus-5": untiered });
+
+    expect(result.approximated).toEqual([]);
+  });
+
+  it("reports an unpriced model as unpriced, not approximated", () => {
+    const byModel = new Map([["claude-unknown-9", premiumMetrics()]]);
+    const result = calculateCostByModel(byModel, {});
+
+    expect(result.unpriced).toEqual(["claude-unknown-9"]);
+    expect(result.approximated).toEqual([]);
+  });
+});

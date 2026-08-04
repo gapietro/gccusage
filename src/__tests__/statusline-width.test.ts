@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { stripAnsi } from "../utils/terminal.js";
+import { PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,7 @@ beforeEach(() => {
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.writeFileSync(
     path.join(cacheDir, "pricing.json"),
-    JSON.stringify({ timestamp: Date.now(), data: {} }),
+    JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now(), data: {} }),
   );
 });
 

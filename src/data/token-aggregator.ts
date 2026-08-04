@@ -1,16 +1,46 @@
 import type { JsonlEntry } from "./jsonl-reader.js";
-import type { TokenMetrics, AggregatedMetrics } from "../types/token-metrics.js";
+import type { TokenCounts, TokenMetrics, AggregatedMetrics } from "../types/token-metrics.js";
+import { PREMIUM_PROMPT_THRESHOLD } from "./pricing-tiers.js";
+
+function emptyCounts(): TokenCounts {
+  return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+}
 
 function emptyMetrics(): TokenMetrics {
-  return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+  return { ...emptyCounts(), premium: emptyCounts() };
+}
+
+/**
+ * What Anthropic bills the tier on: the size of THIS request's prompt, cached
+ * tokens included. One JsonlEntry is one API request — `parseJsonlContent`
+ * already merges the lines sharing a `message.id` — which is why the split
+ * belongs here and not in the cost calculator, where only session sums remain.
+ */
+function promptTokens(usage: NonNullable<JsonlEntry["usage"]>): number {
+  return (
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  );
+}
+
+function addCounts(target: TokenCounts, usage: NonNullable<JsonlEntry["usage"]>): void {
+  target.inputTokens += usage.input_tokens ?? 0;
+  target.outputTokens += usage.output_tokens ?? 0;
+  target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+  target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
 }
 
 function addUsage(target: TokenMetrics, entry: JsonlEntry): void {
   if (!entry.usage) return;
-  target.inputTokens += entry.usage.input_tokens ?? 0;
-  target.outputTokens += entry.usage.output_tokens ?? 0;
-  target.cacheCreationTokens += entry.usage.cache_creation_input_tokens ?? 0;
-  target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
+  addCounts(target, entry.usage);
+
+  // Output follows the prompt's tier: the feed prices output at the premium
+  // rate for a request whose prompt crossed the line.
+  if (promptTokens(entry.usage) > PREMIUM_PROMPT_THRESHOLD) {
+    target.premium ??= emptyCounts();
+    addCounts(target.premium, entry.usage);
+  }
 }
 
 export function aggregateTokens(entries: JsonlEntry[]): AggregatedMetrics {

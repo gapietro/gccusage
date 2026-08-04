@@ -92,12 +92,15 @@ export async function buildRenderContext(
       ? calculateTotalCost(today.costs)
       : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 
-  // A missing price can only understate a figure the pricing table produced.
-  // The stdin cost and the daily store are unaffected, so marking them would
-  // be a false alarm — and a bar that cries uncertain on every render is a
-  // bar nobody reads.
-  const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-  const todayCostUncertain = today !== null && today.unpriced.length > 0;
+  // A missing price can only understate a figure the pricing table produced,
+  // and so can a missing premium tier. The stdin cost and the daily store are
+  // unaffected, so marking them would be a false alarm — and a bar that cries
+  // uncertain on every render is a bar nobody reads.
+  const sessionCostUncertain =
+    sessionCostSource === "calculated" &&
+    (session.unpriced.length > 0 || session.approximated.length > 0);
+  const todayCostUncertain =
+    today !== null && (today.unpriced.length > 0 || today.approximated.length > 0);
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
@@ -128,6 +131,7 @@ export async function buildRenderContext(
     todayCostUsd,
     costByModel,
     unpricedModels: session.unpriced,
+    approximatedModels: session.approximated,
     sessionCostUncertain,
     todayCostUncertain,
     sessionStartTime,

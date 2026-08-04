@@ -39,6 +39,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     todayCostUsd: 0,
     costByModel: new Map(),
     unpricedModels: [],
+    approximatedModels: [],
     sessionCostUncertain: false,
     todayCostUncertain: false,
     sessionStartTime: null,
@@ -900,5 +901,27 @@ describe("alert bands are reachable from real payloads (#46)", () => {
       compactCountdownWidget.render(exact(961_000), { type: "compact-countdown", bg: "#1a5fb4" })
         ?.bg,
     ).toBe(COMPACT_COUNTDOWN_AMBER);
+  });
+});
+
+describe("perModelBreakdownWidget approximation marker (#103)", () => {
+  it("marks an approximated model's amount with ?", () => {
+    const context = makeContext({
+      costByModel: new Map([["claude-opus-5", 12.4]]),
+      approximatedModels: ["claude-opus-5"],
+    });
+
+    const result = perModelBreakdownWidget.render(context, { type: "per-model" });
+    expect(result!.text).toBe("Opus 5:$12.40?");
+  });
+
+  it("leaves a fully priced model unmarked", () => {
+    const context = makeContext({
+      costByModel: new Map([["claude-opus-5", 12.4]]),
+      approximatedModels: [],
+    });
+
+    const result = perModelBreakdownWidget.render(context, { type: "per-model" });
+    expect(result!.text).toBe("Opus 5:$12.40");
   });
 });

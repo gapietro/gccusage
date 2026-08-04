@@ -4,13 +4,32 @@ import { getCacheDir, findTodayJsonlFileStats } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
 import { parseJsonlFile, filterTodayEntries } from "../data/jsonl-reader.js";
 import { aggregateTokens } from "../data/token-aggregator.js";
-import type { TokenMetrics } from "../types/token-metrics.js";
+import type { TokenCounts, TokenMetrics } from "../types/token-metrics.js";
 
+// A negative count already passed plain v.number() before #103; the tier
+// split now SUBTRACTS `premium` from these base counts to get the standard
+// bucket (see cost-calculator.ts), so a negative here — from a corrupt or
+// hand-edited today-aggregates.json — turns "wrong but bounded" into an
+// arbitrarily wrong, possibly negative, cost. Rejecting on read is not a
+// full fix (it does not enforce premium <= base), but it closes off the
+// unbounded case cleanly, and enforcing the cross-field invariant here would
+// require a v.custom check that dredges up the wider "which decomposition is
+// canonical" question this cache boundary should not have to answer.
+const TokenCountsSchema = v.object({
+  inputTokens: v.pipe(v.number(), v.minValue(0)),
+  outputTokens: v.pipe(v.number(), v.minValue(0)),
+  cacheCreationTokens: v.pipe(v.number(), v.minValue(0)),
+  cacheReadTokens: v.pipe(v.number(), v.minValue(0)),
+});
+
+/**
+ * `premium` is REQUIRED, so a cache file written before the tier split fails
+ * validation and is discarded rather than read as "no premium tokens" — a
+ * wrong total for the rest of the day is worse than one re-parse (#103).
+ */
 const TokenMetricsSchema = v.object({
-  inputTokens: v.number(),
-  outputTokens: v.number(),
-  cacheCreationTokens: v.number(),
-  cacheReadTokens: v.number(),
+  ...TokenCountsSchema.entries,
+  premium: TokenCountsSchema,
 });
 
 /**
@@ -50,15 +69,37 @@ function localDateKey(now: Date): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function emptyMetrics(): TokenMetrics {
+function emptyCounts(): TokenCounts {
   return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
 }
 
-function addInto(target: TokenMetrics, source: TokenMetrics): void {
+function emptyMetrics(): TokenMetrics {
+  return { ...emptyCounts(), premium: emptyCounts() };
+}
+
+function addCountsInto(target: TokenCounts, source: TokenCounts): void {
   target.inputTokens += source.inputTokens;
   target.outputTokens += source.outputTokens;
   target.cacheCreationTokens += source.cacheCreationTokens;
   target.cacheReadTokens += source.cacheReadTokens;
+}
+
+function addInto(target: TokenMetrics, source: TokenMetrics): void {
+  addCountsInto(target, source);
+  if (source.premium) {
+    target.premium ??= emptyCounts();
+    addCountsInto(target.premium, source.premium);
+  }
+}
+
+/**
+ * `TokenMetrics.premium` stays optional in memory (other call sites build
+ * `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
+ * always populates it, so this is just bridging the wider in-memory type to the
+ * stricter persisted one — not a silent default for genuinely-missing data.
+ */
+function withRequiredPremium(metrics: TokenMetrics): TokenMetrics & { premium: TokenCounts } {
+  return { ...metrics, premium: metrics.premium ?? emptyCounts() };
 }
 
 /**
@@ -102,8 +143,10 @@ export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
     next[file.path] = {
       mtimeMs: file.mtimeMs,
       size: file.size,
-      byModel: [...aggregate.byModel],
-      totals: aggregate.totals,
+      byModel: [...aggregate.byModel].map(
+        ([model, metrics]) => [model, withRequiredPremium(metrics)] as const,
+      ),
+      totals: withRequiredPremium(aggregate.totals),
     };
     changed = true;
   }

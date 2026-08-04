@@ -116,6 +116,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       todayCostUsd: point.today,
       costByModel: new Map(),
       unpricedModels: [],
+      approximatedModels: [],
       sessionCostUncertain: false,
       todayCostUncertain: false,
       sessionStartTime: null,

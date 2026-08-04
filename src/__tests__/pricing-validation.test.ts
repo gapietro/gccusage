@@ -3,6 +3,7 @@ import {
   MAX_COST_PER_TOKEN,
   isSaneModelPricing,
   sanitisePricingTable,
+  sanitiseModelPricing,
   anchorToSnapshot,
 } from "../data/pricing-validation.js";
 import type { ModelPricing, PricingTable } from "../types/pricing.js";
@@ -125,5 +126,111 @@ describe("anchorToSnapshot", () => {
       "claude-haiku-4-5": pricing({ inputCostPerToken: 1 / 1_000 }),
     });
     expect(result["claude-haiku-4-5"]).toBeUndefined();
+  });
+});
+
+describe("sanitiseModelPricing tier bounds (#103)", () => {
+  const base = {
+    inputCostPerToken: 0.000003,
+    outputCostPerToken: 0.000015,
+    cacheCreationCostPerToken: 0.00000375,
+    cacheReadCostPerToken: 0.0000003,
+  };
+
+  it("keeps a plausible tier", () => {
+    const value = {
+      ...base,
+      above200k: {
+        inputCostPerToken: 0.000006,
+        outputCostPerToken: 0.0000225,
+        cacheCreationCostPerToken: 0.0000075,
+        cacheReadCostPerToken: 0.0000006,
+      },
+    };
+    expect(sanitiseModelPricing(value)?.above200k).toEqual(value.above200k);
+  });
+
+  it("strips a tier priced below its standard counterpart, keeping the model", () => {
+    const result = sanitiseModelPricing({
+      ...base,
+      above200k: { ...base, inputCostPerToken: 0.0000001 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.inputCostPerToken).toBe(base.inputCostPerToken);
+    expect(result!.above200k).toBeUndefined();
+  });
+
+  it("strips a tier above MAX_COST_PER_TOKEN, keeping the model", () => {
+    const result = sanitiseModelPricing({
+      ...base,
+      above200k: { ...base, outputCostPerToken: MAX_COST_PER_TOKEN * 2 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.above200k).toBeUndefined();
+  });
+
+  it("still drops the model when the base rates fail", () => {
+    expect(sanitiseModelPricing({ ...base, inputCostPerToken: 0 })).toBeNull();
+  });
+
+  it("passes a model through untouched when it has no tier", () => {
+    expect(sanitiseModelPricing(base)).toEqual(base);
+  });
+});
+
+describe("anchorToSnapshot tier anchoring (#103)", () => {
+  const known = {
+    inputCostPerToken: 0.000003,
+    outputCostPerToken: 0.000015,
+    cacheCreationCostPerToken: 0.00000375,
+    cacheReadCostPerToken: 0.0000003,
+    above200k: {
+      inputCostPerToken: 0.000006,
+      outputCostPerToken: 0.0000225,
+      cacheCreationCostPerToken: 0.0000075,
+      cacheReadCostPerToken: 0.0000006,
+    },
+  };
+  const snapshot = { "claude-sonnet-4-5": known };
+
+  it("accepts a tier within the deviation bound", () => {
+    const fetched = {
+      "claude-sonnet-4-5": {
+        ...known,
+        above200k: { ...known.above200k, inputCostPerToken: 0.0000066 },
+      },
+    };
+    expect(anchorToSnapshot(fetched, snapshot)["claude-sonnet-4-5"]).toBeDefined();
+  });
+
+  it("rejects a model whose tier drifted beyond the deviation bound", () => {
+    const fetched = {
+      "claude-sonnet-4-5": {
+        ...known,
+        above200k: { ...known.above200k, inputCostPerToken: 0.000006 * 20 },
+      },
+    };
+    expect(anchorToSnapshot(fetched, snapshot)["claude-sonnet-4-5"]).toBeUndefined();
+  });
+
+  it("accepts a newly published tier the snapshot has no counterpart for", () => {
+    const snapshotWithoutTier = { "claude-opus-5": { ...known, above200k: undefined } };
+    const fetched = { "claude-opus-5": known };
+    expect(anchorToSnapshot(fetched, snapshotWithoutTier)["claude-opus-5"]?.above200k).toBeDefined();
+  });
+
+  // The reverse of the case above, and not an inert symmetry: `refreshPricing`
+  // runs `parseLitellmPricing` (which strips a malformed tier via
+  // `sanitiseModelPricing`) before this anchor ever sees the entry, so a
+  // poisoned tier reaches here as a tier-less fetched entry. It passes,
+  // matching the documented one-sided rule, and the model prices at standard
+  // rates for its premium band rather than losing the entry entirely.
+  it("accepts a fetched entry with no tier when the snapshot has one", () => {
+    const fetchedWithoutTier = { "claude-sonnet-4-5": { ...known, above200k: undefined } };
+    const result = anchorToSnapshot(fetchedWithoutTier, snapshot);
+    expect(result["claude-sonnet-4-5"]).toBeDefined();
+    expect(result["claude-sonnet-4-5"]?.above200k).toBeUndefined();
   });
 });

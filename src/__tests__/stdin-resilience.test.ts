@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseStatusJson } from "../data/stdin-reader.js";
 import { stripAnsi } from "../utils/terminal.js";
+import { PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 
 /**
  * Claude Code owns this payload format and evolves it. Before #83 the schema
@@ -137,7 +138,7 @@ beforeEach(() => {
   // Seeded so the render never considers a pricing refresh.
   fs.writeFileSync(
     path.join(cacheDir, "pricing.json"),
-    JSON.stringify({ timestamp: Date.now(), data: {} }),
+    JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now(), data: {} }),
   );
 });
 

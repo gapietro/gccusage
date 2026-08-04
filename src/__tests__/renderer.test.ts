@@ -25,6 +25,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     todayCostUsd: 18.72,
     costByModel: new Map(),
     unpricedModels: [],
+    approximatedModels: [],
     sessionCostUncertain: false,
     todayCostUncertain: false,
     sessionStartTime: null,

@@ -228,6 +228,22 @@ function check(requirement, message$1) {
 		}
 	};
 }
+/* @__NO_SIDE_EFFECTS__ */
+function minValue(requirement, message$1) {
+	return {
+		kind: "validation",
+		type: "min_value",
+		reference: minValue,
+		async: false,
+		expects: `>=${requirement instanceof Date ? requirement.toJSON() : /* @__PURE__ */ _stringify(requirement)}`,
+		requirement,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !(dataset.value >= this.requirement)) _addIssue(this, "value", dataset, config$1, { received: dataset.value instanceof Date ? dataset.value.toJSON() : /* @__PURE__ */ _stringify(dataset.value) });
+			return dataset;
+		}
+	};
+}
 /**
 * Returns the fallback value of the schema.
 *
@@ -341,6 +357,26 @@ function boolean(message$1) {
 		},
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "boolean") dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function literal(literal_, message$1) {
+	return {
+		kind: "schema",
+		type: "literal",
+		reference: literal,
+		expects: /* @__PURE__ */ _stringify(literal_),
+		async: false,
+		literal: literal_,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (dataset.value === this.literal) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
@@ -1873,8 +1909,25 @@ function filterTodayEntries(entries, now = new Date()) {
 }
 
 //#endregion
+//#region src/data/pricing-tiers.ts
+/**
+* Anthropic charges a premium on a request whose prompt exceeds 200k tokens.
+* The threshold is PER REQUEST, not per session: 50 turns of 60k each is 3M
+* cumulative input at standard rates. Comparison is strictly greater-than,
+* so a prompt of exactly 200,000 is standard.
+*/
+const PREMIUM_PROMPT_THRESHOLD = 2e5;
+/** The LiteLLM feed's names for the tier. It encodes the threshold in them. */
+const TIER_FIELDS = {
+	input: "input_cost_per_token_above_200k_tokens",
+	output: "output_cost_per_token_above_200k_tokens",
+	cacheCreation: "cache_creation_input_token_cost_above_200k_tokens",
+	cacheRead: "cache_read_input_token_cost_above_200k_tokens"
+};
+
+//#endregion
 //#region src/data/token-aggregator.ts
-function emptyMetrics$1() {
+function emptyCounts$1() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -1882,12 +1935,34 @@ function emptyMetrics$1() {
 		cacheReadTokens: 0
 	};
 }
+function emptyMetrics$1() {
+	return {
+		...emptyCounts$1(),
+		premium: emptyCounts$1()
+	};
+}
+/**
+* What Anthropic bills the tier on: the size of THIS request's prompt, cached
+* tokens included. One JsonlEntry is one API request — `parseJsonlContent`
+* already merges the lines sharing a `message.id` — which is why the split
+* belongs here and not in the cost calculator, where only session sums remain.
+*/
+function promptTokens(usage) {
+	return (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+}
+function addCounts(target, usage) {
+	target.inputTokens += usage.input_tokens ?? 0;
+	target.outputTokens += usage.output_tokens ?? 0;
+	target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+	target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+}
 function addUsage(target, entry) {
 	if (!entry.usage) return;
-	target.inputTokens += entry.usage.input_tokens ?? 0;
-	target.outputTokens += entry.usage.output_tokens ?? 0;
-	target.cacheCreationTokens += entry.usage.cache_creation_input_tokens ?? 0;
-	target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
+	addCounts(target, entry.usage);
+	if (promptTokens(entry.usage) > PREMIUM_PROMPT_THRESHOLD) {
+		target.premium ??= emptyCounts$1();
+		addCounts(target.premium, entry.usage);
+	}
 }
 function aggregateTokens(entries) {
 	const byModel = new Map();
@@ -2085,19 +2160,37 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-4-5": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-4-5-20250929": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-5": {
 		"inputCostPerToken": 2e-6,
@@ -2115,7 +2208,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-opus-4-1": {
 		"inputCostPerToken": 15e-6,
@@ -2193,7 +2292,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	}
 };
 
@@ -2231,10 +2336,43 @@ function isSaneModelPricing(value) {
 	}
 	return record$1["inputCostPerToken"] > 0;
 }
-/** Drop the entries that fail bounds, keep the rest. Never all-or-nothing. */
+/**
+* Bounds a whole entry, tier included. A failing TIER strips the tier and
+* keeps the model; a failing BASE drops the model, as before. The asymmetry
+* is deliberate: this runs on cache reads as well as on fetches, and losing a
+* model over a bad premium would regress the per-entry posture of #92. A
+* model without a tier prices at standard rates and is flagged approximate.
+*/
+function sanitiseModelPricing(value) {
+	if (!isSaneModelPricing(value)) return null;
+	const pricing = value;
+	if (pricing.above200k === void 0) return pricing;
+	if (isSaneTier(pricing.above200k, pricing)) return pricing;
+	const { above200k: _rejected,...withoutTier } = pricing;
+	return withoutTier;
+}
+/**
+* A premium rate below its standard counterpart is not a price, it is a
+* corrupted or poisoned record — the tier exists to charge MORE. Bounds alone
+* would admit it.
+*/
+function isSaneTier(tier, base) {
+	if (!isSaneModelPricing(tier)) return false;
+	const rates = tier;
+	return COST_KEYS.every((key) => rates[key] >= base[key]);
+}
+/**
+* Drop the entries that fail bounds, keep the rest. Never all-or-nothing —
+* and per-entry itself isn't all-or-nothing: `sanitiseModelPricing` strips a
+* failing tier rather than dropping its model, so a table read here can lose
+* an `above200k` block while keeping the entry it belonged to.
+*/
 function sanitisePricingTable(table) {
 	const out = {};
-	for (const [key, value] of Object.entries(table)) if (isSaneModelPricing(value)) out[key] = value;
+	for (const [key, value] of Object.entries(table)) {
+		const pricing = sanitiseModelPricing(value);
+		if (pricing) out[key] = pricing;
+	}
 	return out;
 }
 /**
@@ -2259,7 +2397,7 @@ function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
 			out[key] = value;
 			continue;
 		}
-		if (COST_KEYS.every((k) => withinDeviation(value[k], known[k]))) out[key] = value;
+		if (COST_KEYS.every((k) => withinDeviation(value[k], known[k])) && tierWithinDeviation(value, known)) out[key] = value;
 	}
 	return out;
 }
@@ -2274,10 +2412,54 @@ function withinDeviation(fetched, known) {
 	const ratio = fetched / known;
 	return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
 }
+/**
+* A tier the snapshot has no counterpart for passes on bounds alone, exactly
+* as a model absent from the snapshot does. That is the path by which a
+* newly published tier reaches users — blocking it would defeat the point of
+* consuming the feed.
+*
+* Unlike `sanitiseModelPricing`, a drifted tier here drops the WHOLE entry
+* rather than stripping the tier and keeping the rest. That is not the same
+* bug in a different place: `sanitiseModelPricing` has nothing behind it, so
+* dropping the model would leave it unpriced. `anchorToSnapshot` has the
+* snapshot behind it — a dropped entry falls through the fallback merge in
+* pricing-fetcher to `known`'s base AND tier together, a record that is
+* internally coherent. Stripping instead would produce a hybrid — live base,
+* no tier at all, since the merge replaces whole entries rather than filling
+* in the missing piece from the snapshot — and would silently cost premium
+* tokens at standard rates. A tier that moved >10x while its base held still
+* is corruption of that record; distrust the whole thing.
+*
+* The one-sided pass is also reachable from the OTHER direction on purpose:
+* `refreshPricing` runs `parseLitellmPricing` (which calls
+* `sanitiseModelPricing`) before this anchor, so a poisoned tier is already
+* stripped by the time it gets here — it arrives one-sided (fetched has no
+* tier, snapshot does) and passes. That is not a bug to close; it is the
+* strip-don't-drop rule from `sanitiseModelPricing` carried through. The
+* model still prices at standard rates, gets flagged approximated, and the
+* under-report is bounded — the alternative (dropping the whole entry here
+* too) would just re-litigate a decision already made one function up.
+*/
+function tierWithinDeviation(fetched, known) {
+	if (!fetched.above200k || !known.above200k) return true;
+	const f = fetched.above200k;
+	const k = known.above200k;
+	return COST_KEYS.every((key) => withinDeviation(f[key], k[key]));
+}
 
 //#endregion
 //#region src/cache/pricing-cache.ts
+/**
+* Bumped whenever the cached envelope's meaning changes in a way an OLD
+* reader would misinterpret and a NEW reader must not accept from an old
+* file. #103 added the above-200k tier to every parser and to the snapshot
+* this cache falls back to; a pre-tier file merged whole-entry over that
+* snapshot would shadow the new tier for up to the cache's full TTL. Exported
+* so a test can pin the exact value rather than restating it.
+*/
+const PRICING_CACHE_VERSION = 1;
 const PricingCacheSchema = object({
+	version: literal(PRICING_CACHE_VERSION),
 	timestamp: number(),
 	data: record(string(), unknown())
 });
@@ -2310,6 +2492,7 @@ function savePricingCache(data) {
 	const cachePath$1 = getCachePath$1();
 	try {
 		const cache = {
+			version: PRICING_CACHE_VERSION,
 			timestamp: Date.now(),
 			data
 		};
@@ -2377,6 +2560,27 @@ async function refreshPricing() {
 		return false;
 	}
 }
+/**
+* The feed publishes the long-context tier as four sibling fields rather than
+* a nested object. Both premium input and output must be present before a
+* tier is attached: a half-published tier would charge premium input against
+* standard output and read as authoritative. Missing premium cache rates
+* derive off the PREMIUM input rate exactly as the base ones derive off the
+* base input rate.
+*/
+function parseTier(model) {
+	const input = model[TIER_FIELDS.input];
+	const output = model[TIER_FIELDS.output];
+	if (typeof input !== "number" || typeof output !== "number") return null;
+	const cacheCreation = model[TIER_FIELDS.cacheCreation];
+	const cacheRead = model[TIER_FIELDS.cacheRead];
+	return {
+		inputCostPerToken: input,
+		outputCostPerToken: output,
+		cacheCreationCostPerToken: typeof cacheCreation === "number" ? cacheCreation : input * 1.25,
+		cacheReadCostPerToken: typeof cacheRead === "number" ? cacheRead : input * .1
+	};
+}
 function parseLitellmPricing(data) {
 	const table = {};
 	for (const [key, value] of Object.entries(data)) {
@@ -2391,10 +2595,13 @@ function parseLitellmPricing(data) {
 			cacheCreationCostPerToken: typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25,
 			cacheReadCostPerToken: typeof model["cache_read_input_token_cost"] === "number" ? model["cache_read_input_token_cost"] : inputCost * .1
 		};
-		if (!isSaneModelPricing(pricing)) continue;
+		const tier = parseTier(model);
+		if (tier) pricing.above200k = tier;
+		const sane = sanitiseModelPricing(pricing);
+		if (!sane) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
-		table[modelId] = pricing;
-		if (key !== modelId) table[key] = pricing;
+		table[modelId] = sane;
+		if (key !== modelId) table[key] = sane;
 	}
 	return table;
 }
@@ -2480,11 +2687,20 @@ function maybeSpawnPricingRefresh(stale) {
 
 //#endregion
 //#region src/cache/today-aggregate-cache.ts
+const TokenCountsSchema = object({
+	inputTokens: pipe(number(), minValue(0)),
+	outputTokens: pipe(number(), minValue(0)),
+	cacheCreationTokens: pipe(number(), minValue(0)),
+	cacheReadTokens: pipe(number(), minValue(0))
+});
+/**
+* `premium` is REQUIRED, so a cache file written before the tier split fails
+* validation and is discarded rather than read as "no premium tokens" — a
+* wrong total for the rest of the day is worse than one re-parse (#103).
+*/
 const TokenMetricsSchema = object({
-	inputTokens: number(),
-	outputTokens: number(),
-	cacheCreationTokens: number(),
-	cacheReadTokens: number()
+	...TokenCountsSchema.entries,
+	premium: TokenCountsSchema
 });
 /**
 * `byModel` is entries rather than an object because a Map does not survive
@@ -2511,7 +2727,7 @@ function localDateKey(now) {
 	const day = String(now.getDate()).padStart(2, "0");
 	return `${now.getFullYear()}-${month}-${day}`;
 }
-function emptyMetrics() {
+function emptyCounts() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -2519,11 +2735,36 @@ function emptyMetrics() {
 		cacheReadTokens: 0
 	};
 }
-function addInto(target, source) {
+function emptyMetrics() {
+	return {
+		...emptyCounts(),
+		premium: emptyCounts()
+	};
+}
+function addCountsInto(target, source) {
 	target.inputTokens += source.inputTokens;
 	target.outputTokens += source.outputTokens;
 	target.cacheCreationTokens += source.cacheCreationTokens;
 	target.cacheReadTokens += source.cacheReadTokens;
+}
+function addInto(target, source) {
+	addCountsInto(target, source);
+	if (source.premium) {
+		target.premium ??= emptyCounts();
+		addCountsInto(target.premium, source.premium);
+	}
+}
+/**
+* `TokenMetrics.premium` stays optional in memory (other call sites build
+* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
+* always populates it, so this is just bridging the wider in-memory type to the
+* stricter persisted one — not a silent default for genuinely-missing data.
+*/
+function withRequiredPremium(metrics) {
+	return {
+		...metrics,
+		premium: metrics.premium ?? emptyCounts()
+	};
 }
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
@@ -2559,8 +2800,8 @@ function getTodayAggregate(now = new Date()) {
 		next[file.path] = {
 			mtimeMs: file.mtimeMs,
 			size: file.size,
-			byModel: [...aggregate.byModel],
-			totals: aggregate.totals
+			byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
+			totals: withRequiredPremium(aggregate.totals)
 		};
 		changed = true;
 	}
@@ -2592,8 +2833,24 @@ function getTodayAggregate(now = new Date()) {
 
 //#endregion
 //#region src/data/cost-calculator.ts
+function rateCounts(counts, rates) {
+	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + counts.cacheCreationTokens * rates.cacheCreationCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
+}
+/**
+* `metrics.premium` is a SUBSET of the four counts, so standard tokens are the
+* difference. When the model publishes no tier the premium tokens fall back to
+* base rates — an under-count we flag rather than guess at (#103).
+*/
 function calculateCost(metrics, pricing) {
-	return metrics.inputTokens * pricing.inputCostPerToken + metrics.outputTokens * pricing.outputCostPerToken + metrics.cacheCreationTokens * pricing.cacheCreationCostPerToken + metrics.cacheReadTokens * pricing.cacheReadCostPerToken;
+	const premium = metrics.premium;
+	if (!premium) return rateCounts(metrics, pricing);
+	const standard = {
+		inputTokens: metrics.inputTokens - premium.inputTokens,
+		outputTokens: metrics.outputTokens - premium.outputTokens,
+		cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+		cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens
+	};
+	return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);
 }
 /**
 * Returns the skipped models alongside the costs rather than a bare Map. The
@@ -2604,18 +2861,26 @@ function calculateCost(metrics, pricing) {
 function calculateCostByModel(byModel, pricing) {
 	const costs = new Map();
 	const unpriced = [];
+	const approximated = [];
 	for (const [model, metrics] of byModel) {
 		const modelPricing = findPricing(model, pricing);
-		if (modelPricing) costs.set(model, calculateCost(metrics, modelPricing));
-		else if (hasTokens(metrics)) unpriced.push(model);
+		if (modelPricing) {
+			costs.set(model, calculateCost(metrics, modelPricing));
+			if (!modelPricing.above200k && hasPremiumTokens(metrics)) approximated.push(model);
+		} else if (hasTokens(metrics)) unpriced.push(model);
 	}
 	return {
 		costs,
-		unpriced
+		unpriced,
+		approximated
 	};
 }
 function hasTokens(metrics) {
 	return metrics.inputTokens > 0 || metrics.outputTokens > 0 || metrics.cacheCreationTokens > 0 || metrics.cacheReadTokens > 0;
+}
+function hasPremiumTokens(metrics) {
+	const premium = metrics.premium;
+	return premium !== void 0 && (premium.inputTokens > 0 || premium.outputTokens > 0 || premium.cacheCreationTokens > 0 || premium.cacheReadTokens > 0);
 }
 function calculateTotalCost(costByModel) {
 	let total = 0;
@@ -3939,8 +4204,8 @@ async function buildRenderContext(stdin, settings) {
 	}
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
 	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
-	const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-	const todayCostUncertain = today !== null && today.unpriced.length > 0;
+	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
+	const todayCostUncertain = today !== null && (today.unpriced.length > 0 || today.approximated.length > 0);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -3956,6 +4221,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUsd,
 		costByModel,
 		unpricedModels: session.unpriced,
+		approximatedModels: session.approximated,
 		sessionCostUncertain,
 		todayCostUncertain,
 		sessionStartTime,
@@ -4412,7 +4678,10 @@ const tokensCachedWidget = { render(context, config) {
 const perModelBreakdownWidget = { render(context, config) {
 	if (context.costByModel.size === 0 && context.unpricedModels.length === 0) return null;
 	const parts = [];
-	for (const [model, cost] of context.costByModel) parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
+	for (const [model, cost] of context.costByModel) {
+		const approximate = context.approximatedModels.includes(model) ? "?" : "";
+		parts.push(`${formatModelName(model)}:${formatDollars(cost)}${approximate}`);
+	}
 	for (const model of context.unpricedModels) parts.push(`${formatModelName(model)}:$?`);
 	const text = parts.join(" ");
 	return {
@@ -5596,10 +5865,11 @@ async function runCli(args) {
 async function reportToday() {
 	const { byModel, totals, fileCount } = getTodayAggregate();
 	const pricing = await fetchPricing(864e5);
-	const { costs: costByModel, unpriced } = calculateCostByModel(byModel, pricing);
+	const { costs: costByModel, unpriced, approximated } = calculateCostByModel(byModel, pricing);
 	const totalCost = calculateTotalCost(costByModel);
+	const marker = unpriced.length > 0 ? " (partial)" : approximated.length > 0 ? " (approximate)" : "";
 	console.log("=== Today's Usage ===\n");
-	console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
+	console.log(`Total Cost: ${formatDollars(totalCost)}${marker}`);
 	console.log(`Total Tokens: ${formatTokens(totals.inputTokens + totals.outputTokens)}`);
 	console.log();
 	if (costByModel.size > 0) {
@@ -5614,7 +5884,16 @@ async function reportToday() {
 		console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
 		console.log("Run `npm run pricing` to refresh the offline table.");
 	}
+	if (approximated.length > 0) {
+		const premiumTokens = approximated.reduce((sum, model) => sum + premiumTokenTotal(byModel.get(model)), 0);
+		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens (prompt, cache and completion) above the ${PREMIUM_PROMPT_THRESHOLD / 1e3}k threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
+	}
 	console.log(`\nSessions analyzed: ${fileCount} files`);
+}
+function premiumTokenTotal(metrics) {
+	const premium = metrics?.premium;
+	if (!premium) return 0;
+	return premium.inputTokens + premium.outputTokens + premium.cacheCreationTokens + premium.cacheReadTokens;
 }
 /** POSIX shell single-quote escaping: ' becomes '\'' */
 function shellQuote(p) {

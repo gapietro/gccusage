@@ -1,14 +1,33 @@
-import type { TokenMetrics } from "../types/token-metrics.js";
-import type { PricingTable, ModelPricing } from "../types/pricing.js";
+import type { TokenMetrics, TokenCounts } from "../types/token-metrics.js";
+import type { PricingTable, ModelPricing, RateSet } from "../types/pricing.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
-export function calculateCost(metrics: TokenMetrics, pricing: ModelPricing): number {
+function rateCounts(counts: TokenCounts, rates: RateSet): number {
   return (
-    metrics.inputTokens * pricing.inputCostPerToken +
-    metrics.outputTokens * pricing.outputCostPerToken +
-    metrics.cacheCreationTokens * pricing.cacheCreationCostPerToken +
-    metrics.cacheReadTokens * pricing.cacheReadCostPerToken
+    counts.inputTokens * rates.inputCostPerToken +
+    counts.outputTokens * rates.outputCostPerToken +
+    counts.cacheCreationTokens * rates.cacheCreationCostPerToken +
+    counts.cacheReadTokens * rates.cacheReadCostPerToken
   );
+}
+
+/**
+ * `metrics.premium` is a SUBSET of the four counts, so standard tokens are the
+ * difference. When the model publishes no tier the premium tokens fall back to
+ * base rates — an under-count we flag rather than guess at (#103).
+ */
+export function calculateCost(metrics: TokenMetrics, pricing: ModelPricing): number {
+  const premium = metrics.premium;
+  if (!premium) return rateCounts(metrics, pricing);
+
+  const standard: TokenCounts = {
+    inputTokens: metrics.inputTokens - premium.inputTokens,
+    outputTokens: metrics.outputTokens - premium.outputTokens,
+    cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+    cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens,
+  };
+
+  return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);
 }
 
 export interface CostByModel {
@@ -18,6 +37,13 @@ export interface CostByModel {
    * `costs`, so any total derived from it understates the truth.
    */
   unpriced: string[];
+  /**
+   * Models that billed tokens above the 200k threshold on a price list that
+   * publishes no premium tier, so those tokens are costed at the standard
+   * rate. Unlike `unpriced`, their usage IS in `costs` — the figure is a lower
+   * bound, not a gap (#103).
+   */
+  approximated: string[];
 }
 
 /**
@@ -32,11 +58,13 @@ export function calculateCostByModel(
 ): CostByModel {
   const costs = new Map<string, number>();
   const unpriced: string[] = [];
+  const approximated: string[] = [];
 
   for (const [model, metrics] of byModel) {
     const modelPricing = findPricing(model, pricing);
     if (modelPricing) {
       costs.set(model, calculateCost(metrics, modelPricing));
+      if (!modelPricing.above200k && hasPremiumTokens(metrics)) approximated.push(model);
     } else if (hasTokens(metrics)) {
       // A model with no tokens loses nothing by going unpriced, and flagging
       // it would mark the bar uncertain on renders where nothing is missing.
@@ -44,7 +72,7 @@ export function calculateCostByModel(
     }
   }
 
-  return { costs, unpriced };
+  return { costs, unpriced, approximated };
 }
 
 function hasTokens(metrics: TokenMetrics): boolean {
@@ -53,6 +81,17 @@ function hasTokens(metrics: TokenMetrics): boolean {
     metrics.outputTokens > 0 ||
     metrics.cacheCreationTokens > 0 ||
     metrics.cacheReadTokens > 0
+  );
+}
+
+function hasPremiumTokens(metrics: TokenMetrics): boolean {
+  const premium = metrics.premium;
+  return (
+    premium !== undefined &&
+    (premium.inputTokens > 0 ||
+      premium.outputTokens > 0 ||
+      premium.cacheCreationTokens > 0 ||
+      premium.cacheReadTokens > 0)
   );
 }
 

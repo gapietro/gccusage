@@ -14,7 +14,11 @@ export const perModelBreakdownWidget: Widget = {
       // collapsed "Sonnet 4.5" and "Sonnet 4" to the same "S4" — two segments
       // labelled identically in the one widget whose entire job is telling
       // models apart (#63). Nothing is shortened now, so nothing can collide.
-      parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
+      //
+      // A trailing `?` means the amount is a lower bound: tokens billed above
+      // the 200k threshold on a model with no published premium rate (#103).
+      const approximate = context.approximatedModels.includes(model) ? "?" : "";
+      parts.push(`${formatModelName(model)}:${formatDollars(cost)}${approximate}`);
     }
 
     // A model with no pricing entry used to be dropped outright, so the one
