@@ -111,3 +111,90 @@ describe("rendering with the pricing feed unreachable", () => {
     expect(bar).not.toMatch(/\$0\.00\?/);
   });
 });
+
+/**
+ * End-to-end proof for #118: a cache write made with the 1-hour TTL must be
+ * billed at the 1-hour rate, not the 5-minute rate every cache write used to
+ * get regardless of what TTL it asked for. Unit tests already cover the
+ * parser (pricing-fetcher), the transcript reader (jsonl-reader) and the
+ * cost calculator in isolation; this is the only place the shipped bundle
+ * runs the whole chain — parser, snapshot, reader, aggregator, calculator —
+ * unmocked, on a cold cache, offline.
+ *
+ * costSource is forced to "calculated" and stdin carries no `cost` object,
+ * so the session total can only come from the transcript below, not from a
+ * pass-through of a stdin-supplied figure.
+ */
+describe("1-hour cache write pricing (#118)", () => {
+  // claude-opus-5's committed offline snapshot (src/data/fallback-pricing.ts):
+  //   cacheCreationCostPerToken:   6.25e-6  (5-minute TTL)
+  //   cacheCreation1hCostPerToken: 1e-5     (1-hour TTL)
+  //
+  // 1000 tokens written with each TTL, run through formatDollars
+  // (src/utils/format.ts):
+  //   1-hour:   1000 * 1e-5    = 0.01    -> not < 0.01, < 1 -> toFixed(2) -> "$0.01"
+  //   5-minute: 1000 * 6.25e-6 = 0.00625 -> < 0.01 -> literal          -> "$0.00"
+  // ("5-minute" is what the pre-fix code produced for every cache write,
+  // whatever TTL the transcript actually recorded.)
+  //
+  // These are two DIFFERENT rendered strings, not the same string reached
+  // two ways — the failure mode this branch hit four times already (see
+  // MEMORY.md's "vacuous tests" note). The session's only tokens are these
+  // cache-creation tokens (input/output both 0), so nothing else contributes
+  // cents that could round the two cases to the same displayed figure.
+  function writeCacheWriteTranscript(ephemeral5m: number, ephemeral1h: number): void {
+    const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, `${SESSION_ID}.jsonl`),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: new Date().toISOString(),
+        sessionId: SESSION_ID,
+        message: {
+          model: "claude-opus-5",
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: ephemeral5m + ephemeral1h,
+            cache_creation: {
+              ephemeral_5m_input_tokens: ephemeral5m,
+              ephemeral_1h_input_tokens: ephemeral1h,
+            },
+          },
+        },
+      }) + "\n",
+    );
+  }
+
+  function renderOfflineWithCacheWrite(
+    ephemeral5m: number,
+    ephemeral1h: number,
+  ): Promise<string> {
+    writeCacheWriteTranscript(ephemeral5m, ephemeral1h);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("getaddrinfo ENOTFOUND — offline");
+      }),
+    );
+    return runStatusline(
+      {
+        session_id: SESSION_ID,
+        model: { id: "claude-opus-5", display_name: "claude-opus-5" },
+        // No cost.total_cost_usd: the session total must be computed from
+        // the transcript, not passed through from stdin.
+      },
+      { ...DEFAULT_SETTINGS, costSource: "calculated" },
+    );
+  }
+
+  it("bills a 1000-token 1-hour cache write at the 1-hour rate, not the 5-minute rate", async () => {
+    const bar = stripAnsi(await renderOfflineWithCacheWrite(0, 1000));
+
+    expect(bar, `expected $0.01 for a 1000-token 1-hour cache write: ${bar}`).toContain("$0.01");
+    // The pre-fix code billed every cache write at the 5-minute rate, which
+    // for this session (cache tokens only) renders as $0.00 (0.00625 < 0.01).
+    expect(bar, `rendered the pre-fix 5-minute-rate figure: ${bar}`).not.toMatch(/\$0\.00(?!\/hr)/);
+  });
+});
