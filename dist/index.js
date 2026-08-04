@@ -1873,8 +1873,25 @@ function filterTodayEntries(entries, now = new Date()) {
 }
 
 //#endregion
+//#region src/data/pricing-tiers.ts
+/**
+* Anthropic charges a premium on a request whose prompt exceeds 200k tokens.
+* The threshold is PER REQUEST, not per session: 50 turns of 60k each is 3M
+* cumulative input at standard rates. Comparison is strictly greater-than,
+* so a prompt of exactly 200,000 is standard.
+*/
+const PREMIUM_PROMPT_THRESHOLD = 2e5;
+/** The LiteLLM feed's names for the tier. It encodes the threshold in them. */
+const TIER_FIELDS = {
+	input: "input_cost_per_token_above_200k_tokens",
+	output: "output_cost_per_token_above_200k_tokens",
+	cacheCreation: "cache_creation_input_token_cost_above_200k_tokens",
+	cacheRead: "cache_read_input_token_cost_above_200k_tokens"
+};
+
+//#endregion
 //#region src/data/token-aggregator.ts
-function emptyMetrics$1() {
+function emptyCounts() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -1882,12 +1899,34 @@ function emptyMetrics$1() {
 		cacheReadTokens: 0
 	};
 }
+function emptyMetrics$1() {
+	return {
+		...emptyCounts(),
+		premium: emptyCounts()
+	};
+}
+/**
+* What Anthropic bills the tier on: the size of THIS request's prompt, cached
+* tokens included. One JsonlEntry is one API request — `parseJsonlContent`
+* already merges the lines sharing a `message.id` — which is why the split
+* belongs here and not in the cost calculator, where only session sums remain.
+*/
+function promptTokens(usage) {
+	return (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+}
+function addCounts(target, usage) {
+	target.inputTokens += usage.input_tokens ?? 0;
+	target.outputTokens += usage.output_tokens ?? 0;
+	target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+	target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+}
 function addUsage(target, entry) {
 	if (!entry.usage) return;
-	target.inputTokens += entry.usage.input_tokens ?? 0;
-	target.outputTokens += entry.usage.output_tokens ?? 0;
-	target.cacheCreationTokens += entry.usage.cache_creation_input_tokens ?? 0;
-	target.cacheReadTokens += entry.usage.cache_read_input_tokens ?? 0;
+	addCounts(target, entry.usage);
+	if (promptTokens(entry.usage) > PREMIUM_PROMPT_THRESHOLD) {
+		target.premium ??= emptyCounts();
+		addCounts(target.premium, entry.usage);
+	}
 }
 function aggregateTokens(entries) {
 	const byModel = new Map();
@@ -2373,16 +2412,6 @@ function savePricingCache(data) {
 		writeJsonAtomic(cachePath$1, cache);
 	} catch {}
 }
-
-//#endregion
-//#region src/data/pricing-tiers.ts
-/** The LiteLLM feed's names for the tier. It encodes the threshold in them. */
-const TIER_FIELDS = {
-	input: "input_cost_per_token_above_200k_tokens",
-	output: "output_cost_per_token_above_200k_tokens",
-	cacheCreation: "cache_creation_input_token_cost_above_200k_tokens",
-	cacheRead: "cache_read_input_token_cost_above_200k_tokens"
-};
 
 //#endregion
 //#region src/data/pricing-fetcher.ts

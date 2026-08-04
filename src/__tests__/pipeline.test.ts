@@ -266,6 +266,12 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
       cacheReadTokens: EXPECTED_CACHE_READ,
+      premium: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
     });
 
     // Guard the two wrong rules explicitly.
@@ -277,6 +283,12 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
       cacheReadTokens: EXPECTED_CACHE_READ,
+      premium: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
     });
   });
 });
