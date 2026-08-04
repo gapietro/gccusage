@@ -196,4 +196,48 @@ describe("getTodayAggregate", () => {
     expect(result.byModel.size).toBe(0);
     expect(result.fileCount).toBe(0);
   });
+
+  it("discards a pre-upgrade cache entry that has no premium bucket (#103)", () => {
+    const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+
+    // Prime the cache, then rewrite it in the PRE-UPGRADE shape (no `premium`)
+    // with a bogus count, keyed on the live file's real mtime and size so it
+    // would be a cache HIT if the schema still accepted it.
+    getTodayAggregate(NOW);
+    const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
+    const stat = fs.statSync(filePath);
+    const bogus = {
+      inputTokens: 999_999,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+    fs.writeFileSync(
+      cacheFile,
+      JSON.stringify({
+        // Reuse the primed file's own date key rather than recomputing it: the
+        // module keys on the LOCAL date, and a hand-rolled UTC key makes this
+        // pass or fail depending on timezone and hour.
+        date: primed.date,
+        files: {
+          [filePath]: {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            byModel: [["opus", bogus]],
+            totals: bogus,
+          },
+        },
+      }),
+    );
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const result = getTodayAggregate(NOW);
+
+    // 100, not 999_999: the pre-upgrade shape was rejected and the transcript
+    // re-parsed.
+    expect(parsedPaths()).toHaveLength(1);
+    expect(result.totals.inputTokens).toBe(100);
+    expect(result.totals.premium).toBeDefined();
+  });
 });

@@ -1891,7 +1891,7 @@ const TIER_FIELDS = {
 
 //#endregion
 //#region src/data/token-aggregator.ts
-function emptyCounts() {
+function emptyCounts$1() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -1901,8 +1901,8 @@ function emptyCounts() {
 }
 function emptyMetrics$1() {
 	return {
-		...emptyCounts(),
-		premium: emptyCounts()
+		...emptyCounts$1(),
+		premium: emptyCounts$1()
 	};
 }
 /**
@@ -1924,7 +1924,7 @@ function addUsage(target, entry) {
 	if (!entry.usage) return;
 	addCounts(target, entry.usage);
 	if (promptTokens(entry.usage) > PREMIUM_PROMPT_THRESHOLD) {
-		target.premium ??= emptyCounts();
+		target.premium ??= emptyCounts$1();
 		addCounts(target.premium, entry.usage);
 	}
 }
@@ -2600,11 +2600,20 @@ function maybeSpawnPricingRefresh(stale) {
 
 //#endregion
 //#region src/cache/today-aggregate-cache.ts
-const TokenMetricsSchema = object({
+const TokenCountsSchema = object({
 	inputTokens: number(),
 	outputTokens: number(),
 	cacheCreationTokens: number(),
 	cacheReadTokens: number()
+});
+/**
+* `premium` is REQUIRED, so a cache file written before the tier split fails
+* validation and is discarded rather than read as "no premium tokens" — a
+* wrong total for the rest of the day is worse than one re-parse (#103).
+*/
+const TokenMetricsSchema = object({
+	...TokenCountsSchema.entries,
+	premium: TokenCountsSchema
 });
 /**
 * `byModel` is entries rather than an object because a Map does not survive
@@ -2631,7 +2640,7 @@ function localDateKey(now) {
 	const day = String(now.getDate()).padStart(2, "0");
 	return `${now.getFullYear()}-${month}-${day}`;
 }
-function emptyMetrics() {
+function emptyCounts() {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -2639,11 +2648,36 @@ function emptyMetrics() {
 		cacheReadTokens: 0
 	};
 }
-function addInto(target, source) {
+function emptyMetrics() {
+	return {
+		...emptyCounts(),
+		premium: emptyCounts()
+	};
+}
+function addCountsInto(target, source) {
 	target.inputTokens += source.inputTokens;
 	target.outputTokens += source.outputTokens;
 	target.cacheCreationTokens += source.cacheCreationTokens;
 	target.cacheReadTokens += source.cacheReadTokens;
+}
+function addInto(target, source) {
+	addCountsInto(target, source);
+	if (source.premium) {
+		target.premium ??= emptyCounts();
+		addCountsInto(target.premium, source.premium);
+	}
+}
+/**
+* `TokenMetrics.premium` stays optional in memory (other call sites build
+* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
+* always populates it, so this is just bridging the wider in-memory type to the
+* stricter persisted one — not a silent default for genuinely-missing data.
+*/
+function withRequiredPremium(metrics) {
+	return {
+		...metrics,
+		premium: metrics.premium ?? emptyCounts()
+	};
 }
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
@@ -2679,8 +2713,8 @@ function getTodayAggregate(now = new Date()) {
 		next[file.path] = {
 			mtimeMs: file.mtimeMs,
 			size: file.size,
-			byModel: [...aggregate.byModel],
-			totals: aggregate.totals
+			byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
+			totals: withRequiredPremium(aggregate.totals)
 		};
 		changed = true;
 	}
