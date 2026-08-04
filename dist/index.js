@@ -4337,6 +4337,23 @@ function trackTurn(sessionId) {
 }
 
 //#endregion
+//#region src/config/layout.ts
+/**
+* Whether `type` appears anywhere in the resolved layout.
+*
+* Deliberately coarse: it asks whether the widget is *configured*, not whether
+* it survives the shrink pass at render time. A widget dropped for width still
+* counts. Over-counting in that edge is acceptable — the point is to charge
+* nothing to the users who never configured the widget at all.
+*
+* `lines` is always present after the loader merge (`loader.ts:40`), so there
+* is no optional handling here.
+*/
+function layoutIncludesWidget(settings, type) {
+	return settings.lines.some((line) => line.widgets.some((w) => w.type === type));
+}
+
+//#endregion
 //#region src/data/pipeline.ts
 function getStdinBurnRate(stdin) {
 	const durationMs = stdin.cost?.total_duration_ms;
@@ -4393,7 +4410,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUncertain,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth(),
-		turnCount: trackTurn(stdin.session_id),
+		turnCount: layoutIncludesWidget(settings, "turn-counter") ? trackTurn(stdin.session_id) : 0,
 		alerts: {
 			sessionWarn: settings.alerts?.sessionWarn ?? 5,
 			sessionDanger: settings.alerts?.sessionDanger ?? 15,

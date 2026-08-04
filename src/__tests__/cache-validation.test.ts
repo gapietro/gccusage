@@ -457,12 +457,18 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
       cost: { total_cost_usd: 1.5 },
     };
 
-    // A null turn-count.json throws inside trackTurn when the reader is
+    // A null turn shard throws inside trackTurn when the reader is
     // unvalidated (see the sabotage below) — that throw propagates straight
     // out of runStatusline here, since this test calls it directly rather
     // than through src/index.ts's main().catch(), which is what turns the
     // same throw into an empty bar and exit 0 in production.
-    write("turn-count.json", "null");
+    //
+    // The turn store is only read when the layout contains `turn-counter`
+    // (#99), so this leg renders with HOSTILE_SETTINGS below rather than
+    // DEFAULT_SETTINGS. With the default layout the sabotage is never read
+    // and this leg would assert nothing.
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "turns"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "gccusage", "turns", "hostile.json"), "null");
 
     // The key gate in checkCache must clear so only the schema can reject
     // this entry — otherwise the gate rejects it for a reason unrelated to
@@ -509,7 +515,17 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
       JSON.stringify({ sessionId: "ghost", date: today, costUsd: "not-a-number", updatedAt: now.getTime() }),
     );
 
-    const output = await runStatusline(stdin, DEFAULT_SETTINGS);
+    // DEFAULT_SETTINGS plus a turn-counter, so the corrupted turn shard is
+    // actually read. Everything else about the layout is unchanged.
+    const HOSTILE_SETTINGS = {
+      ...DEFAULT_SETTINGS,
+      lines: [
+        ...DEFAULT_SETTINGS.lines,
+        { widgets: [{ type: "turn-counter" }], flex: "left" as const },
+      ],
+    };
+
+    const output = await runStatusline(stdin, HOSTILE_SETTINGS);
 
     expect(output).not.toContain("NaN");
     expect(output).not.toContain("undefined");

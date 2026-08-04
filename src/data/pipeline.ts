@@ -16,6 +16,7 @@ import {
 import { getTerminalWidth } from "../utils/terminal.js";
 import { trackDailyCost, type CostSource } from "./daily-cost-tracker.js";
 import { trackTurn } from "./turn-tracker.js";
+import { layoutIncludesWidget } from "../config/layout.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -136,7 +137,13 @@ export async function buildRenderContext(
     todayCostUncertain,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
-    turnCount: trackTurn(stdin.session_id),
+    // `trackTurn` reads and writes a file, and `turn-counter` is in no default
+    // layout — so for almost every user this was I/O for a number nothing
+    // displays (#99). Gate on the layout, the same shape as the `today` gate
+    // above. 0 is safe: `turn-counter` renders nothing below 1.
+    turnCount: layoutIncludesWidget(settings, "turn-counter")
+      ? trackTurn(stdin.session_id)
+      : 0,
     alerts: {
       sessionWarn: settings.alerts?.sessionWarn ?? 5,
       sessionDanger: settings.alerts?.sessionDanger ?? 15,
