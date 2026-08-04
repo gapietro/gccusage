@@ -8,12 +8,22 @@ import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
 // cast then dereferenced outside the try block — throwing, and blanking the
 // entire statusline over a four-byte cache file (#92).
 //
-// `updatedAt` falls back to 0 so a shard written in an older format reads as
-// infinitely stale and is pruned, rather than surviving forever unpruneable.
+// `count` and `updatedAt` are constrained to safe integers, not just
+// `v.number()`: `JSON.parse("1e400")` is `Infinity`, and `v.number()` accepts
+// it. An `Infinity` count reaches the bar as the literal text "#Infinity" —
+// `turn-counter.ts`'s `!count || count < 1` guard does not catch it, since
+// `Infinity` is truthy and not less than 1. An `Infinity` updatedAt is a
+// second, independent failure: `now - updatedAt` evaluates to `-Infinity`,
+// which is always less than `STALE_TURN_MS`, making the shard unpruneable
+// forever. `v.safeInteger()` rejects both.
+//
+// `updatedAt` falls back to 0 so a shard written in an older format, or one
+// carrying a non-integer/infinite value, reads as infinitely stale and is
+// pruned, rather than surviving forever unpruneable.
 const TurnDataSchema = v.object({
   sessionId: v.string(),
-  count: v.number(),
-  updatedAt: v.fallback(v.number(), 0),
+  count: v.pipe(v.number(), v.safeInteger()),
+  updatedAt: v.fallback(v.pipe(v.number(), v.safeInteger()), 0),
 });
 
 type TurnData = v.InferOutput<typeof TurnDataSchema>;

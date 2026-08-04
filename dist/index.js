@@ -245,6 +245,22 @@ function minValue(requirement, message$1) {
 		}
 	};
 }
+/* @__NO_SIDE_EFFECTS__ */
+function safeInteger(message$1) {
+	return {
+		kind: "validation",
+		type: "safe_integer",
+		reference: safeInteger,
+		async: false,
+		expects: null,
+		requirement: Number.isSafeInteger,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "safe integer", dataset, config$1);
+			return dataset;
+		}
+	};
+}
 /**
 * Returns the fallback value of the schema.
 *
@@ -4262,8 +4278,8 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 //#region src/data/turn-tracker.ts
 const TurnDataSchema = object({
 	sessionId: string(),
-	count: number(),
-	updatedAt: fallback(number(), 0)
+	count: pipe(number(), safeInteger()),
+	updatedAt: fallback(pipe(number(), safeInteger()), 0)
 });
 const STALE_TURN_MS = 48 * 3600 * 1e3;
 function getTurnDir() {

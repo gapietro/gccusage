@@ -107,6 +107,28 @@ describe("trackTurn store validation", () => {
     writeShard("s1.json", '{"sessionId": "s1", "cou');
     expect(trackTurn("s1")).toBe(1);
   });
+
+  // `JSON.parse("1e400")` is `Infinity`, and a bare `v.number()` schema
+  // accepts it as a "valid" count — the shard would then render as the
+  // literal text "#Infinity" in the bar (see cache-validation.test.ts's
+  // "rejects an Infinity turn count instead of rendering it" for the
+  // render-level assertion). `v.safeInteger()` rejects the whole document,
+  // so trackTurn treats it the same as any other corrupt shard: rebuild at 1.
+  it("rebuilds when count is Infinity", () => {
+    writeShard("s1.json", '{"sessionId":"s1","count":1e400,"updatedAt":0}');
+    expect(trackTurn("s1")).toBe(1);
+  });
+
+  // An Infinity updatedAt is a second, independent failure if left
+  // unvalidated: `now - updatedAt` evaluates to `-Infinity`, which is always
+  // less than STALE_TURN_MS, so the shard would never be pruned. The
+  // fallback to 0 (same as a pre-updatedAt legacy shard) makes it read as
+  // infinitely STALE instead — the opposite, safe failure mode.
+  it("treats an Infinity updatedAt as infinitely stale, not unpruneable", () => {
+    writeShard("ancient.json", '{"sessionId":"ancient","count":99,"updatedAt":1e400}');
+    trackTurn("fresh");
+    expect(shardFiles()).toEqual(["fresh.json"]);
+  });
 });
 
 describe("trackTurn pruning", () => {
