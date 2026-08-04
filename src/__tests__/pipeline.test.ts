@@ -310,11 +310,13 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       inputTokens: EXPECTED_INPUT,
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: EXPECTED_CACHE_READ,
       premium: {
         inputTokens: 0,
         outputTokens: 0,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         cacheReadTokens: 0,
       },
     });
@@ -327,11 +329,13 @@ describe("buildRenderContext token totals from a multi-block transcript", () => 
       inputTokens: EXPECTED_INPUT,
       outputTokens: EXPECTED_OUTPUT,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: EXPECTED_CACHE_READ,
       premium: {
         inputTokens: 0,
         outputTokens: 0,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         cacheReadTokens: 0,
       },
     });

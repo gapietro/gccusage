@@ -3,7 +3,13 @@ import type { TokenCounts, TokenMetrics, AggregatedMetrics } from "../types/toke
 import { PREMIUM_PROMPT_THRESHOLD } from "./pricing-tiers.js";
 
 function emptyCounts(): TokenCounts {
-  return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
+    cacheReadTokens: 0,
+  };
 }
 
 function emptyMetrics(): TokenMetrics {
@@ -28,6 +34,7 @@ function addCounts(target: TokenCounts, usage: NonNullable<JsonlEntry["usage"]>)
   target.inputTokens += usage.input_tokens ?? 0;
   target.outputTokens += usage.output_tokens ?? 0;
   target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+  target.cacheCreation1hTokens += usage.cache_creation_1h_input_tokens ?? 0;
   target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
 }
 

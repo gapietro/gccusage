@@ -19,6 +19,7 @@ const TokenCountsSchema = v.object({
   inputTokens: v.pipe(v.number(), v.minValue(0)),
   outputTokens: v.pipe(v.number(), v.minValue(0)),
   cacheCreationTokens: v.pipe(v.number(), v.minValue(0)),
+  cacheCreation1hTokens: v.pipe(v.number(), v.minValue(0)),
   cacheReadTokens: v.pipe(v.number(), v.minValue(0)),
 });
 
@@ -26,6 +27,10 @@ const TokenCountsSchema = v.object({
  * `premium` is REQUIRED, so a cache file written before the tier split fails
  * validation and is discarded rather than read as "no premium tokens" — a
  * wrong total for the rest of the day is worse than one re-parse (#103).
+ *
+ * `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
+ * TTL split fails validation and is discarded rather than read as "no 1-hour
+ * tokens" — which would under-cost the rest of the day (#118).
  */
 const TokenMetricsSchema = v.object({
   ...TokenCountsSchema.entries,
@@ -70,7 +75,13 @@ function localDateKey(now: Date): string {
 }
 
 function emptyCounts(): TokenCounts {
-  return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
+    cacheReadTokens: 0,
+  };
 }
 
 function emptyMetrics(): TokenMetrics {
@@ -81,6 +92,7 @@ function addCountsInto(target: TokenCounts, source: TokenCounts): void {
   target.inputTokens += source.inputTokens;
   target.outputTokens += source.outputTokens;
   target.cacheCreationTokens += source.cacheCreationTokens;
+  target.cacheCreation1hTokens += source.cacheCreation1hTokens;
   target.cacheReadTokens += source.cacheReadTokens;
 }
 

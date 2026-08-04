@@ -107,7 +107,13 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       },
       metrics: {
         byModel: new Map(),
-        totals: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+        totals: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheCreation1hTokens: 0,
+          cacheReadTokens: 0,
+        },
       },
       block: null,
       burnRate: { costPerHour: 1, costPerMinute: 0.02 },

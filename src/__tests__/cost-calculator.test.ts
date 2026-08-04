@@ -22,6 +22,7 @@ describe("calculateCost", () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheCreationTokens: 200,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 100,
     };
 
@@ -62,6 +63,7 @@ describe("calculateCostByModel", () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
     });
 
@@ -90,6 +92,7 @@ describe("calculateCostByModel", () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
     });
 
@@ -105,6 +108,7 @@ describe("calculateCostByModel", () => {
       inputTokens: 0,
       outputTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
     });
 
@@ -119,6 +123,7 @@ describe("calculateBurnRate", () => {
     inputTokens: 1_000_000,
     outputTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
     cacheReadTokens: 0,
   };
 
@@ -301,11 +306,13 @@ describe("calculateCost above-200k tier (#103)", () => {
       inputTokens: 300_000,
       outputTokens: 1_000,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
       premium: {
         inputTokens: 250_000,
         outputTokens: 800,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         cacheReadTokens: 0,
       },
     };
@@ -324,11 +331,13 @@ describe("calculateCost above-200k tier (#103)", () => {
       inputTokens: 300_000,
       outputTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
       premium: {
         inputTokens: 300_000,
         outputTokens: 0,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         cacheReadTokens: 0,
       },
     };
@@ -342,6 +351,7 @@ describe("calculateCost above-200k tier (#103)", () => {
       inputTokens: 1_000,
       outputTokens: 500,
       cacheCreationTokens: 200,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 100,
     };
 
@@ -379,11 +389,13 @@ describe("calculateCostByModel approximated models (#103)", () => {
       inputTokens: 300_000,
       outputTokens: 100,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
       premium: {
         inputTokens: 300_000,
         outputTokens: 100,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         cacheReadTokens: 0,
       },
     };
@@ -413,8 +425,15 @@ describe("calculateCostByModel approximated models (#103)", () => {
           inputTokens: 1_000,
           outputTokens: 100,
           cacheCreationTokens: 0,
+          cacheCreation1hTokens: 0,
           cacheReadTokens: 0,
-          premium: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+          premium: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheCreation1hTokens: 0,
+            cacheReadTokens: 0,
+          },
         },
       ],
     ]);
@@ -429,5 +448,78 @@ describe("calculateCostByModel approximated models (#103)", () => {
 
     expect(result.unpriced).toEqual(["claude-unknown-9"]);
     expect(result.approximated).toEqual([]);
+  });
+});
+
+describe("1-hour cache write pricing", () => {
+  const pricing: ModelPricing = {
+    inputCostPerToken: 5e-6,
+    outputCostPerToken: 2.5e-5,
+    cacheCreationCostPerToken: 6.25e-6,
+    cacheCreation1hCostPerToken: 1e-5,
+    cacheReadCostPerToken: 5e-7,
+  };
+
+  it("splits cache writes between the 5-minute and 1-hour rates", () => {
+    const cost = calculateCost(
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 400,
+        cacheReadTokens: 0,
+      },
+      pricing,
+    );
+    // 600 x 6.25e-6 + 400 x 1e-5 = 3.75e-3 + 4e-3
+    expect(cost).toBeCloseTo(0.00775, 10);
+  });
+
+  it("charges every cache write at the 5-minute rate when none asked for 1 hour", () => {
+    const cost = calculateCost(
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 0,
+        cacheReadTokens: 0,
+      },
+      pricing,
+    );
+    expect(cost).toBeCloseTo(0.00625, 10);
+  });
+
+  // The 2x2 matrix: a request above 200k that also asked for a 1-hour TTL
+  // must reach the cross-product rate, not any of the other three.
+  it("bills the above-200k 1-hour rate for premium 1-hour writes", () => {
+    const tiered: ModelPricing = {
+      ...pricing,
+      above200k: {
+        inputCostPerToken: 1e-5,
+        outputCostPerToken: 5e-5,
+        cacheCreationCostPerToken: 1.25e-5,
+        cacheCreation1hCostPerToken: 2e-5,
+        cacheReadCostPerToken: 1e-6,
+      },
+    };
+    const cost = calculateCost(
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 400,
+        cacheReadTokens: 0,
+        premium: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 1000,
+          cacheCreation1hTokens: 400,
+          cacheReadTokens: 0,
+        },
+      },
+      tiered,
+    );
+    // All premium: 600 x 1.25e-5 + 400 x 2e-5 = 7.5e-3 + 8e-3
+    expect(cost).toBeCloseTo(0.0155, 10);
   });
 });

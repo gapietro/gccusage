@@ -1954,6 +1954,7 @@ function emptyCounts$1() {
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
 		cacheReadTokens: 0
 	};
 }
@@ -1976,6 +1977,7 @@ function addCounts(target, usage) {
 	target.inputTokens += usage.input_tokens ?? 0;
 	target.outputTokens += usage.output_tokens ?? 0;
 	target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+	target.cacheCreation1hTokens += usage.cache_creation_1h_input_tokens ?? 0;
 	target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
 }
 function addUsage(target, entry) {
@@ -2777,12 +2779,17 @@ const TokenCountsSchema = object({
 	inputTokens: pipe(number(), minValue(0)),
 	outputTokens: pipe(number(), minValue(0)),
 	cacheCreationTokens: pipe(number(), minValue(0)),
+	cacheCreation1hTokens: pipe(number(), minValue(0)),
 	cacheReadTokens: pipe(number(), minValue(0))
 });
 /**
 * `premium` is REQUIRED, so a cache file written before the tier split fails
 * validation and is discarded rather than read as "no premium tokens" — a
 * wrong total for the rest of the day is worse than one re-parse (#103).
+*
+* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
+* TTL split fails validation and is discarded rather than read as "no 1-hour
+* tokens" — which would under-cost the rest of the day (#118).
 */
 const TokenMetricsSchema = object({
 	...TokenCountsSchema.entries,
@@ -2818,6 +2825,7 @@ function emptyCounts() {
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
 		cacheReadTokens: 0
 	};
 }
@@ -2831,6 +2839,7 @@ function addCountsInto(target, source) {
 	target.inputTokens += source.inputTokens;
 	target.outputTokens += source.outputTokens;
 	target.cacheCreationTokens += source.cacheCreationTokens;
+	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
 	target.cacheReadTokens += source.cacheReadTokens;
 }
 function addInto(target, source) {
@@ -2920,7 +2929,8 @@ function getTodayAggregate(now = new Date()) {
 //#endregion
 //#region src/data/cost-calculator.ts
 function rateCounts(counts, rates) {
-	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + counts.cacheCreationTokens * rates.cacheCreationCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
+	const cacheCreation5m = counts.cacheCreationTokens - counts.cacheCreation1hTokens;
+	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + cacheCreation5m * rates.cacheCreationCostPerToken + counts.cacheCreation1hTokens * rates.cacheCreation1hCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
 }
 /**
 * `metrics.premium` is a SUBSET of the four counts, so standard tokens are the
@@ -2934,6 +2944,7 @@ function calculateCost(metrics, pricing) {
 		inputTokens: metrics.inputTokens - premium.inputTokens,
 		outputTokens: metrics.outputTokens - premium.outputTokens,
 		cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+		cacheCreation1hTokens: metrics.cacheCreation1hTokens - premium.cacheCreation1hTokens,
 		cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens
 	};
 	return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);

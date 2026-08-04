@@ -284,4 +284,86 @@ describe("getTodayAggregate", () => {
     expect(parsedPaths()).toHaveLength(1);
     expect(result.totals.inputTokens).toBe(100);
   });
+
+  it("re-parses a transcript whose cached aggregate predates the TTL split (#118)", () => {
+    const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+
+    // Prime the cache, then rewrite it in the PRE-#118 shape (no
+    // `cacheCreation1hTokens` anywhere) with a bogus count, keyed on the live
+    // file's real mtime and size so it would be a cache HIT if the schema
+    // still accepted it. Reading it as "0 one-hour tokens" would under-cost
+    // every 1-hour write for the rest of the day, so the required field must
+    // make validation discard it and force a re-parse.
+    getTodayAggregate(NOW);
+    const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
+    const stat = fs.statSync(filePath);
+    const preSplitCounts = {
+      inputTokens: 999_999,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+    fs.writeFileSync(
+      cacheFile,
+      JSON.stringify({
+        date: primed.date,
+        files: {
+          [filePath]: {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            byModel: [["opus", { ...preSplitCounts, premium: preSplitCounts }]],
+            totals: { ...preSplitCounts, premium: preSplitCounts },
+          },
+        },
+      }),
+    );
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const result = getTodayAggregate(NOW);
+
+    // 100, not 999_999: the pre-#118 shape was rejected and the transcript
+    // re-parsed.
+    expect(parsedPaths()).toContain(filePath);
+    expect(result.totals.inputTokens).toBe(100);
+  });
+
+  // The pair to the test above: a cached aggregate that DOES carry
+  // `cacheCreation1hTokens` must be reused, not re-parsed. Without this half,
+  // the re-parse assertion above would pass even if caching were disabled
+  // outright rather than specifically rejecting the pre-split shape.
+  it("reuses a cached aggregate that already carries cacheCreation1hTokens (#118)", () => {
+    const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+
+    getTodayAggregate(NOW);
+    const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
+    const stat = fs.statSync(filePath);
+    const postSplitCounts = {
+      inputTokens: 100,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
+      cacheReadTokens: 0,
+    };
+    fs.writeFileSync(
+      cacheFile,
+      JSON.stringify({
+        date: primed.date,
+        files: {
+          [filePath]: {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            byModel: [["opus", { ...postSplitCounts, premium: postSplitCounts }]],
+            totals: { ...postSplitCounts, premium: postSplitCounts },
+          },
+        },
+      }),
+    );
+    vi.mocked(parseJsonlFile).mockClear();
+
+    getTodayAggregate(NOW);
+
+    expect(parsedPaths()).not.toContain(filePath);
+  });
 });
