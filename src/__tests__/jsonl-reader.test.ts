@@ -53,6 +53,7 @@ describe("parseJsonlContent", () => {
       input_tokens: 2,
       output_tokens: 468,
       cache_creation_input_tokens: 22228,
+      cache_creation_1h_input_tokens: 0,
       cache_read_input_tokens: 20554,
     });
   });
@@ -157,5 +158,70 @@ describe("filterTodayEntries", () => {
       { timestamp: "not-a-date", usage: { input_tokens: 2 } },
     ];
     expect(filterTodayEntries(entries, now)).toHaveLength(0);
+  });
+});
+
+describe("1-hour cache creation tokens", () => {
+  it("reads the ephemeral_1h count out of the nested breakdown", () => {
+    const entries = parseJsonlContent(
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-08-03T10:00:00Z",
+        message: {
+          id: "msg_1",
+          model: "claude-opus-5",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_creation_input_tokens: 1000,
+            cache_read_input_tokens: 500,
+            cache_creation: {
+              ephemeral_5m_input_tokens: 400,
+              ephemeral_1h_input_tokens: 600,
+            },
+          },
+        },
+      }),
+    );
+    expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(600);
+    // The flat total is untouched — the 1h count is a SUBSET of it, not a sibling.
+    expect(entries[0]!.usage!.cache_creation_input_tokens).toBe(1000);
+  });
+
+  it("treats a missing cache_creation object as all 5-minute", () => {
+    const entries = parseJsonlContent(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg_2",
+          model: "claude-opus-5",
+          usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 1000 },
+        },
+      }),
+    );
+    // Honest default: transcripts predating the breakdown predate 1h caching.
+    expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(0);
+  });
+
+  // SYNTHETIC CORRUPTION — this shape does NOT occur in real transcripts
+  // (0 occurrences across 98,722 usage-bearing lines). It guards the subset
+  // invariant only: calculateCost derives the 5-minute bucket by subtraction,
+  // so an unclamped overshoot would yield a NEGATIVE bucket and a cost below
+  // the truth. Do not read this as a real-world case.
+  it("clamps a 1-hour count that exceeds the flat total", () => {
+    const entries = parseJsonlContent(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg_3",
+          model: "claude-opus-5",
+          usage: {
+            cache_creation_input_tokens: 100,
+            cache_creation: { ephemeral_1h_input_tokens: 500 },
+          },
+        },
+      }),
+    );
+    expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(100);
   });
 });

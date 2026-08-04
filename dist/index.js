@@ -1888,12 +1888,19 @@ function normalizeEntry(raw) {
 	const model = message?.["model"] ?? raw["model"];
 	const usage = message?.["usage"] ?? raw["usage"];
 	if (typeof model === "string") entry.model = model;
-	if (usage && typeof usage === "object") entry.usage = {
-		input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
-		output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
-		cache_creation_input_tokens: typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : void 0,
-		cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
-	};
+	if (usage && typeof usage === "object") {
+		const cacheCreation = typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null ? usage["cache_creation"] : void 0;
+		const flatCacheCreation = typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : 0;
+		const raw1h = cacheCreation?.["ephemeral_1h_input_tokens"];
+		const cacheCreation1h = typeof raw1h === "number" && raw1h > 0 ? Math.min(raw1h, flatCacheCreation) : 0;
+		entry.usage = {
+			input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
+			output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
+			cache_creation_input_tokens: typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : void 0,
+			cache_creation_1h_input_tokens: cacheCreation1h,
+			cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
+		};
+	}
 	return entry;
 }
 function isEntryFromToday(entry, now = new Date()) {
