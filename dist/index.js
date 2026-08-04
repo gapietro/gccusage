@@ -25,10 +25,10 @@ import process$1 from "node:process";
 import * as os$1 from "node:os";
 import os, { homedir } from "node:os";
 import tty from "node:tty";
-import { execSync, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import * as crypto from "node:crypto";
 import { createHash } from "node:crypto";
+import { execSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 //#region node_modules/valibot/dist/index.mjs
 let store$4;
@@ -1746,6 +1746,10 @@ function getClaudeDataDir() {
 }
 function getProjectsDir() {
 	return path$10.join(getClaudeDataDir(), "projects");
+}
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+function shardKey(sessionId) {
+	return SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
@@ -4115,7 +4119,6 @@ const LegacyEntrySchema = object({
 	updatedAt: fallback(optional(number()), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
-const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function getShardDir() {
 	return path$4.join(getCacheDir(), "daily");
 }
@@ -4128,8 +4131,7 @@ function getLegacyPath() {
 * is no shared read-modify-write left to lose an update.
 */
 function shardPath(sessionId) {
-	const key = SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-	return path$4.join(getShardDir(), `${key}.json`);
+	return path$4.join(getShardDir(), `${shardKey(sessionId)}.json`);
 }
 function dateStr(d) {
 	const y = d.getFullYear();

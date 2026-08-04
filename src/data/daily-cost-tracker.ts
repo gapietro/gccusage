@@ -1,8 +1,7 @@
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as v from "valibot";
-import { getCacheDir } from "../utils/paths.js";
+import { getCacheDir, shardKey } from "../utils/paths.js";
 import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 
 export type CostSource = "stdin" | "calculated";
@@ -51,10 +50,6 @@ const LegacyEntrySchema = v.object({
 
 const STALE_SESSION_MS = 48 * 3600 * 1000;
 
-// The UUIDs Claude Code sends. Anything else is hashed rather than trusted:
-// sessionId arrives from stdin and must never reach a path unchecked.
-const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
-
 function getShardDir(): string {
   return path.join(getCacheDir(), "daily");
 }
@@ -69,10 +64,7 @@ function getLegacyPath(): string {
  * is no shared read-modify-write left to lose an update.
  */
 function shardPath(sessionId: string): string {
-  const key = SAFE_SESSION_ID.test(sessionId)
-    ? sessionId
-    : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-  return path.join(getShardDir(), `${key}.json`);
+  return path.join(getShardDir(), `${shardKey(sessionId)}.json`);
 }
 
 function dateStr(d: Date): string {
