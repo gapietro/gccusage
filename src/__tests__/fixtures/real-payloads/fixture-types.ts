@@ -62,14 +62,15 @@ export interface RealPayloadFixture {
   /**
    * Deliberately chosen test inputs, NOT recordings. `turnCount` lives here,
    * separate from `derived`, because `src/data/turn-tracker.ts`'s
-   * `trackTurn()` is a live, single-slot global cache
-   * (`~/.cache/gccusage/turn-count.json`, one `sessionId` field at a time) —
-   * its per-session history cannot be reconstructed after the fact.
-   * Generating fixtures for three different session ids back-to-back in one
-   * process makes each call see a session-id mismatch, reset the cache to 0,
-   * and increment to 1 — a "recorded" turnCount would only encode generation
-   * order, not real pipeline output. Everything under `derived`, by
-   * contrast, IS a real recording and must never be hand-edited.
+   * `trackTurn()` is now sharded per session id (`<cacheDir>/turns/<shardKey
+   * (sessionId)>.json`, #99) rather than a single global file — but that
+   * does not make a recorded value meaningful. Generating fixtures for three
+   * different session ids in one process creates a *fresh* shard per session
+   * id, and a fresh shard always starts at count 1: a "recorded" turnCount
+   * would still only encode generation order (which fixture ran first),
+   * never anything resembling a real session's accumulated turn count.
+   * Everything under `derived`, by contrast, IS a real recording and must
+   * never be hand-edited.
    */
   controlled: {
     turnCount: number;

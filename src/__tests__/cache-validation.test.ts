@@ -62,10 +62,6 @@ function write(name: string, contents: string): void {
   fs.writeFileSync(path.join(tmpDir, "gccusage", name), contents);
 }
 
-function read(name: string): unknown {
-  return JSON.parse(fs.readFileSync(path.join(tmpDir, "gccusage", name), "utf-8"));
-}
-
 describe("statusline cache validation", () => {
   const HOUR = 3_600_000;
 

@@ -183,7 +183,13 @@ describe("trackTurn pruning", () => {
     expect(shardFiles()).toContain("other.json");
   });
 
-  it("deletes the pre-shard turn-count.json", () => {
+  // This calls trackTurn directly, bypassing the layout gate in pipeline.ts
+  // (#99) that decides whether trackTurn ever runs at all. It pins that the
+  // unlink itself works, not that every user gets it: in production this
+  // path only runs for the minority who configure `turn-counter` — everyone
+  // else keeps the legacy file forever. Do not read this test as coverage of
+  // the gated (default) case.
+  it("deletes the pre-shard turn-count.json when trackTurn runs", () => {
     const legacy = path.join(tmpDir, "gccusage", "turn-count.json");
     fs.mkdirSync(path.join(tmpDir, "gccusage"), { recursive: true });
     fs.writeFileSync(legacy, JSON.stringify({ sessionId: "old", count: 12 }));

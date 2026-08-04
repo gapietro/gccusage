@@ -62,6 +62,13 @@ function pruneStaleShards(now: number): void {
   // The pre-shard global file. Its value is deliberately not migrated: it
   // holds one count, for one session, for a widget in no default layout, and
   // the counter resets on session change by design.
+  //
+  // This unlink only runs inside trackTurn, which the gate at pipeline.ts
+  // restricts to users who configured `turn-counter` (#99). Every existing
+  // user has this file (the old call was unconditional), but it is removed
+  // only for that minority; everyone else keeps a ~50-byte orphan on disk
+  // indefinitely, an accepted cost of not adding an unconditional unlink back
+  // to every render.
   try {
     fs.unlinkSync(getLegacyTurnPath());
   } catch {

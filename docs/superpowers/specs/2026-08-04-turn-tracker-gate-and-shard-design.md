@@ -136,8 +136,15 @@ independently stale.
 The sweep:
 
 - removes shards whose `updatedAt` is older than 48h, and
-- unlinks the legacy `turn-count.json` if present, so the old global file does
-  not linger as orphaned litter.
+- unlinks the legacy `turn-count.json` if present.
+
+That unlink is reachable only through `trackTurn`, which the layout gate
+above restricts to users who configured `turn-counter`. Every existing user
+has this file (the old call was unconditional), but only that minority will
+ever have it removed — for everyone else a ~50-byte orphan remains
+indefinitely. That is an accepted cost, not a cleanup: reaching every user
+would mean an unconditional unlink attempt on every render, the exact I/O
+this gate exists to remove.
 
 The 48h threshold is defined locally in `turn-tracker.ts` rather than imported
 from `daily-cost-tracker.ts`. The two stores agree on the number today but
