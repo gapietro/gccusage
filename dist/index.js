@@ -2745,8 +2745,15 @@ async function fetchPricing(ttlMs) {
 * spawn at source.
 */
 const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
+/**
+* Exported so tests can seed the stamp to suppress the spawn, and assert it
+* was not rewritten. A test that hardcodes the name keeps passing if this is
+* renamed — it would seed a path nothing reads, and silently get a refresher
+* again (#122).
+*/
+const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
 function stampPath() {
-	return path$6.join(getCacheDir(), "pricing-refresh-attempt.json");
+	return path$6.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
 }
 function attemptedRecently() {
 	try {

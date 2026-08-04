@@ -13,8 +13,16 @@ import { writeJsonAtomic } from "../utils/atomic-json.js";
  */
 export const REFRESH_BACKOFF_MS = 10 * 60 * 1000;
 
+/**
+ * Exported so tests can seed the stamp to suppress the spawn, and assert it
+ * was not rewritten. A test that hardcodes the name keeps passing if this is
+ * renamed — it would seed a path nothing reads, and silently get a refresher
+ * again (#122).
+ */
+export const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
+
 function stampPath(): string {
-  return path.join(getCacheDir(), "pricing-refresh-attempt.json");
+  return path.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
 }
 
 function attemptedRecently(): boolean {
