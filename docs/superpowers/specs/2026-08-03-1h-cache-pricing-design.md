@@ -160,11 +160,26 @@ is already a `RateSet` so it carries its own 1-hour rate.
 
 ### D5 — The count is clamped at ingestion
 
-4 of 98,722 lines have `5m + 1h != flat` — all subagent streaming partials,
-including a `flat: 0` line whose breakdown reports 1,145. Unclamped,
-`calculateCost` subtracts and produces a negative standard bucket.
+`calculateCost` computes the 5-minute bucket by subtraction, so a 1-hour count
+exceeding `cacheCreationTokens` yields a negative bucket and a cost below the
+truth — the same failure shape `premium` guards against.
 
-`cacheCreation1hTokens` is clamped to `cacheCreationTokens` where it is read.
+**This never happens in observed data.** Across 98,722 usage-bearing lines,
+`ephemeral_1h_input_tokens > cache_creation_input_tokens` occurs **zero**
+times. 4 lines do have `5m + 1h != flat`, but every one of those is a
+discrepancy in the *5-minute* field on a subagent streaming partial, which this
+change never reads.
+
+The clamp is therefore **purely defensive** — a guard against a malformed or
+hand-edited transcript, not a fix for a shape the corpus exhibits. It is worth
+having because it is one `Math.min` at the boundary and the alternative failure
+is a silent under-count, but the test that covers it must be labelled as
+synthetic corruption rather than dressed up as a real-world case.
+
+`cacheCreation1hTokens` is clamped to `cacheCreationTokens` in `normalizeEntry`,
+where the raw usage object is read.
+
+`rateCounts` is deliberately **not** additionally guarded (see below).
 
 `rateCounts` is deliberately **not** guarded with `Math.max(0, ...)`. That
 would hide corruption rather than prevent it, and `premium` is not guarded
@@ -230,11 +245,21 @@ caught: without the bump, a `pricing.json` written by the old parser lacks
 `cacheCreation1hCostPerToken`, fails the new `COST_KEYS` bounds, and every
 model is dropped for up to the 24h TTL.
 
-**Ordering constraint for the plan:** `npm run pricing` must regenerate
-`FALLBACK_PRICING` *before* the field becomes required, or every snapshot entry
-fails bounds and the offline path prices nothing. The generator runs through
-`parseLitellmPricing`, so the field appears automatically once the parser sets
-it.
+**Ordering constraint, within a single commit.** The snapshot cannot be
+regenerated *before* the parser change, because the generator produces the new
+field only once `parseLitellmPricing` emits it. Nor can the field become
+required before regeneration, or every snapshot entry fails bounds and the
+offline path prices nothing. The only correct order is: parser emits it →
+`npm run pricing` regenerates → the field joins `COST_KEYS`. All three land
+together; any commit between them is broken.
+
+TypeScript enforces the middle step for free: `FALLBACK_PRICING` is a typed
+`PricingTable` literal, so the moment `RateSet` gains a required field, the
+checked-in snapshot fails `tsc` until it is regenerated. `serializeTable` uses
+a bare `JSON.stringify`, so it needs no change to emit the new field.
+
+`npm run pricing` **fetches the live feed** — it is the one step here that
+needs network.
 
 **Build constraint:** every commit touching `src/` runs `npm run build` and
 stages `dist/index.js`. Enforced by CI's `bundle-drift` job.
@@ -246,8 +271,11 @@ stages `dist/index.js`. Enforced by CI's `bundle-drift` job.
 - **The accepted gap is asserted, not just documented.** `claude-3-haiku`'s 20x
   value must *survive*. This test fails loudly if someone later swaps
   monotonicity for a band without revisiting D2.
-- **Subset invariant.** The `flat: 0` / `1h: 1145` shape produces a
-  non-negative cost.
+- **Subset invariant (synthetic).** A hand-built usage object with
+  `cache_creation_input_tokens: 100` and `ephemeral_1h_input_tokens: 500` is
+  clamped to 100, so the 5-minute bucket is 0 rather than -400. The test names
+  itself as synthetic corruption: no such line exists in the corpus (0 of
+  98,722), and a future reader must not mistake it for a real-world shape.
 - **Cross product.** A Sonnet 4.5 request above 200k with 1-hour cache writes
   bills `above_1hr_above_200k`, and not any of the other three rates.
 - **Cache migration.** An old-format `today-aggregates.json` and an old-format
