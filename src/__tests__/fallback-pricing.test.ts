@@ -138,6 +138,7 @@ if (process.env["UPDATE_FALLBACK_PRICING"]) {
           pricing.inputCostPerToken,
           pricing.outputCostPerToken,
           pricing.cacheCreationCostPerToken,
+          pricing.cacheCreation1hCostPerToken,
           pricing.cacheReadCostPerToken,
         ];
         for (const rate of rates) {
@@ -152,6 +153,13 @@ if (process.env["UPDATE_FALLBACK_PRICING"]) {
           pricing.cacheReadCostPerToken,
           `${model}: cache read priced above input`,
         ).toBeLessThanOrEqual(pricing.inputCostPerToken);
+        // A longer TTL cannot cost less (spec D2). claude-3-haiku-20240307
+        // deliberately carries an inflated 1-hour rate (6e-6 against a 3e-7
+        // five-minute rate) — >= still holds for it, and it must keep passing.
+        expect(
+          pricing.cacheCreation1hCostPerToken,
+          `${model}: 1-hour cache write priced below the 5-minute rate`,
+        ).toBeGreaterThanOrEqual(pricing.cacheCreationCostPerToken);
 
         const tier = pricing.above200k;
         if (tier) {
@@ -159,6 +167,7 @@ if (process.env["UPDATE_FALLBACK_PRICING"]) {
             tier.inputCostPerToken,
             tier.outputCostPerToken,
             tier.cacheCreationCostPerToken,
+            tier.cacheCreation1hCostPerToken,
             tier.cacheReadCostPerToken,
           ]) {
             expect(Number.isFinite(rate), `${model}: non-finite tier rate`).toBe(true);

@@ -68,6 +68,16 @@ describe("sanitisePricingTable", () => {
     });
     expect(Object.keys(result)).toEqual(["good"]);
   });
+
+  // COST_KEYS is what makes this reachable: an entry missing the 1-hour rate
+  // is exactly as invalid as one missing any other rate. Without the key in
+  // COST_KEYS, this entry would sail through sanitisation with an `undefined`
+  // cacheCreation1hCostPerToken and later yield a NaN cost (#118 review, I1).
+  it("drops an entry missing cacheCreation1hCostPerToken", () => {
+    const { cacheCreation1hCostPerToken: _omitted, ...missing1h } = pricing();
+    const result = sanitisePricingTable({ good: pricing(), missing1h });
+    expect(Object.keys(result)).toEqual(["good"]);
+  });
 });
 
 describe("anchorToSnapshot", () => {
@@ -161,6 +171,20 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
 
     expect(result).not.toBeNull();
     expect(result!.inputCostPerToken).toBe(base.inputCostPerToken);
+    expect(result!.above200k).toBeUndefined();
+  });
+
+  // Same check, the 1-hour rate specifically (#118 review, I1): COST_KEYS is
+  // what makes isSaneTier's `tier[key] >= base[key]` sweep cover this field at
+  // all.
+  it("strips a tier priced below its standard counterpart on the 1-hour rate, keeping the model", () => {
+    const result = sanitiseModelPricing({
+      ...base,
+      above200k: { ...base, cacheCreation1hCostPerToken: 0.0000001 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.cacheCreation1hCostPerToken).toBe(base.cacheCreation1hCostPerToken);
     expect(result!.above200k).toBeUndefined();
   });
 

@@ -92,6 +92,18 @@ export async function refreshPricing(): Promise<boolean> {
  * eventually reject a genuine repricing (#91's documented accepted risk).
  * The cost is that `claude-3-haiku`'s 20x value survives — unreachable in
  * practice, since Claude Code cannot run Haiku 3 (spec D2).
+ *
+ * Latent interaction with `isSaneTier` (pricing-validation.ts): that
+ * function now compares a tier's 1-hour rate against its OWN base's, not
+ * against the derivation this function would have produced. A model shaped
+ * like `claude-3-haiku` — an inflated base 1-hour rate let through by design
+ * above — that also published an above-200k tier without the tier's own
+ * 1-hour cross-product field would derive that tier's rate as `tierInput x
+ * 2`, land below the inflated base, and have the WHOLE tier stripped
+ * (`approximated`), not just the 1-hour field repaired. No model in the
+ * current feed has that shape, so this is latent, not live; D2's residual
+ * paragraph names only the hand-edited-`pricing.json` case, so this
+ * consequence is recorded here instead.
  */
 function resolveCache1hRate(
   published: unknown,

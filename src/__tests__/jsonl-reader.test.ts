@@ -224,4 +224,26 @@ describe("1-hour cache creation tokens", () => {
     );
     expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(100);
   });
+
+  // SYNTHETIC CORRUPTION, same as above. Guards the `raw1h > 0` guard in
+  // normalizeEntry (#118 review, M1): relaxing it to `typeof raw1h ===
+  // "number"` would let a negative count through Math.min unclamped, handing
+  // calculateCost a negative 1-hour bucket that over-charges the 5-minute
+  // remainder and negates the 1-hour term.
+  it("treats a negative ephemeral_1h count as zero", () => {
+    const entries = parseJsonlContent(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg_4",
+          model: "claude-opus-5",
+          usage: {
+            cache_creation_input_tokens: 100,
+            cache_creation: { ephemeral_1h_input_tokens: -50 },
+          },
+        },
+      }),
+    );
+    expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(0);
+  });
 });
