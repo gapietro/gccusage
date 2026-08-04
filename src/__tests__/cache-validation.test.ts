@@ -381,9 +381,19 @@ describe("pricing cache version validation", () => {
 
   // The existing "version does not match" test uses PRICING_CACHE_VERSION + 1,
   // which is version-RELATIVE: it keeps passing after any bump without ever
-  // proving the bump did its job. This pins the literal old version, so it
-  // fails if someone reverts PRICING_CACHE_VERSION to 1.
-  it("rejects a literal v1 cache, whose entries predate the 1-hour rate", () => {
+  // proving the bump did its job. This pins the literal old version.
+  //
+  // The entry is deliberately given cacheCreation1hCostPerToken — a shape
+  // COST_KEYS bounds would accept on its own — so the only thing that can
+  // reject this fixture is the envelope's version literal. Without that field
+  // the bounds check rejects the entry independently of the envelope, and
+  // reverting PRICING_CACHE_VERSION to 1 would no longer turn this test red
+  // (confirmed: that was the exact vacuity found in the first pass). A
+  // realistic pre-#118 file — entry missing the field, as an old parser would
+  // actually have written — is still rejected by BOTH layers; that
+  // belt-and-suspenders behavior is what made the original fixture blind to
+  // this specific mutation.
+  it("rejects a v1 cache envelope even when its entries are otherwise valid", () => {
     write(
       "pricing.json",
       JSON.stringify({
@@ -394,13 +404,12 @@ describe("pricing cache version validation", () => {
             inputCostPerToken: 0.000005,
             outputCostPerToken: 0.000025,
             cacheCreationCostPerToken: 0.00000625,
+            cacheCreation1hCostPerToken: 0.00001,
             cacheReadCostPerToken: 0.0000005,
           },
         },
       }),
     );
-    // Rejected at the envelope. Were it accepted, every entry would then fail
-    // the new COST_KEYS bounds one by one and empty the table for a full TTL.
     expect(loadPricingCacheEntry()).toBeNull();
   });
 });

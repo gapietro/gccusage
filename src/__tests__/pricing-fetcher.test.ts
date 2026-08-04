@@ -310,6 +310,14 @@ describe("1-hour cache creation rate", () => {
   });
 
   it("reads the above-200k cross-product rate onto the tier", () => {
+    // The cross-product value (1.5e-5) is deliberately NOT tierInput x 2
+    // (which would be 1.2e-5) and is ABOVE the tier's cache-creation cost
+    // (7.5e-6), so this test cannot be satisfied by any path other than
+    // actually reading TIER_FIELDS.cacheCreation1hAbove200k: misreading the
+    // base field (6e-6, below cacheCreationCost) repairs to 1.2e-5, and a
+    // parser that ignored the field entirely and derived tierInput x 2 also
+    // lands on 1.2e-5. Both wrong answers coincide with each other but not
+    // with the correct 1.5e-5 — a derivation cannot masquerade as a read.
     const table = parseLitellmPricing({
       "claude-sonnet-4-5": {
         input_cost_per_token: 3e-6,
@@ -319,10 +327,10 @@ describe("1-hour cache creation rate", () => {
         input_cost_per_token_above_200k_tokens: 6e-6,
         output_cost_per_token_above_200k_tokens: 2.25e-5,
         cache_creation_input_token_cost_above_200k_tokens: 7.5e-6,
-        cache_creation_input_token_cost_above_1hr_above_200k_tokens: 1.2e-5,
+        cache_creation_input_token_cost_above_1hr_above_200k_tokens: 1.5e-5,
       },
     });
-    expect(table["claude-sonnet-4-5"]!.above200k!.cacheCreation1hCostPerToken).toBe(1.2e-5);
+    expect(table["claude-sonnet-4-5"]!.above200k!.cacheCreation1hCostPerToken).toBe(1.5e-5);
   });
 
   it("derives the tier's 1-hour rate from the TIER input when absent", () => {
