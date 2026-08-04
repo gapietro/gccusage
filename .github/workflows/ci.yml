@@ -56,6 +56,31 @@ jobs:
 
       - run: npm test
 
+  coverage:
+    runs-on: ubuntu-latest
+    # Separate from the matrix on purpose. `npm test` above is the honest
+    # signal that the code works, on both supported runtimes, uninstrumented.
+    # This job asks a different question — is any single file unmeasured — and
+    # the answer does not vary by Node version, so it runs once.
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      # `prepare` builds dist/index.js during this, which the suite needs:
+      # the concurrency and CLI tests spawn the shipped bundle as a real child
+      # process rather than importing src.
+      - run: npm ci
+
+      # Fails when any file on the production path drops below 70% statements.
+      # The bar is per-file, not global: coverage was 87.78% overall when the
+      # audit ran and every correctness defect it found still lived in a file
+      # at 0-46%, which a global average had comfortably hidden (#95).
+      - run: npm run coverage
+
   bundle-drift:
     runs-on: ubuntu-latest
     steps:
