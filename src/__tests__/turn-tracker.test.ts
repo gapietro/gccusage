@@ -150,6 +150,17 @@ describe("trackTurn pruning", () => {
     expect(shardFiles()).toEqual(["ancient.json", "fresh.json"]);
   });
 
+  it("leaves a shard it cannot parse alone rather than deleting it", () => {
+    // A corrupt or unreadable shard is indistinguishable from outside — the
+    // sweep must not treat "failed to read" as "safe to delete". Written
+    // under a different session's name so the sweep's target survives the
+    // current session's own (immediate) rewrite, which would otherwise mask
+    // a wrongful delete.
+    writeShard("other.json", "null");
+    trackTurn("fresh");
+    expect(shardFiles()).toContain("other.json");
+  });
+
   it("deletes the pre-shard turn-count.json", () => {
     const legacy = path.join(tmpDir, "gccusage", "turn-count.json");
     fs.mkdirSync(path.join(tmpDir, "gccusage"), { recursive: true });
