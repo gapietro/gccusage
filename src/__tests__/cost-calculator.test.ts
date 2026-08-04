@@ -522,4 +522,48 @@ describe("1-hour cache write pricing", () => {
     // All premium: 600 x 1.25e-5 + 400 x 2e-5 = 7.5e-3 + 8e-3
     expect(cost).toBeCloseTo(0.0155, 10);
   });
+
+  // The test above sets premium equal to metrics, so `standard` is all
+  // zeros and the new `cacheCreation1hTokens` subtraction line evaluates to
+  // 0 regardless of what it computes — a sign flip or a copy-paste of the
+  // neighbouring `cacheCreationTokens` subtraction both survive it
+  // undetected, since both also net to 0 when top-level equals premium.
+  // This test populates all FOUR cells of the {5m,1h} x {standard,premium}
+  // matrix with distinct, non-zero values so a wrong expression cannot land
+  // on the right total by degenerating to zero.
+  it("bills all four cells of the {5m,1h} x {standard,premium} matrix distinctly", () => {
+    const tiered: ModelPricing = {
+      ...pricing,
+      above200k: {
+        inputCostPerToken: 1e-5,
+        outputCostPerToken: 5e-5,
+        cacheCreationCostPerToken: 1.25e-5,
+        cacheCreation1hCostPerToken: 2e-5,
+        cacheReadCostPerToken: 1e-6,
+      },
+    };
+    const cost = calculateCost(
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 400,
+        cacheReadTokens: 0,
+        premium: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 600,
+          cacheCreation1hTokens: 100,
+          cacheReadTokens: 0,
+        },
+      },
+      tiered,
+    );
+    // standard: cacheCreationTokens 400, cacheCreation1hTokens 300, so
+    // 5-minute = 100 -> 100 x 6.25e-6 + 300 x 1e-5 = 0.003625
+    // premium: cacheCreationTokens 600, cacheCreation1hTokens 100, so
+    // 5-minute = 500 -> 500 x 1.25e-5 + 100 x 2e-5 = 0.00825
+    // total = 0.011875
+    expect(cost).toBeCloseTo(0.011875, 10);
+  });
 });

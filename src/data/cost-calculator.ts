@@ -4,7 +4,12 @@ import type { BurnRate } from "../types/burn-rate.js";
 
 function rateCounts(counts: TokenCounts, rates: RateSet): number {
   // 5-minute writes are the remainder: cacheCreation1hTokens is a SUBSET of
-  // cacheCreationTokens, clamped at ingestion so this cannot go negative.
+  // cacheCreationTokens. `jsonl-reader.ts` clamps it at ingestion so a live
+  // session cannot go negative here, but `TokenCountsSchema` in
+  // today-aggregate-cache.ts enforces only per-field non-negativity, not
+  // `cacheCreation1hTokens <= cacheCreationTokens` — the same gap its own
+  // comment admits for `premium <= base` — so a corrupted cache file can
+  // still drive this negative.
   const cacheCreation5m = counts.cacheCreationTokens - counts.cacheCreation1hTokens;
   return (
     counts.inputTokens * rates.inputCostPerToken +

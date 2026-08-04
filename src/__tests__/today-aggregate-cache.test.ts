@@ -332,6 +332,13 @@ describe("getTodayAggregate", () => {
   // `cacheCreation1hTokens` must be reused, not re-parsed. Without this half,
   // the re-parse assertion above would pass even if caching were disabled
   // outright rather than specifically rejecting the pre-split shape.
+  //
+  // The stored count is a bogus 999_999 (mirroring the migration test above),
+  // not the real re-parsed value of 100, so the assertion on the returned
+  // total proves cached CONTENT flowed through the cache hit — not just that
+  // `parseJsonlFile` went uncalled, which `not.toContain` alone cannot rule
+  // out (a hit that discarded the cached numbers and returned zeroes would
+  // also leave `parsedPaths()` empty).
   it("reuses a cached aggregate that already carries cacheCreation1hTokens (#118)", () => {
     const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
     const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
@@ -340,7 +347,7 @@ describe("getTodayAggregate", () => {
     const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
     const stat = fs.statSync(filePath);
     const postSplitCounts = {
-      inputTokens: 100,
+      inputTokens: 999_999,
       outputTokens: 0,
       cacheCreationTokens: 0,
       cacheCreation1hTokens: 0,
@@ -362,8 +369,9 @@ describe("getTodayAggregate", () => {
     );
     vi.mocked(parseJsonlFile).mockClear();
 
-    getTodayAggregate(NOW);
+    const result = getTodayAggregate(NOW);
 
     expect(parsedPaths()).not.toContain(filePath);
+    expect(result.totals.inputTokens).toBe(999_999);
   });
 });
