@@ -152,7 +152,42 @@ if (process.env["UPDATE_FALLBACK_PRICING"]) {
           pricing.cacheReadCostPerToken,
           `${model}: cache read priced above input`,
         ).toBeLessThanOrEqual(pricing.inputCostPerToken);
+
+        const tier = pricing.above200k;
+        if (tier) {
+          for (const rate of [
+            tier.inputCostPerToken,
+            tier.outputCostPerToken,
+            tier.cacheCreationCostPerToken,
+            tier.cacheReadCostPerToken,
+          ]) {
+            expect(Number.isFinite(rate), `${model}: non-finite tier rate`).toBe(true);
+            expect(rate, `${model}: non-positive tier rate`).toBeGreaterThan(0);
+          }
+          expect(
+            tier.inputCostPerToken,
+            `${model}: premium input priced below standard`,
+          ).toBeGreaterThanOrEqual(pricing.inputCostPerToken);
+          expect(
+            tier.outputCostPerToken,
+            `${model}: premium output priced below standard`,
+          ).toBeGreaterThanOrEqual(pricing.outputCostPerToken);
+        }
       }
+    });
+
+    it("carries the tier the feed publishes for the long-context Sonnets", () => {
+      // Verified against the live feed on 2026-08-03. If Anthropic or LiteLLM
+      // withdraws the tier this fails loudly, which is the point: the snapshot
+      // silently losing a rate is how #82 happened.
+      expect(FALLBACK_PRICING["claude-sonnet-4-5"]?.above200k).toBeDefined();
+      expect(FALLBACK_PRICING["claude-sonnet-4-20250514"]?.above200k).toBeDefined();
+    });
+
+    it("has no invented tier for a model the feed does not publish one for", () => {
+      // The whole point of #103's design: an unpublished premium is flagged,
+      // never guessed at.
+      expect(FALLBACK_PRICING["claude-opus-5"]?.above200k).toBeUndefined();
     });
   });
 }

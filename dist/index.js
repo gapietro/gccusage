@@ -2124,19 +2124,37 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-4-5": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-4-5-20250929": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-sonnet-5": {
 		"inputCostPerToken": 2e-6,
@@ -2154,7 +2172,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	},
 	"claude-opus-4-1": {
 		"inputCostPerToken": 15e-6,
@@ -2232,7 +2256,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
-		"cacheReadCostPerToken": 3e-7
+		"cacheReadCostPerToken": 3e-7,
+		"above200k": {
+			"inputCostPerToken": 6e-6,
+			"outputCostPerToken": 225e-7,
+			"cacheCreationCostPerToken": 75e-7,
+			"cacheReadCostPerToken": 6e-7
+		}
 	}
 };
 
