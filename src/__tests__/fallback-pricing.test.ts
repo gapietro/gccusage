@@ -181,6 +181,16 @@ if (process.env["UPDATE_FALLBACK_PRICING"]) {
             tier.outputCostPerToken,
             `${model}: premium output priced below standard`,
           ).toBeGreaterThanOrEqual(pricing.outputCostPerToken);
+          // The same TTL rule as the base rates, but against the tier's OWN
+          // 5-minute rate — the comparison isSaneTier does not make, since it
+          // compares each tier rate against the base's (#124). Unreachable
+          // today: parseTier resolves the tier's 1-hour rate through the same
+          // resolveCache1hRate repair, against that same tier rate. This pins
+          // the invariant so a regenerated snapshot cannot quietly drop it.
+          expect(
+            tier.cacheCreation1hCostPerToken,
+            `${model}: premium 1-hour cache write priced below the premium 5-minute rate`,
+          ).toBeGreaterThanOrEqual(tier.cacheCreationCostPerToken);
         }
       }
     });

@@ -143,6 +143,27 @@ drew — cache reads get schema validation, not semantic invariants — and addi
 a second enforcement point here would put the invariant in two places that must
 agree.
 
+**Second residual, documented not fixed (#125):** an inflated *base* 1-hour rate
+can strip a model's whole above-200k tier. `cacheCreation1hCostPerToken` is a
+member of `COST_KEYS`, so `isSaneTier` compares a tier's 1-hour rate against the
+**base's** — not against the derivation `resolveCache1hRate` would have produced.
+Consider a model shaped like `claude-3-haiku`, whose implausibly-high base rate
+this decision admits by design, that *also* publishes an above-200k tier without
+the cross-product field `cache_creation_input_token_cost_above_1hr_above_200k_tokens`.
+Its tier rate derives to `tierInput x 2`, which can land below the inflated base
+rate; `isSaneTier` rejects the tier and `sanitiseModelPricing` strips it. The
+model then silently loses long-context pricing altogether and is flagged
+`approximated` — because its *base* rate was bad, not its tier.
+
+Latent, not live: no model in the feed has that shape. All five keys carrying an
+above-200k tier have base `6e-6` and tier `1.2e-5`, and `claude-3-haiku` carries
+no tier (verified against the live feed on 2026-08-03).
+
+Deliberately not fixed in code. Suppressing it means either a plausibility band —
+rejected above, for reasons that still hold — or exempting the 1-hour key from
+`isSaneTier`, which would surrender real protection to guard a case that does not
+occur. The honest outcome is a documented consequence.
+
 ### D4 — The 1-hour count is a subset, and the rate is required
 
 `cacheCreation1hTokens` is a **subset** of `cacheCreationTokens`, exactly as

@@ -2647,9 +2647,8 @@ async function refreshPricing() {
 * 1-hour cross-product field would derive that tier's rate as `tierInput x
 * 2`, land below the inflated base, and have the WHOLE tier stripped
 * (`approximated`), not just the 1-hour field repaired. No model in the
-* current feed has that shape, so this is latent, not live; D2's residual
-* paragraph names only the hand-edited-`pricing.json` case, so this
-* consequence is recorded here instead.
+* current feed has that shape, so this is latent, not live — see D2's second
+* residual paragraph for why it is documented rather than suppressed (#125).
 */
 function resolveCache1hRate(published, inputCost, cacheCreationCost) {
 	const derived = inputCost * CACHE_1H_INPUT_MULTIPLIER;
