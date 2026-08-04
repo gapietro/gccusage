@@ -70,7 +70,12 @@ function isSaneTier(tier: unknown, base: RateSet): boolean {
   return COST_KEYS.every((key) => rates[key] >= base[key]);
 }
 
-/** Drop the entries that fail bounds, keep the rest. Never all-or-nothing. */
+/**
+ * Drop the entries that fail bounds, keep the rest. Never all-or-nothing —
+ * and per-entry itself isn't all-or-nothing: `sanitiseModelPricing` strips a
+ * failing tier rather than dropping its model, so a table read here can lose
+ * an `above200k` block while keeping the entry it belonged to.
+ */
 export function sanitisePricingTable(table: Record<string, unknown>): PricingTable {
   const out: PricingTable = {};
   for (const [key, value] of Object.entries(table)) {
@@ -134,6 +139,18 @@ function withinDeviation(fetched: number, known: number): boolean {
  * as a model absent from the snapshot does. That is the path by which a
  * newly published tier reaches users — blocking it would defeat the point of
  * consuming the feed.
+ *
+ * Unlike `sanitiseModelPricing`, a drifted tier here drops the WHOLE entry
+ * rather than stripping the tier and keeping the rest. That is not the same
+ * bug in a different place: `sanitiseModelPricing` has nothing behind it, so
+ * dropping the model would leave it unpriced. `anchorToSnapshot` has the
+ * snapshot behind it — a dropped entry falls through the fallback merge in
+ * pricing-fetcher to `known`'s base AND tier together, a record that is
+ * internally coherent. Stripping instead would produce a hybrid — live base,
+ * no tier at all, since the merge replaces whole entries rather than filling
+ * in the missing piece from the snapshot — and would silently cost premium
+ * tokens at standard rates. A tier that moved >10x while its base held still
+ * is corruption of that record; distrust the whole thing.
  */
 function tierWithinDeviation(fetched: ModelPricing, known: ModelPricing): boolean {
   if (!fetched.above200k || !known.above200k) return true;
