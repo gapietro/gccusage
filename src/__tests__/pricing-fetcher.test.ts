@@ -253,15 +253,21 @@ describe("parseLitellmPricing above-200k tier (#103)", () => {
 
 describe("1-hour cache creation rate", () => {
   it("uses the published above_1hr rate", () => {
+    // 1.2e-5 is deliberately NOT input x 2 (which would be 1e-5) — a
+    // resolveCache1hRate that ignored `published` and always returned the
+    // derivation would still pass an expectation of 1e-5. It stays above
+    // cacheCreationCost (6.25e-6) so no repair fires and the published value
+    // passes straight through, diverging from the derivation. Do not "tidy"
+    // this back to a realistic 2x rate; that would silently restore the gap.
     const table = parseLitellmPricing({
       "claude-test-a": {
         input_cost_per_token: 5e-6,
         output_cost_per_token: 2.5e-5,
         cache_creation_input_token_cost: 6.25e-6,
-        cache_creation_input_token_cost_above_1hr: 1e-5,
+        cache_creation_input_token_cost_above_1hr: 1.2e-5,
       },
     });
-    expect(table["claude-test-a"]!.cacheCreation1hCostPerToken).toBe(1e-5);
+    expect(table["claude-test-a"]!.cacheCreation1hCostPerToken).toBe(1.2e-5);
   });
 
   it("derives input x 2 when the feed publishes no 1-hour rate", () => {
@@ -334,12 +340,21 @@ describe("1-hour cache creation rate", () => {
   });
 
   it("derives the tier's 1-hour rate from the TIER input when absent", () => {
+    // The BASE 1-hour field is 9e-6 here, deliberately NOT tierInput x 2
+    // (which would be 1.2e-5, coinciding with the correct derivation below).
+    // If parseTier misread this base field instead of the (absent) tier
+    // field, it would feed 9e-6 into resolveCache1hRate against the tier's
+    // own cacheCreationCost (7.5e-6): 9e-6 is NOT below 7.5e-6, so no repair
+    // fires and 9e-6 passes straight through — diverging from 1.2e-5. Merely
+    // deleting the base field does not close this: `published` would then be
+    // undefined and fall through to the same correct derivation, proving
+    // nothing. Do not "tidy" this back to a realistic 2x rate.
     const table = parseLitellmPricing({
       "claude-sonnet-4-20250514": {
         input_cost_per_token: 3e-6,
         output_cost_per_token: 1.5e-5,
         cache_creation_input_token_cost: 3.75e-6,
-        cache_creation_input_token_cost_above_1hr: 6e-6,
+        cache_creation_input_token_cost_above_1hr: 9e-6,
         input_cost_per_token_above_200k_tokens: 6e-6,
         output_cost_per_token_above_200k_tokens: 2.25e-5,
         cache_creation_input_token_cost_above_200k_tokens: 7.5e-6,
