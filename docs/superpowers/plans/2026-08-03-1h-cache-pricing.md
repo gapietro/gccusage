@@ -353,9 +353,28 @@ The pricing cache is tested in **`src/__tests__/cache-validation.test.ts`**, whi
 
 Note: `SANE` is typed `ModelPricing`, so `npm run typecheck` will require `cacheCreation1hCostPerToken` on it. Add it there (`0.00001`) as part of this step.
 
-- [ ] **Step 11: Run the full suite and typecheck**
+- [ ] **Step 11: Sweep the `RateSet` fixtures, then run the full suite**
 
-Run: `npm run typecheck && npm test`
+`cacheCreation1hCostPerToken` is required, so **every hand-built `RateSet` /
+`ModelPricing` literal in the suite now fails `tsc`** — 33 occurrences of
+`cacheCreationCostPerToken` across the test files, concentrated in
+`cache-validation.test.ts` (6), `pricing-fetcher.test.ts` (3),
+`pipeline.test.ts` (1), and `today-read-flatness.test.ts` (1). Not every
+occurrence is a literal needing the field; some are property reads.
+
+Run: `npm run typecheck`
+
+Work through the errors, adding `cacheCreation1hCostPerToken` to each failing
+literal. Use a value consistent with that fixture's own input rate
+(`inputCostPerToken * 2`) so the fixture stays internally coherent and does not
+trip `isSaneTier`'s tier-above-base check once Step 8 lands.
+
+**Do not change any existing expected cost value.** Existing assertions cover
+metrics whose `cacheCreation1hTokens` is absent until Task 3, so no cost should
+move in this task. If one does, stop — the rate is being applied to tokens that
+have not been split yet, and something in Step 5 is wrong.
+
+Then run: `npm run typecheck && npm test`
 Expected: PASS. If `fallback-pricing.ts` fails typecheck, Step 7 did not run.
 
 - [ ] **Step 12: Verify the tests are not vacuous**
