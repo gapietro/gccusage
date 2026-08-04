@@ -20,6 +20,7 @@ const PINNED_PRICING = {
     inputCostPerToken: 1 / 1_000_000,
     outputCostPerToken: 0,
     cacheCreationCostPerToken: 0,
+    cacheCreation1hCostPerToken: 2 / 1_000_000,
     cacheReadCostPerToken: 0,
   },
 };
@@ -260,6 +261,7 @@ describe("pricing cache validation", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
   };
 
@@ -325,6 +327,7 @@ describe("pricing cache validation", () => {
     inputCostPerToken: 20e-6,
     outputCostPerToken: 100e-6,
     cacheCreationCostPerToken: 25e-6,
+    cacheCreation1hCostPerToken: 40e-6,
     cacheReadCostPerToken: 2e-6,
   };
 
@@ -346,6 +349,7 @@ describe("pricing cache version validation", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
   };
 
@@ -374,6 +378,31 @@ describe("pricing cache version validation", () => {
     expect(entry).not.toBeNull();
     expect(entry!.data["claude-x"]).toEqual(SANE);
   });
+
+  // The existing "version does not match" test uses PRICING_CACHE_VERSION + 1,
+  // which is version-RELATIVE: it keeps passing after any bump without ever
+  // proving the bump did its job. This pins the literal old version, so it
+  // fails if someone reverts PRICING_CACHE_VERSION to 1.
+  it("rejects a literal v1 cache, whose entries predate the 1-hour rate", () => {
+    write(
+      "pricing.json",
+      JSON.stringify({
+        version: 1,
+        timestamp: Date.now(),
+        data: {
+          "claude-opus-5": {
+            inputCostPerToken: 0.000005,
+            outputCostPerToken: 0.000025,
+            cacheCreationCostPerToken: 0.00000625,
+            cacheReadCostPerToken: 0.0000005,
+          },
+        },
+      }),
+    );
+    // Rejected at the envelope. Were it accepted, every entry would then fail
+    // the new COST_KEYS bounds one by one and empty the table for a full TTL.
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
 });
 
 describe("pricing cache tier validation (#103)", () => {
@@ -388,12 +417,14 @@ describe("pricing cache tier validation (#103)", () => {
             inputCostPerToken: 0.000005,
             outputCostPerToken: 0.000025,
             cacheCreationCostPerToken: 0.00000625,
+            cacheCreation1hCostPerToken: 0.00001,
             cacheReadCostPerToken: 0.0000005,
             // Premium below standard: not a price.
             above200k: {
               inputCostPerToken: 0.0000001,
               outputCostPerToken: 0.0000002,
               cacheCreationCostPerToken: 0.0000003,
+              cacheCreation1hCostPerToken: 0.0000002,
               cacheReadCostPerToken: 0.0000004,
             },
           },

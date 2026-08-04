@@ -6,7 +6,7 @@ import {
 } from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
 import { anchorToSnapshot, sanitiseModelPricing } from "./pricing-validation.js";
-import { TIER_FIELDS } from "./pricing-tiers.js";
+import { TIER_FIELDS, CACHE_1H_FIELD, CACHE_1H_INPUT_MULTIPLIER } from "./pricing-tiers.js";
 
 export const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
@@ -75,6 +75,35 @@ export async function refreshPricing(): Promise<boolean> {
 }
 
 /**
+ * A 1-hour cache write costs more than a 5-minute one, always — a longer TTL
+ * cannot be cheaper. A published rate that undercuts its own 5-minute sibling
+ * is therefore a corrupted record, not a price, and resolves to the derivation
+ * instead.
+ *
+ * This REPAIRS where `isSaneTier` REJECTS, and the asymmetry is deliberate:
+ * a tier can be stripped and the model still prices at standard rates, but
+ * this field is required and has no safe absence state, so rejecting would
+ * mean dropping the whole model over one bad sibling — regressing the
+ * per-entry posture of #92. Repair degrades to exactly the value the model
+ * would have taken had the feed stayed silent.
+ *
+ * Deliberately NOT a plausibility band. Monotonicity is a fact about how
+ * caching works and cannot go stale; a band is a calibration that would
+ * eventually reject a genuine repricing (#91's documented accepted risk).
+ * The cost is that `claude-3-haiku`'s 20x value survives — unreachable in
+ * practice, since Claude Code cannot run Haiku 3 (spec D2).
+ */
+function resolveCache1hRate(
+  published: unknown,
+  inputCost: number,
+  cacheCreationCost: number,
+): number {
+  const derived = inputCost * CACHE_1H_INPUT_MULTIPLIER;
+  if (typeof published !== "number" || !Number.isFinite(published)) return derived;
+  return published < cacheCreationCost ? derived : published;
+}
+
+/**
  * The feed publishes the long-context tier as four sibling fields rather than
  * a nested object. Both premium input and output must be present before a
  * tier is attached: a half-published tier would charge premium input against
@@ -89,10 +118,16 @@ function parseTier(model: Record<string, unknown>): RateSet | null {
 
   const cacheCreation = model[TIER_FIELDS.cacheCreation];
   const cacheRead = model[TIER_FIELDS.cacheRead];
+  const cacheCreationCost = typeof cacheCreation === "number" ? cacheCreation : input * 1.25;
   return {
     inputCostPerToken: input,
     outputCostPerToken: output,
-    cacheCreationCostPerToken: typeof cacheCreation === "number" ? cacheCreation : input * 1.25,
+    cacheCreationCostPerToken: cacheCreationCost,
+    cacheCreation1hCostPerToken: resolveCache1hRate(
+      model[TIER_FIELDS.cacheCreation1hAbove200k],
+      input,
+      cacheCreationCost,
+    ),
     cacheReadCostPerToken: typeof cacheRead === "number" ? cacheRead : input * 0.1,
   };
 }
@@ -108,13 +143,20 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
     const outputCost = model["output_cost_per_token"];
     if (typeof inputCost !== "number" || typeof outputCost !== "number") continue;
 
+    const cacheCreationCost =
+      typeof model["cache_creation_input_token_cost"] === "number"
+        ? model["cache_creation_input_token_cost"]
+        : inputCost * 1.25;
+
     const pricing: ModelPricing = {
       inputCostPerToken: inputCost,
       outputCostPerToken: outputCost,
-      cacheCreationCostPerToken:
-        typeof model["cache_creation_input_token_cost"] === "number"
-          ? model["cache_creation_input_token_cost"]
-          : inputCost * 1.25,
+      cacheCreationCostPerToken: cacheCreationCost,
+      cacheCreation1hCostPerToken: resolveCache1hRate(
+        model[CACHE_1H_FIELD],
+        inputCost,
+        cacheCreationCost,
+      ),
       cacheReadCostPerToken:
         typeof model["cache_read_input_token_cost"] === "number"
           ? model["cache_read_input_token_cost"]

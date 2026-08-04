@@ -13,6 +13,7 @@ describe("calculateCost", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
   };
 
@@ -40,6 +41,7 @@ describe("findPricing", () => {
       inputCostPerToken: 3 / 1_000_000,
       outputCostPerToken: 15 / 1_000_000,
       cacheCreationCostPerToken: 3.75 / 1_000_000,
+      cacheCreation1hCostPerToken: 6 / 1_000_000,
       cacheReadCostPerToken: 0.3 / 1_000_000,
     },
   };
@@ -68,6 +70,7 @@ describe("calculateCostByModel", () => {
         inputCostPerToken: 3 / 1_000_000,
         outputCostPerToken: 15 / 1_000_000,
         cacheCreationCostPerToken: 3.75 / 1_000_000,
+        cacheCreation1hCostPerToken: 6 / 1_000_000,
         cacheReadCostPerToken: 0.3 / 1_000_000,
       },
     };
@@ -124,6 +127,7 @@ describe("calculateBurnRate", () => {
       inputCostPerToken: 3 / 1_000_000,
       outputCostPerToken: 15 / 1_000_000,
       cacheCreationCostPerToken: 3.75 / 1_000_000,
+      cacheCreation1hCostPerToken: 6 / 1_000_000,
       cacheReadCostPerToken: 0.3 / 1_000_000,
     },
   };
@@ -164,12 +168,14 @@ describe("findPricing fuzzy tie-break (#91)", () => {
     inputCostPerToken: 15 / 1_000_000,
     outputCostPerToken: 75 / 1_000_000,
     cacheCreationCostPerToken: 18.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 30 / 1_000_000,
     cacheReadCostPerToken: 1.5 / 1_000_000,
   };
   const specific: ModelPricing = {
     inputCostPerToken: 5 / 1_000_000,
     outputCostPerToken: 25 / 1_000_000,
     cacheCreationCostPerToken: 6.25 / 1_000_000,
+    cacheCreation1hCostPerToken: 10 / 1_000_000,
     cacheReadCostPerToken: 0.5 / 1_000_000,
   };
 
@@ -226,6 +232,7 @@ describe("findPricing forward/reverse direction preference (#108)", () => {
       inputCostPerToken: 0.000005,
       outputCostPerToken: 0.000025,
       cacheCreationCostPerToken: 0.00000625,
+      cacheCreation1hCostPerToken: 0.00001,
       cacheReadCostPerToken: 0.0000005,
     };
     // Snapshot-absent alias, priced ~100x the real rate — this is the
@@ -235,6 +242,7 @@ describe("findPricing forward/reverse direction preference (#108)", () => {
       inputCostPerToken: 0.0005,
       outputCostPerToken: 0.0009,
       cacheCreationCostPerToken: 0.000625,
+      cacheCreation1hCostPerToken: 0.001,
       cacheReadCostPerToken: 0.00005,
     };
 
@@ -257,6 +265,7 @@ describe("findPricing forward/reverse direction preference (#108)", () => {
       inputCostPerToken: 5 / 1_000_000,
       outputCostPerToken: 25 / 1_000_000,
       cacheCreationCostPerToken: 6.25 / 1_000_000,
+      cacheCreation1hCostPerToken: 10 / 1_000_000,
       cacheReadCostPerToken: 0.5 / 1_000_000,
     };
     const table: PricingTable = {
@@ -275,11 +284,13 @@ describe("calculateCost above-200k tier (#103)", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
     above200k: {
       inputCostPerToken: 6 / 1_000_000,
       outputCostPerToken: 22.5 / 1_000_000,
       cacheCreationCostPerToken: 7.5 / 1_000_000,
+      cacheCreation1hCostPerToken: 12 / 1_000_000,
       cacheReadCostPerToken: 0.6 / 1_000_000,
     },
   };
@@ -349,6 +360,7 @@ describe("calculateCostByModel approximated models (#103)", () => {
     inputCostPerToken: 5 / 1_000_000,
     outputCostPerToken: 25 / 1_000_000,
     cacheCreationCostPerToken: 6.25 / 1_000_000,
+    cacheCreation1hCostPerToken: 10 / 1_000_000,
     cacheReadCostPerToken: 0.5 / 1_000_000,
   };
   const tiered: ModelPricing = {
@@ -357,6 +369,7 @@ describe("calculateCostByModel approximated models (#103)", () => {
       inputCostPerToken: 10 / 1_000_000,
       outputCostPerToken: 50 / 1_000_000,
       cacheCreationCostPerToken: 12.5 / 1_000_000,
+      cacheCreation1hCostPerToken: 20 / 1_000_000,
       cacheReadCostPerToken: 1 / 1_000_000,
     },
   };

@@ -18,8 +18,13 @@ interface PricingCacheFile {
  * this cache falls back to; a pre-tier file merged whole-entry over that
  * snapshot would shadow the new tier for up to the cache's full TTL. Exported
  * so a test can pin the exact value rather than restating it.
+ *
+ * Bumped again for #118: `cacheCreation1hCostPerToken` joined COST_KEYS, so a
+ * v1 file written by the old parser lacks it, fails bounds on read, and would
+ * drop EVERY model for up to the full TTL. Rejecting the envelope instead
+ * degrades to FALLBACK_PRICING, which carries the field.
  */
-export const PRICING_CACHE_VERSION = 1;
+export const PRICING_CACHE_VERSION = 2;
 
 // The envelope is validated as a whole; `data` is left as unknown values and
 // filtered per entry below, so one corrupted price drops one model rather than

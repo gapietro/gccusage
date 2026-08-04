@@ -42,6 +42,7 @@ const CACHED_TABLE: PricingTable = {
     inputCostPerToken: 1 / 1_000_000,
     outputCostPerToken: 2 / 1_000_000,
     cacheCreationCostPerToken: 1 / 1_000_000,
+    cacheCreation1hCostPerToken: 2 / 1_000_000,
     cacheReadCostPerToken: 0.1 / 1_000_000,
   },
 };

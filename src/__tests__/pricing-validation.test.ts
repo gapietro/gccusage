@@ -13,6 +13,7 @@ function pricing(overrides: Partial<ModelPricing> = {}): ModelPricing {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
     ...overrides,
   };
@@ -134,6 +135,7 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
     inputCostPerToken: 0.000003,
     outputCostPerToken: 0.000015,
     cacheCreationCostPerToken: 0.00000375,
+    cacheCreation1hCostPerToken: 0.000006,
     cacheReadCostPerToken: 0.0000003,
   };
 
@@ -144,6 +146,7 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
         inputCostPerToken: 0.000006,
         outputCostPerToken: 0.0000225,
         cacheCreationCostPerToken: 0.0000075,
+        cacheCreation1hCostPerToken: 0.000012,
         cacheReadCostPerToken: 0.0000006,
       },
     };
@@ -185,11 +188,13 @@ describe("anchorToSnapshot tier anchoring (#103)", () => {
     inputCostPerToken: 0.000003,
     outputCostPerToken: 0.000015,
     cacheCreationCostPerToken: 0.00000375,
+    cacheCreation1hCostPerToken: 0.000006,
     cacheReadCostPerToken: 0.0000003,
     above200k: {
       inputCostPerToken: 0.000006,
       outputCostPerToken: 0.0000225,
       cacheCreationCostPerToken: 0.0000075,
+      cacheCreation1hCostPerToken: 0.000012,
       cacheReadCostPerToken: 0.0000006,
     },
   };

@@ -2,6 +2,14 @@ export interface RateSet {
   inputCostPerToken: number;
   outputCostPerToken: number;
   cacheCreationCostPerToken: number;
+  /**
+   * Rate for a cache write requesting the 1-hour TTL. Required, not optional:
+   * it is always derivable (`input x 2`), so optionality would buy nothing and
+   * force a `??` at the cost site. A write's TTL is an independent dimension
+   * from the prompt's size, so this appears on the base rates AND on
+   * `above200k` (#118).
+   */
+  cacheCreation1hCostPerToken: number;
   cacheReadCostPerToken: number;
 }
 
