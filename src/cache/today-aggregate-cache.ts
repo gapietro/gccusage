@@ -6,11 +6,20 @@ import { parseJsonlFile, filterTodayEntries } from "../data/jsonl-reader.js";
 import { aggregateTokens } from "../data/token-aggregator.js";
 import type { TokenCounts, TokenMetrics } from "../types/token-metrics.js";
 
+// A negative count already passed plain v.number() before #103; the tier
+// split now SUBTRACTS `premium` from these base counts to get the standard
+// bucket (see cost-calculator.ts), so a negative here — from a corrupt or
+// hand-edited today-aggregates.json — turns "wrong but bounded" into an
+// arbitrarily wrong, possibly negative, cost. Rejecting on read is not a
+// full fix (it does not enforce premium <= base), but it closes off the
+// unbounded case cleanly, and enforcing the cross-field invariant here would
+// require a v.custom check that dredges up the wider "which decomposition is
+// canonical" question this cache boundary should not have to answer.
 const TokenCountsSchema = v.object({
-  inputTokens: v.number(),
-  outputTokens: v.number(),
-  cacheCreationTokens: v.number(),
-  cacheReadTokens: v.number(),
+  inputTokens: v.pipe(v.number(), v.minValue(0)),
+  outputTokens: v.pipe(v.number(), v.minValue(0)),
+  cacheCreationTokens: v.pipe(v.number(), v.minValue(0)),
+  cacheReadTokens: v.pipe(v.number(), v.minValue(0)),
 });
 
 /**

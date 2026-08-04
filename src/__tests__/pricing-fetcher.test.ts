@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { fetchPricing, parseLitellmPricing } from "../data/pricing-fetcher.js";
 import { FALLBACK_PRICING } from "../data/fallback-pricing.js";
 import { findPricing } from "../data/cost-calculator.js";
+import { PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 import type { PricingTable } from "../types/pricing.js";
 
 /**
@@ -35,7 +36,7 @@ function writeCache(data: PricingTable, ageMs = 0): void {
   fs.mkdirSync(path.dirname(cachePath()), { recursive: true });
   fs.writeFileSync(
     cachePath(),
-    JSON.stringify({ timestamp: Date.now() - ageMs, data }),
+    JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now() - ageMs, data }),
   );
 }
 

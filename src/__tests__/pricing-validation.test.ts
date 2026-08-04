@@ -220,4 +220,17 @@ describe("anchorToSnapshot tier anchoring (#103)", () => {
     const fetched = { "claude-opus-5": known };
     expect(anchorToSnapshot(fetched, snapshotWithoutTier)["claude-opus-5"]?.above200k).toBeDefined();
   });
+
+  // The reverse of the case above, and not an inert symmetry: `refreshPricing`
+  // runs `parseLitellmPricing` (which strips a malformed tier via
+  // `sanitiseModelPricing`) before this anchor ever sees the entry, so a
+  // poisoned tier reaches here as a tier-less fetched entry. It passes,
+  // matching the documented one-sided rule, and the model prices at standard
+  // rates for its premium band rather than losing the entry entirely.
+  it("accepts a fetched entry with no tier when the snapshot has one", () => {
+    const fetchedWithoutTier = { "claude-sonnet-4-5": { ...known, above200k: undefined } };
+    const result = anchorToSnapshot(fetchedWithoutTier, snapshot);
+    expect(result["claude-sonnet-4-5"]).toBeDefined();
+    expect(result["claude-sonnet-4-5"]?.above200k).toBeUndefined();
+  });
 });

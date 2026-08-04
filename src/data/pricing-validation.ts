@@ -151,6 +151,16 @@ function withinDeviation(fetched: number, known: number): boolean {
  * in the missing piece from the snapshot — and would silently cost premium
  * tokens at standard rates. A tier that moved >10x while its base held still
  * is corruption of that record; distrust the whole thing.
+ *
+ * The one-sided pass is also reachable from the OTHER direction on purpose:
+ * `refreshPricing` runs `parseLitellmPricing` (which calls
+ * `sanitiseModelPricing`) before this anchor, so a poisoned tier is already
+ * stripped by the time it gets here — it arrives one-sided (fetched has no
+ * tier, snapshot does) and passes. That is not a bug to close; it is the
+ * strip-don't-drop rule from `sanitiseModelPricing` carried through. The
+ * model still prices at standard rates, gets flagged approximated, and the
+ * under-report is bounded — the alternative (dropping the whole entry here
+ * too) would just re-litigate a decision already made one function up.
  */
 function tierWithinDeviation(fetched: ModelPricing, known: ModelPricing): boolean {
   if (!fetched.above200k || !known.above200k) return true;

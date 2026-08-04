@@ -228,6 +228,22 @@ function check(requirement, message$1) {
 		}
 	};
 }
+/* @__NO_SIDE_EFFECTS__ */
+function minValue(requirement, message$1) {
+	return {
+		kind: "validation",
+		type: "min_value",
+		reference: minValue,
+		async: false,
+		expects: `>=${requirement instanceof Date ? requirement.toJSON() : /* @__PURE__ */ _stringify(requirement)}`,
+		requirement,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !(dataset.value >= this.requirement)) _addIssue(this, "value", dataset, config$1, { received: dataset.value instanceof Date ? dataset.value.toJSON() : /* @__PURE__ */ _stringify(dataset.value) });
+			return dataset;
+		}
+	};
+}
 /**
 * Returns the fallback value of the schema.
 *
@@ -341,6 +357,26 @@ function boolean(message$1) {
 		},
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "boolean") dataset.typed = true;
+			else _addIssue(this, "type", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function literal(literal_, message$1) {
+	return {
+		kind: "schema",
+		type: "literal",
+		reference: literal,
+		expects: /* @__PURE__ */ _stringify(literal_),
+		async: false,
+		literal: literal_,
+		message: message$1,
+		get "~standard"() {
+			return /* @__PURE__ */ _getStandardProps(this);
+		},
+		"~run"(dataset, config$1) {
+			if (dataset.value === this.literal) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
@@ -2393,6 +2429,16 @@ function withinDeviation(fetched, known) {
 * in the missing piece from the snapshot — and would silently cost premium
 * tokens at standard rates. A tier that moved >10x while its base held still
 * is corruption of that record; distrust the whole thing.
+*
+* The one-sided pass is also reachable from the OTHER direction on purpose:
+* `refreshPricing` runs `parseLitellmPricing` (which calls
+* `sanitiseModelPricing`) before this anchor, so a poisoned tier is already
+* stripped by the time it gets here — it arrives one-sided (fetched has no
+* tier, snapshot does) and passes. That is not a bug to close; it is the
+* strip-don't-drop rule from `sanitiseModelPricing` carried through. The
+* model still prices at standard rates, gets flagged approximated, and the
+* under-report is bounded — the alternative (dropping the whole entry here
+* too) would just re-litigate a decision already made one function up.
 */
 function tierWithinDeviation(fetched, known) {
 	if (!fetched.above200k || !known.above200k) return true;
@@ -2403,7 +2449,17 @@ function tierWithinDeviation(fetched, known) {
 
 //#endregion
 //#region src/cache/pricing-cache.ts
+/**
+* Bumped whenever the cached envelope's meaning changes in a way an OLD
+* reader would misinterpret and a NEW reader must not accept from an old
+* file. #103 added the above-200k tier to every parser and to the snapshot
+* this cache falls back to; a pre-tier file merged whole-entry over that
+* snapshot would shadow the new tier for up to the cache's full TTL. Exported
+* so a test can pin the exact value rather than restating it.
+*/
+const PRICING_CACHE_VERSION = 1;
 const PricingCacheSchema = object({
+	version: literal(PRICING_CACHE_VERSION),
 	timestamp: number(),
 	data: record(string(), unknown())
 });
@@ -2436,6 +2492,7 @@ function savePricingCache(data) {
 	const cachePath$1 = getCachePath$1();
 	try {
 		const cache = {
+			version: PRICING_CACHE_VERSION,
 			timestamp: Date.now(),
 			data
 		};
@@ -2631,10 +2688,10 @@ function maybeSpawnPricingRefresh(stale) {
 //#endregion
 //#region src/cache/today-aggregate-cache.ts
 const TokenCountsSchema = object({
-	inputTokens: number(),
-	outputTokens: number(),
-	cacheCreationTokens: number(),
-	cacheReadTokens: number()
+	inputTokens: pipe(number(), minValue(0)),
+	outputTokens: pipe(number(), minValue(0)),
+	cacheCreationTokens: pipe(number(), minValue(0)),
+	cacheReadTokens: pipe(number(), minValue(0))
 });
 /**
 * `premium` is REQUIRED, so a cache file written before the tier split fails
@@ -5829,7 +5886,7 @@ async function reportToday() {
 	}
 	if (approximated.length > 0) {
 		const premiumTokens = approximated.reduce((sum, model) => sum + premiumTokenTotal(byModel.get(model)), 0);
-		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ${PREMIUM_PROMPT_THRESHOLD / 1e3}k threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
+		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens (prompt, cache and completion) above the ${PREMIUM_PROMPT_THRESHOLD / 1e3}k threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
 	}
 	console.log(`\nSessions analyzed: ${fileCount} files`);
 }

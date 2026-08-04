@@ -85,10 +85,18 @@ async function reportToday(): Promise<void> {
     // formatTokens is for humanising the latter, and would render this as
     // "200.0k" for no benefit. The measured premium token count above DOES
     // want formatTokens.
+    //
+    // premiumTokens sums all four counts (input + output + cacheCreation +
+    // cacheRead), while "Total Tokens" above and the "By Model" line sum
+    // input + output only — a real session's cache reads can make this figure
+    // an order of magnitude larger than either. That is the CORRECT scope for
+    // a sentence about billing (Anthropic bills the premium tier on all four),
+    // so the fix is naming the scope in words, not changing the arithmetic.
     console.log(
-      `\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ` +
-        `${PREMIUM_PROMPT_THRESHOLD / 1000}k threshold; no premium rate is published for ` +
-        `them, so those tokens are costed at the standard rate. The real total is higher.`,
+      `\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens (prompt, ` +
+        `cache and completion) above the ${PREMIUM_PROMPT_THRESHOLD / 1000}k threshold; no ` +
+        `premium rate is published for them, so those tokens are costed at the standard rate. ` +
+        `The real total is higher.`,
     );
   }
 

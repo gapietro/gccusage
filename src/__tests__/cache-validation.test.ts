@@ -6,7 +6,7 @@ import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { computeCacheKey } from "../cache/cache-key.js";
 import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
-import { loadPricingCacheEntry } from "../cache/pricing-cache.js";
+import { loadPricingCacheEntry, savePricingCache, PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 import { loadBlockCache } from "../cache/block-cache.js";
 import { runStatusline } from "../statusline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
@@ -264,7 +264,10 @@ describe("pricing cache validation", () => {
   };
 
   function writePricing(data: unknown, ageMs = 0): void {
-    write("pricing.json", JSON.stringify({ timestamp: Date.now() - ageMs, data }));
+    write(
+      "pricing.json",
+      JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now() - ageMs, data }),
+    );
   }
 
   it("loads a well-formed table", () => {
@@ -284,7 +287,14 @@ describe("pricing cache validation", () => {
   });
 
   it("returns null when the timestamp is not a number", () => {
-    write("pricing.json", JSON.stringify({ timestamp: "now", data: { "claude-x": SANE } }));
+    write(
+      "pricing.json",
+      JSON.stringify({
+        version: PRICING_CACHE_VERSION,
+        timestamp: "now",
+        data: { "claude-x": SANE },
+      }),
+    );
     expect(loadPricingCacheEntry()).toBeNull();
   });
 
@@ -324,11 +334,54 @@ describe("pricing cache validation", () => {
   });
 });
 
+// A pre-tier cache carries no version at all. #103 added the above-200k tier
+// to every parser and to FALLBACK_PRICING; a pre-version file merged whole
+// over that snapshot would shadow the new tier for up to the cache's full TTL
+// (24h default) — the exact under-count #103 exists to fix, silently
+// reintroduced by upgrading. Rejecting on read degrades to FALLBACK_PRICING,
+// which now HAS the tiers, so the degradation is strictly better than the
+// shadow it replaces.
+describe("pricing cache version validation", () => {
+  const SANE = {
+    inputCostPerToken: 3 / 1_000_000,
+    outputCostPerToken: 15 / 1_000_000,
+    cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheReadCostPerToken: 0.3 / 1_000_000,
+  };
+
+  // The load-bearing assertion: a cache file in the shape written by the OLD
+  // parser (no `version` field at all) must be rejected, not merely ignored.
+  it("rejects a pre-version cache file", () => {
+    write("pricing.json", JSON.stringify({ timestamp: Date.now(), data: { "claude-x": SANE } }));
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
+
+  it("rejects a cache file whose version does not match", () => {
+    write(
+      "pricing.json",
+      JSON.stringify({
+        version: PRICING_CACHE_VERSION + 1,
+        timestamp: Date.now(),
+        data: { "claude-x": SANE },
+      }),
+    );
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
+
+  it("round-trips through savePricingCache", () => {
+    savePricingCache({ "claude-x": SANE });
+    const entry = loadPricingCacheEntry();
+    expect(entry).not.toBeNull();
+    expect(entry!.data["claude-x"]).toEqual(SANE);
+  });
+});
+
 describe("pricing cache tier validation (#103)", () => {
   it("keeps a cached model whose tier is malformed, minus the tier", () => {
     write(
       "pricing.json",
       JSON.stringify({
+        version: PRICING_CACHE_VERSION,
         timestamp: Date.now(),
         data: {
           "claude-opus-4-5": {
