@@ -21,7 +21,7 @@ let tmpDir: string;
 let originalHome: string | undefined;
 let originalXdg: string | undefined;
 
-function writeTranscript(model: string): void {
+function writeTranscript(model: string, inputTokens: number, outputTokens: number): void {
   const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(
@@ -32,15 +32,14 @@ function writeTranscript(model: string): void {
       sessionId: SESSION_ID,
       message: {
         model,
-        // Enough tokens that any real Claude rate rounds to a visible figure.
-        usage: { input_tokens: 2_000_000, output_tokens: 500_000 },
+        usage: { input_tokens: inputTokens, output_tokens: outputTokens },
       },
     }) + "\n",
   );
 }
 
-function renderOffline(model: string): Promise<string> {
-  writeTranscript(model);
+function renderOffline(model: string, inputTokens: number, outputTokens: number): Promise<string> {
+  writeTranscript(model, inputTokens, outputTokens);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => {
@@ -72,7 +71,14 @@ afterEach(() => {
 
 describe("rendering with the pricing feed unreachable", () => {
   it("still shows a real cost for a current model", async () => {
-    const bar = stripAnsi(await renderOffline("claude-opus-5"));
+    // 150k input, 50k output: enough tokens that any real Claude rate rounds
+    // to a visible figure, and deliberately below the 200k premium prompt
+    // threshold (PREMIUM_PROMPT_THRESHOLD, output tokens don't count toward
+    // it) so this session is genuinely standard-rate. If this crossed the
+    // threshold the "not.toContain('?')" assertion below would depend on
+    // claude-opus-5 carrying a published premium rate, which it does not
+    // (#103) — that would make this test fail for a reason unrelated to #82.
+    const bar = stripAnsi(await renderOffline("claude-opus-5", 150_000, 50_000));
 
     const amounts = [...bar.matchAll(/\$(\d+\.\d{2})/g)].map((m) => Number(m[1]));
     expect(amounts.length, `no cost rendered: ${bar}`).toBeGreaterThan(0);
@@ -82,10 +88,26 @@ describe("rendering with the pricing feed unreachable", () => {
   });
 
   it("marks the cost when the model really has no price", async () => {
-    const bar = stripAnsi(await renderOffline("claude-not-a-real-model-99"));
+    const bar = stripAnsi(await renderOffline("claude-not-a-real-model-99", 2_000_000, 500_000));
 
     // Not a regression — this is the honest rendering of an unknown model:
     // the figure is flagged rather than passed off as a complete total.
     expect(bar).toMatch(/\$0\.00\?/);
+  });
+
+  // Distinct from the test above: that one renders $0.00? because nothing
+  // could be priced at all. This one renders a real, non-zero figure that is
+  // a LOWER BOUND — the model IS priced, but claude-opus-5 has no published
+  // premium rate (#103), so tokens above the 200k threshold are costed at
+  // the standard rate. Do not fold these two cases into one test: "no price"
+  // and "approximated price" are different failure modes with different
+  // wording, and collapsing them would hide a regression that turned one
+  // into the other. This file is the only place the whole render path runs
+  // unmocked, so it is the only true end-to-end acceptance test for #103.
+  it("marks the cost when a long-context session outran the published rates", async () => {
+    const bar = stripAnsi(await renderOffline("claude-opus-5", 300_000, 1_000));
+
+    expect(bar).toMatch(/\$\d+\.\d{2}\?/);
+    expect(bar).not.toMatch(/\$0\.00\?/);
   });
 });

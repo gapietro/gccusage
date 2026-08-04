@@ -26,6 +26,7 @@ export function contextFromFixture(fx: RealPayloadFixture, homeDir: string): Ren
     // Every captured payload priced cleanly, so the marked-uncertain rendering
     // is pinned in widgets.test.ts rather than here.
     unpricedModels: [],
+    approximatedModels: [],
     sessionCostUncertain: false,
     todayCostUncertain: false,
     sessionStartTime: fx.derived.sessionStartTime,

@@ -40,8 +40,16 @@ let tmpDir: string;
 let originalHome: string | undefined;
 let originalXdg: string | undefined;
 
-// One transcript entry worth exactly $1.00 of calculated cost.
-const CALCULATED_COST = 1.0;
+// One transcript entry worth exactly $0.10 of calculated cost. Pinned well
+// under the 200k premium threshold (#103) rather than AT the boundary, on
+// purpose: this fixture is shared by a dozen unrelated tests in this file,
+// and the exact-boundary behaviour (200,000 is standard, 200,001 is premium)
+// is already pinned in exactly one place —
+// src/__tests__/token-aggregator.test.ts's "aggregateTokens premium
+// bucketing (#103)" describe block. Sitting on the boundary here would mean
+// a future `>` -> `>=` slip there breaks a dozen confusing tests in this
+// file instead of that one dedicated test.
+const CALCULATED_COST = 0.1;
 
 function shardDir(): string {
   return path.join(tmpDir, "gccusage", "daily");
@@ -74,7 +82,26 @@ function writeTranscript(sessionId: string): void {
       sessionId,
       message: {
         model: "test-model",
-        usage: { input_tokens: 1_000_000, output_tokens: 0 },
+        usage: { input_tokens: 100_000, output_tokens: 0 },
+      },
+    }) + "\n",
+  );
+}
+
+// One turn with a 300k prompt: over the threshold, on a pinned price list
+// that publishes no premium tier.
+function writePremiumTranscript(sessionId: string): void {
+  const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date().toISOString(),
+      sessionId,
+      message: {
+        model: "test-model",
+        usage: { input_tokens: 300_000, output_tokens: 0 },
       },
     }) + "\n",
   );
@@ -237,11 +264,28 @@ describe("buildRenderContext today cost", () => {
     );
 
     expect(context.todayCostUsd).toBeCloseTo(CALCULATED_COST);
+    // costUsd is a float division result (100_000 / 1_000_000), not exactly
+    // representable, so an exact toMatchObject would flake on the ULP.
     expect(readShard("session-a")).toMatchObject({
       sessionId: "session-a",
-      costUsd: CALCULATED_COST,
+      costUsd: expect.closeTo(CALCULATED_COST, 10),
       source: "calculated",
     });
+  });
+
+  it("marks the session cost uncertain when a model is only approximated (#103)", async () => {
+    writePremiumTranscript("session-premium");
+
+    const context = await buildRenderContext(
+      { session_id: "session-premium" },
+      settingsWith("calculated"),
+    );
+
+    expect(context.approximatedModels).toEqual(["test-model"]);
+    // Approximated is NOT unpriced: the usage is counted, at the standard rate.
+    expect(context.unpricedModels).toEqual([]);
+    expect(context.sessionCostUncertain).toBe(true);
+    expect(context.sessionCostUsd).toBeCloseTo(0.3, 10);
   });
 });
 
@@ -471,11 +515,11 @@ describe("today's transcripts are read only when they are used (#94)", () => {
     const ctx = await buildRenderContext(stdinWithCost, settingsWith("calculated"));
 
     expect(parsedPaths()).toContain(other);
-    // $1.00 from the shared beforeEach's "session-a" transcript (also
-    // today-dated) + $1.00 from the current session + $2.00 from the other
+    // $0.10 from the shared beforeEach's "session-a" transcript (also
+    // today-dated) + $0.10 from the current session + $2.00 from the other
     // one. Calculated mode sums every today transcript, not just this
     // session's and the "other" one named in this test.
-    expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
+    expect(ctx.todayCostUsd).toBeCloseTo(2.2, 6);
   });
 
   it("does not re-parse unchanged transcripts on a second calculated render", async () => {
@@ -491,10 +535,10 @@ describe("today's transcripts are read only when they are used (#94)", () => {
     // session totals and the start timestamp. Today's OTHER transcripts come
     // from the cache.
     expect(parsedPaths()).not.toContain(other);
-    // $1.00 from the shared beforeEach's "session-a" transcript + $1.00 from
+    // $0.10 from the shared beforeEach's "session-a" transcript + $0.10 from
     // the current session + $2.00 from the other one — same arithmetic as
     // "does read them under costSource calculated" above, since both calls
     // to buildRenderContext see the same three today-dated transcripts.
-    expect(ctx.todayCostUsd).toBeCloseTo(4.0, 6);
+    expect(ctx.todayCostUsd).toBeCloseTo(2.2, 6);
   });
 });

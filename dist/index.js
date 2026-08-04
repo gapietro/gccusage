@@ -4117,8 +4117,8 @@ async function buildRenderContext(stdin, settings) {
 	}
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
 	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
-	const sessionCostUncertain = sessionCostSource === "calculated" && session.unpriced.length > 0;
-	const todayCostUncertain = today !== null && today.unpriced.length > 0;
+	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
+	const todayCostUncertain = today !== null && (today.unpriced.length > 0 || today.approximated.length > 0);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -4134,6 +4134,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUsd,
 		costByModel,
 		unpricedModels: session.unpriced,
+		approximatedModels: session.approximated,
 		sessionCostUncertain,
 		todayCostUncertain,
 		sessionStartTime,
@@ -4590,7 +4591,10 @@ const tokensCachedWidget = { render(context, config) {
 const perModelBreakdownWidget = { render(context, config) {
 	if (context.costByModel.size === 0 && context.unpricedModels.length === 0) return null;
 	const parts = [];
-	for (const [model, cost] of context.costByModel) parts.push(`${formatModelName(model)}:${formatDollars(cost)}`);
+	for (const [model, cost] of context.costByModel) {
+		const approximate = context.approximatedModels.includes(model) ? "?" : "";
+		parts.push(`${formatModelName(model)}:${formatDollars(cost)}${approximate}`);
+	}
 	for (const model of context.unpricedModels) parts.push(`${formatModelName(model)}:$?`);
 	const text = parts.join(" ");
 	return {
@@ -5774,10 +5778,11 @@ async function runCli(args) {
 async function reportToday() {
 	const { byModel, totals, fileCount } = getTodayAggregate();
 	const pricing = await fetchPricing(864e5);
-	const { costs: costByModel, unpriced } = calculateCostByModel(byModel, pricing);
+	const { costs: costByModel, unpriced, approximated } = calculateCostByModel(byModel, pricing);
 	const totalCost = calculateTotalCost(costByModel);
+	const marker = unpriced.length > 0 ? " (partial)" : approximated.length > 0 ? " (approximate)" : "";
 	console.log("=== Today's Usage ===\n");
-	console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
+	console.log(`Total Cost: ${formatDollars(totalCost)}${marker}`);
 	console.log(`Total Tokens: ${formatTokens(totals.inputTokens + totals.outputTokens)}`);
 	console.log();
 	if (costByModel.size > 0) {
@@ -5792,7 +5797,16 @@ async function reportToday() {
 		console.log(`\nNo pricing for ${unpriced.join(", ")} — their usage is missing from the total.`);
 		console.log("Run `npm run pricing` to refresh the offline table.");
 	}
+	if (approximated.length > 0) {
+		const premiumTokens = approximated.reduce((sum, model) => sum + premiumTokenTotal(byModel.get(model)), 0);
+		console.log(`\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ${formatTokens(PREMIUM_PROMPT_THRESHOLD)} threshold; no premium rate is published for them, so those tokens are costed at the standard rate. The real total is higher.`);
+	}
 	console.log(`\nSessions analyzed: ${fileCount} files`);
+}
+function premiumTokenTotal(metrics) {
+	const premium = metrics?.premium;
+	if (!premium) return 0;
+	return premium.inputTokens + premium.outputTokens + premium.cacheCreationTokens + premium.cacheReadTokens;
 }
 /** POSIX shell single-quote escaping: ' becomes '\'' */
 function shellQuote(p) {

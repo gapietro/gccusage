@@ -8,6 +8,8 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
+import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
+import type { TokenMetrics } from "./types/token-metrics.js";
 
 export async function runCli(args: string[]): Promise<void> {
   const command = args[0] ?? "today";
@@ -40,11 +42,14 @@ async function reportToday(): Promise<void> {
   // after a render costs a stat sweep rather than a full re-parse (#94).
   const { byModel, totals, fileCount } = getTodayAggregate();
   const pricing = await fetchPricing(86400000);
-  const { costs: costByModel, unpriced } = calculateCostByModel(byModel, pricing);
+  const { costs: costByModel, unpriced, approximated } = calculateCostByModel(byModel, pricing);
   const totalCost = calculateTotalCost(costByModel);
 
+  const marker =
+    unpriced.length > 0 ? " (partial)" : approximated.length > 0 ? " (approximate)" : "";
+
   console.log("=== Today's Usage ===\n");
-  console.log(`Total Cost: ${formatDollars(totalCost)}${unpriced.length > 0 ? " (partial)" : ""}`);
+  console.log(`Total Cost: ${formatDollars(totalCost)}${marker}`);
   console.log(`Total Tokens: ${formatTokens(totals.inputTokens + totals.outputTokens)}`);
   console.log();
 
@@ -68,7 +73,33 @@ async function reportToday(): Promise<void> {
     console.log("Run `npm run pricing` to refresh the offline table.");
   }
 
+  // Distinct from the unpriced sentence above, which would be false here: the
+  // usage IS in the total, charged at the standard rate because the feed
+  // publishes no premium rate for that model (#103).
+  if (approximated.length > 0) {
+    const premiumTokens = approximated.reduce(
+      (sum, model) => sum + premiumTokenTotal(byModel.get(model)),
+      0,
+    );
+    console.log(
+      `\n${approximated.join(", ")} billed ${formatTokens(premiumTokens)} tokens above the ` +
+        `${formatTokens(PREMIUM_PROMPT_THRESHOLD)} threshold; no premium rate is published for ` +
+        `them, so those tokens are costed at the standard rate. The real total is higher.`,
+    );
+  }
+
   console.log(`\nSessions analyzed: ${fileCount} files`);
+}
+
+function premiumTokenTotal(metrics: TokenMetrics | undefined): number {
+  const premium = metrics?.premium;
+  if (!premium) return 0;
+  return (
+    premium.inputTokens +
+    premium.outputTokens +
+    premium.cacheCreationTokens +
+    premium.cacheReadTokens
+  );
 }
 
 /** POSIX shell single-quote escaping: ' becomes '\'' */

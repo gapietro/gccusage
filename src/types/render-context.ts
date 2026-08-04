@@ -27,9 +27,17 @@ export interface RenderContext {
    */
   unpricedModels: string[];
   /**
+   * Models that billed tokens above the 200k threshold with no published
+   * premium rate, so their cost is a lower bound. Distinct from
+   * `unpricedModels`: the usage IS counted, just at the standard rate (#103).
+   */
+  approximatedModels: string[];
+  /**
    * True when `sessionCostUsd` was derived from the pricing table and that
-   * table was missing a model, so the figure understates the session. False
-   * for a stdin-sourced cost, which no missing price can affect.
+   * table was either missing a model or had to approximate one at standard
+   * rates, so the figure may understate the session. False for a
+   * stdin-sourced cost, which neither a missing price nor a missing premium
+   * rate can affect.
    */
   sessionCostUncertain: boolean;
   /** As `sessionCostUncertain`, for `todayCostUsd`. */
