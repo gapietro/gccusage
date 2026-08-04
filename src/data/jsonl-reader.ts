@@ -8,6 +8,12 @@ export interface JsonlEntry {
     input_tokens?: number;
     output_tokens?: number;
     cache_creation_input_tokens?: number;
+    /**
+     * The SUBSET of `cache_creation_input_tokens` written with the 1-hour TTL,
+     * flattened out of the transcript's nested `cache_creation` object and
+     * clamped to the flat total. 5-minute tokens are the difference (#118).
+     */
+    cache_creation_1h_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
   timestamp?: string;
@@ -114,6 +120,21 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
   if (typeof model === "string") entry.model = model;
 
   if (usage && typeof usage === "object") {
+    const cacheCreation =
+      typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null
+        ? (usage["cache_creation"] as Record<string, unknown>)
+        : undefined;
+    const flatCacheCreation =
+      typeof usage["cache_creation_input_tokens"] === "number"
+        ? usage["cache_creation_input_tokens"]
+        : 0;
+    const raw1h = cacheCreation?.["ephemeral_1h_input_tokens"];
+    // Clamped so the subset invariant holds no matter what the file says:
+    // calculateCost subtracts to get the 5-minute bucket, and a negative
+    // bucket would silently UNDER-count. Never observed in real transcripts.
+    const cacheCreation1h =
+      typeof raw1h === "number" && raw1h > 0 ? Math.min(raw1h, flatCacheCreation) : 0;
+
     entry.usage = {
       input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : undefined,
       output_tokens:
@@ -122,6 +143,7 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
         typeof usage["cache_creation_input_tokens"] === "number"
           ? usage["cache_creation_input_tokens"]
           : undefined,
+      cache_creation_1h_input_tokens: cacheCreation1h,
       cache_read_input_tokens:
         typeof usage["cache_read_input_tokens"] === "number"
           ? usage["cache_read_input_tokens"]

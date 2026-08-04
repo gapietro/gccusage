@@ -3,10 +3,19 @@ import type { PricingTable, ModelPricing, RateSet } from "../types/pricing.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function rateCounts(counts: TokenCounts, rates: RateSet): number {
+  // 5-minute writes are the remainder: cacheCreation1hTokens is a SUBSET of
+  // cacheCreationTokens. `jsonl-reader.ts` clamps it at ingestion so a live
+  // session cannot go negative here, but `TokenCountsSchema` in
+  // today-aggregate-cache.ts enforces only per-field non-negativity, not
+  // `cacheCreation1hTokens <= cacheCreationTokens` — the same gap its own
+  // comment admits for `premium <= base` — so a corrupted cache file can
+  // still drive this negative.
+  const cacheCreation5m = counts.cacheCreationTokens - counts.cacheCreation1hTokens;
   return (
     counts.inputTokens * rates.inputCostPerToken +
     counts.outputTokens * rates.outputCostPerToken +
-    counts.cacheCreationTokens * rates.cacheCreationCostPerToken +
+    cacheCreation5m * rates.cacheCreationCostPerToken +
+    counts.cacheCreation1hTokens * rates.cacheCreation1hCostPerToken +
     counts.cacheReadTokens * rates.cacheReadCostPerToken
   );
 }
@@ -24,6 +33,7 @@ export function calculateCost(metrics: TokenMetrics, pricing: ModelPricing): num
     inputTokens: metrics.inputTokens - premium.inputTokens,
     outputTokens: metrics.outputTokens - premium.outputTokens,
     cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+    cacheCreation1hTokens: metrics.cacheCreation1hTokens - premium.cacheCreation1hTokens,
     cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens,
   };
 

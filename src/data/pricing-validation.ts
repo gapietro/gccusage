@@ -18,6 +18,7 @@ const COST_KEYS = [
   "inputCostPerToken",
   "outputCostPerToken",
   "cacheCreationCostPerToken",
+  "cacheCreation1hCostPerToken",
   "cacheReadCostPerToken",
 ] as const;
 

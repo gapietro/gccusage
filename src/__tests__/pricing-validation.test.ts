@@ -13,6 +13,7 @@ function pricing(overrides: Partial<ModelPricing> = {}): ModelPricing {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
     ...overrides,
   };
@@ -65,6 +66,16 @@ describe("sanitisePricingTable", () => {
       poisoned: pricing({ outputCostPerToken: 1 }),
       junk: "not-an-object",
     });
+    expect(Object.keys(result)).toEqual(["good"]);
+  });
+
+  // COST_KEYS is what makes this reachable: an entry missing the 1-hour rate
+  // is exactly as invalid as one missing any other rate. Without the key in
+  // COST_KEYS, this entry would sail through sanitisation with an `undefined`
+  // cacheCreation1hCostPerToken and later yield a NaN cost (#118 review, I1).
+  it("drops an entry missing cacheCreation1hCostPerToken", () => {
+    const { cacheCreation1hCostPerToken: _omitted, ...missing1h } = pricing();
+    const result = sanitisePricingTable({ good: pricing(), missing1h });
     expect(Object.keys(result)).toEqual(["good"]);
   });
 });
@@ -134,6 +145,7 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
     inputCostPerToken: 0.000003,
     outputCostPerToken: 0.000015,
     cacheCreationCostPerToken: 0.00000375,
+    cacheCreation1hCostPerToken: 0.000006,
     cacheReadCostPerToken: 0.0000003,
   };
 
@@ -144,6 +156,7 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
         inputCostPerToken: 0.000006,
         outputCostPerToken: 0.0000225,
         cacheCreationCostPerToken: 0.0000075,
+        cacheCreation1hCostPerToken: 0.000012,
         cacheReadCostPerToken: 0.0000006,
       },
     };
@@ -158,6 +171,20 @@ describe("sanitiseModelPricing tier bounds (#103)", () => {
 
     expect(result).not.toBeNull();
     expect(result!.inputCostPerToken).toBe(base.inputCostPerToken);
+    expect(result!.above200k).toBeUndefined();
+  });
+
+  // Same check, the 1-hour rate specifically (#118 review, I1): COST_KEYS is
+  // what makes isSaneTier's `tier[key] >= base[key]` sweep cover this field at
+  // all.
+  it("strips a tier priced below its standard counterpart on the 1-hour rate, keeping the model", () => {
+    const result = sanitiseModelPricing({
+      ...base,
+      above200k: { ...base, cacheCreation1hCostPerToken: 0.0000001 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.cacheCreation1hCostPerToken).toBe(base.cacheCreation1hCostPerToken);
     expect(result!.above200k).toBeUndefined();
   });
 
@@ -185,11 +212,13 @@ describe("anchorToSnapshot tier anchoring (#103)", () => {
     inputCostPerToken: 0.000003,
     outputCostPerToken: 0.000015,
     cacheCreationCostPerToken: 0.00000375,
+    cacheCreation1hCostPerToken: 0.000006,
     cacheReadCostPerToken: 0.0000003,
     above200k: {
       inputCostPerToken: 0.000006,
       outputCostPerToken: 0.0000225,
       cacheCreationCostPerToken: 0.0000075,
+      cacheCreation1hCostPerToken: 0.000012,
       cacheReadCostPerToken: 0.0000006,
     },
   };

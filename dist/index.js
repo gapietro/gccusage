@@ -1888,12 +1888,19 @@ function normalizeEntry(raw) {
 	const model = message?.["model"] ?? raw["model"];
 	const usage = message?.["usage"] ?? raw["usage"];
 	if (typeof model === "string") entry.model = model;
-	if (usage && typeof usage === "object") entry.usage = {
-		input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
-		output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
-		cache_creation_input_tokens: typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : void 0,
-		cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
-	};
+	if (usage && typeof usage === "object") {
+		const cacheCreation = typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null ? usage["cache_creation"] : void 0;
+		const flatCacheCreation = typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : 0;
+		const raw1h = cacheCreation?.["ephemeral_1h_input_tokens"];
+		const cacheCreation1h = typeof raw1h === "number" && raw1h > 0 ? Math.min(raw1h, flatCacheCreation) : 0;
+		entry.usage = {
+			input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
+			output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
+			cache_creation_input_tokens: typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : void 0,
+			cache_creation_1h_input_tokens: cacheCreation1h,
+			cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
+		};
+	}
 	return entry;
 }
 function isEntryFromToday(entry, now = new Date()) {
@@ -1922,8 +1929,23 @@ const TIER_FIELDS = {
 	input: "input_cost_per_token_above_200k_tokens",
 	output: "output_cost_per_token_above_200k_tokens",
 	cacheCreation: "cache_creation_input_token_cost_above_200k_tokens",
-	cacheRead: "cache_read_input_token_cost_above_200k_tokens"
+	cacheRead: "cache_read_input_token_cost_above_200k_tokens",
+	cacheCreation1hAbove200k: "cache_creation_input_token_cost_above_1hr_above_200k_tokens"
 };
+/**
+* The 1-hour cache TTL is a SEPARATE dimension from the 200k prompt tier: this
+* one keys on the TTL the request asked for, that one on the prompt's size.
+* The feed publishes the cross product, which is why TIER_FIELDS carries a
+* 1-hour entry too (#118).
+*/
+const CACHE_1H_FIELD = "cache_creation_input_token_cost_above_1hr";
+/**
+* A 1-hour cache write costs twice the input rate. Verified against the live
+* feed: 21 of the 23 `claude-*` keys publishing the rate match this exactly,
+* and the 2 that do not are provably-broken records (spec D2). The same factor
+* reproduces all three published cross-product rates.
+*/
+const CACHE_1H_INPUT_MULTIPLIER = 2;
 
 //#endregion
 //#region src/data/token-aggregator.ts
@@ -1932,6 +1954,7 @@ function emptyCounts$1() {
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
 		cacheReadTokens: 0
 	};
 }
@@ -1954,6 +1977,7 @@ function addCounts(target, usage) {
 	target.inputTokens += usage.input_tokens ?? 0;
 	target.outputTokens += usage.output_tokens ?? 0;
 	target.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+	target.cacheCreation1hTokens += usage.cache_creation_1h_input_tokens ?? 0;
 	target.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
 }
 function addUsage(target, entry) {
@@ -2124,47 +2148,55 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 1e-6,
 		"outputCostPerToken": 5e-6,
 		"cacheCreationCostPerToken": 125e-8,
+		"cacheCreation1hCostPerToken": 2e-6,
 		"cacheReadCostPerToken": 1e-7
 	},
 	"claude-haiku-4-5": {
 		"inputCostPerToken": 1e-6,
 		"outputCostPerToken": 5e-6,
 		"cacheCreationCostPerToken": 125e-8,
+		"cacheCreation1hCostPerToken": 2e-6,
 		"cacheReadCostPerToken": 1e-7
 	},
 	"claude-3-7-sonnet-20250219": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7
 	},
 	"claude-3-haiku-20240307": {
 		"inputCostPerToken": 25e-8,
 		"outputCostPerToken": 125e-8,
 		"cacheCreationCostPerToken": 3e-7,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-8
 	},
 	"claude-3-opus-20240229": {
 		"inputCostPerToken": 15e-6,
 		"outputCostPerToken": 75e-6,
 		"cacheCreationCostPerToken": 1875e-8,
+		"cacheCreation1hCostPerToken": 3e-5,
 		"cacheReadCostPerToken": 15e-7
 	},
 	"claude-4-opus-20250514": {
 		"inputCostPerToken": 15e-6,
 		"outputCostPerToken": 75e-6,
 		"cacheCreationCostPerToken": 1875e-8,
+		"cacheCreation1hCostPerToken": 3e-5,
 		"cacheReadCostPerToken": 15e-7
 	},
 	"claude-4-sonnet-20250514": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7,
 		"above200k": {
 			"inputCostPerToken": 6e-6,
 			"outputCostPerToken": 225e-7,
 			"cacheCreationCostPerToken": 75e-7,
+			"cacheCreation1hCostPerToken": 12e-6,
 			"cacheReadCostPerToken": 6e-7
 		}
 	},
@@ -2172,11 +2204,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7,
 		"above200k": {
 			"inputCostPerToken": 6e-6,
 			"outputCostPerToken": 225e-7,
 			"cacheCreationCostPerToken": 75e-7,
+			"cacheCreation1hCostPerToken": 12e-6,
 			"cacheReadCostPerToken": 6e-7
 		}
 	},
@@ -2184,11 +2218,13 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7,
 		"above200k": {
 			"inputCostPerToken": 6e-6,
 			"outputCostPerToken": 225e-7,
 			"cacheCreationCostPerToken": 75e-7,
+			"cacheCreation1hCostPerToken": 12e-6,
 			"cacheReadCostPerToken": 6e-7
 		}
 	},
@@ -2196,23 +2232,27 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 2e-6,
 		"outputCostPerToken": 1e-5,
 		"cacheCreationCostPerToken": 25e-7,
+		"cacheCreation1hCostPerToken": 4e-6,
 		"cacheReadCostPerToken": 2e-7
 	},
 	"claude-sonnet-4-6": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7
 	},
 	"claude-sonnet-4-5-20250929-v1:0": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7,
 		"above200k": {
 			"inputCostPerToken": 6e-6,
 			"outputCostPerToken": 225e-7,
 			"cacheCreationCostPerToken": 75e-7,
+			"cacheCreation1hCostPerToken": 12e-6,
 			"cacheReadCostPerToken": 6e-7
 		}
 	},
@@ -2220,83 +2260,97 @@ const FALLBACK_PRICING = {
 		"inputCostPerToken": 15e-6,
 		"outputCostPerToken": 75e-6,
 		"cacheCreationCostPerToken": 1875e-8,
+		"cacheCreation1hCostPerToken": 3e-5,
 		"cacheReadCostPerToken": 15e-7
 	},
 	"claude-opus-4-1-20250805": {
 		"inputCostPerToken": 15e-6,
 		"outputCostPerToken": 75e-6,
 		"cacheCreationCostPerToken": 1875e-8,
+		"cacheCreation1hCostPerToken": 3e-5,
 		"cacheReadCostPerToken": 15e-7
 	},
 	"claude-opus-4-20250514": {
 		"inputCostPerToken": 15e-6,
 		"outputCostPerToken": 75e-6,
 		"cacheCreationCostPerToken": 1875e-8,
+		"cacheCreation1hCostPerToken": 3e-5,
 		"cacheReadCostPerToken": 15e-7
 	},
 	"claude-opus-4-5-20251101": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-5": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-6": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-6-20260205": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-7": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-7-20260416": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-fable-5": {
 		"inputCostPerToken": 1e-5,
 		"outputCostPerToken": 5e-5,
 		"cacheCreationCostPerToken": 125e-7,
+		"cacheCreation1hCostPerToken": 2e-5,
 		"cacheReadCostPerToken": 1e-6
 	},
 	"claude-opus-5": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-opus-4-8": {
 		"inputCostPerToken": 5e-6,
 		"outputCostPerToken": 25e-6,
 		"cacheCreationCostPerToken": 625e-8,
+		"cacheCreation1hCostPerToken": 1e-5,
 		"cacheReadCostPerToken": 5e-7
 	},
 	"claude-sonnet-4-20250514": {
 		"inputCostPerToken": 3e-6,
 		"outputCostPerToken": 15e-6,
 		"cacheCreationCostPerToken": 375e-8,
+		"cacheCreation1hCostPerToken": 6e-6,
 		"cacheReadCostPerToken": 3e-7,
 		"above200k": {
 			"inputCostPerToken": 6e-6,
 			"outputCostPerToken": 225e-7,
 			"cacheCreationCostPerToken": 75e-7,
+			"cacheCreation1hCostPerToken": 12e-6,
 			"cacheReadCostPerToken": 6e-7
 		}
 	}
@@ -2319,6 +2373,7 @@ const COST_KEYS = [
 	"inputCostPerToken",
 	"outputCostPerToken",
 	"cacheCreationCostPerToken",
+	"cacheCreation1hCostPerToken",
 	"cacheReadCostPerToken"
 ];
 /**
@@ -2456,8 +2511,13 @@ function tierWithinDeviation(fetched, known) {
 * this cache falls back to; a pre-tier file merged whole-entry over that
 * snapshot would shadow the new tier for up to the cache's full TTL. Exported
 * so a test can pin the exact value rather than restating it.
+*
+* Bumped again for #118: `cacheCreation1hCostPerToken` joined COST_KEYS, so a
+* v1 file written by the old parser lacks it, fails bounds on read, and would
+* drop EVERY model for up to the full TTL. Rejecting the envelope instead
+* degrades to FALLBACK_PRICING, which carries the field.
 */
-const PRICING_CACHE_VERSION = 1;
+const PRICING_CACHE_VERSION = 2;
 const PricingCacheSchema = object({
 	version: literal(PRICING_CACHE_VERSION),
 	timestamp: number(),
@@ -2561,6 +2621,42 @@ async function refreshPricing() {
 	}
 }
 /**
+* A 1-hour cache write costs more than a 5-minute one, always — a longer TTL
+* cannot be cheaper. A published rate that undercuts its own 5-minute sibling
+* is therefore a corrupted record, not a price, and resolves to the derivation
+* instead.
+*
+* This REPAIRS where `isSaneTier` REJECTS, and the asymmetry is deliberate:
+* a tier can be stripped and the model still prices at standard rates, but
+* this field is required and has no safe absence state, so rejecting would
+* mean dropping the whole model over one bad sibling — regressing the
+* per-entry posture of #92. Repair degrades to exactly the value the model
+* would have taken had the feed stayed silent.
+*
+* Deliberately NOT a plausibility band. Monotonicity is a fact about how
+* caching works and cannot go stale; a band is a calibration that would
+* eventually reject a genuine repricing (#91's documented accepted risk).
+* The cost is that `claude-3-haiku`'s 20x value survives — unreachable in
+* practice, since Claude Code cannot run Haiku 3 (spec D2).
+*
+* Latent interaction with `isSaneTier` (pricing-validation.ts): that
+* function now compares a tier's 1-hour rate against its OWN base's, not
+* against the derivation this function would have produced. A model shaped
+* like `claude-3-haiku` — an inflated base 1-hour rate let through by design
+* above — that also published an above-200k tier without the tier's own
+* 1-hour cross-product field would derive that tier's rate as `tierInput x
+* 2`, land below the inflated base, and have the WHOLE tier stripped
+* (`approximated`), not just the 1-hour field repaired. No model in the
+* current feed has that shape, so this is latent, not live; D2's residual
+* paragraph names only the hand-edited-`pricing.json` case, so this
+* consequence is recorded here instead.
+*/
+function resolveCache1hRate(published, inputCost, cacheCreationCost) {
+	const derived = inputCost * CACHE_1H_INPUT_MULTIPLIER;
+	if (typeof published !== "number" || !Number.isFinite(published)) return derived;
+	return published < cacheCreationCost ? derived : published;
+}
+/**
 * The feed publishes the long-context tier as four sibling fields rather than
 * a nested object. Both premium input and output must be present before a
 * tier is attached: a half-published tier would charge premium input against
@@ -2574,10 +2670,12 @@ function parseTier(model) {
 	if (typeof input !== "number" || typeof output !== "number") return null;
 	const cacheCreation = model[TIER_FIELDS.cacheCreation];
 	const cacheRead = model[TIER_FIELDS.cacheRead];
+	const cacheCreationCost = typeof cacheCreation === "number" ? cacheCreation : input * 1.25;
 	return {
 		inputCostPerToken: input,
 		outputCostPerToken: output,
-		cacheCreationCostPerToken: typeof cacheCreation === "number" ? cacheCreation : input * 1.25,
+		cacheCreationCostPerToken: cacheCreationCost,
+		cacheCreation1hCostPerToken: resolveCache1hRate(model[TIER_FIELDS.cacheCreation1hAbove200k], input, cacheCreationCost),
 		cacheReadCostPerToken: typeof cacheRead === "number" ? cacheRead : input * .1
 	};
 }
@@ -2589,10 +2687,12 @@ function parseLitellmPricing(data) {
 		const inputCost = model["input_cost_per_token"];
 		const outputCost = model["output_cost_per_token"];
 		if (typeof inputCost !== "number" || typeof outputCost !== "number") continue;
+		const cacheCreationCost = typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25;
 		const pricing = {
 			inputCostPerToken: inputCost,
 			outputCostPerToken: outputCost,
-			cacheCreationCostPerToken: typeof model["cache_creation_input_token_cost"] === "number" ? model["cache_creation_input_token_cost"] : inputCost * 1.25,
+			cacheCreationCostPerToken: cacheCreationCost,
+			cacheCreation1hCostPerToken: resolveCache1hRate(model[CACHE_1H_FIELD], inputCost, cacheCreationCost),
 			cacheReadCostPerToken: typeof model["cache_read_input_token_cost"] === "number" ? model["cache_read_input_token_cost"] : inputCost * .1
 		};
 		const tier = parseTier(model);
@@ -2691,12 +2791,17 @@ const TokenCountsSchema = object({
 	inputTokens: pipe(number(), minValue(0)),
 	outputTokens: pipe(number(), minValue(0)),
 	cacheCreationTokens: pipe(number(), minValue(0)),
+	cacheCreation1hTokens: pipe(number(), minValue(0)),
 	cacheReadTokens: pipe(number(), minValue(0))
 });
 /**
 * `premium` is REQUIRED, so a cache file written before the tier split fails
 * validation and is discarded rather than read as "no premium tokens" — a
 * wrong total for the rest of the day is worse than one re-parse (#103).
+*
+* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
+* TTL split fails validation and is discarded rather than read as "no 1-hour
+* tokens" — which would under-cost the rest of the day (#118).
 */
 const TokenMetricsSchema = object({
 	...TokenCountsSchema.entries,
@@ -2732,6 +2837,7 @@ function emptyCounts() {
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
 		cacheReadTokens: 0
 	};
 }
@@ -2745,6 +2851,7 @@ function addCountsInto(target, source) {
 	target.inputTokens += source.inputTokens;
 	target.outputTokens += source.outputTokens;
 	target.cacheCreationTokens += source.cacheCreationTokens;
+	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
 	target.cacheReadTokens += source.cacheReadTokens;
 }
 function addInto(target, source) {
@@ -2834,7 +2941,8 @@ function getTodayAggregate(now = new Date()) {
 //#endregion
 //#region src/data/cost-calculator.ts
 function rateCounts(counts, rates) {
-	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + counts.cacheCreationTokens * rates.cacheCreationCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
+	const cacheCreation5m = counts.cacheCreationTokens - counts.cacheCreation1hTokens;
+	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + cacheCreation5m * rates.cacheCreationCostPerToken + counts.cacheCreation1hTokens * rates.cacheCreation1hCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
 }
 /**
 * `metrics.premium` is a SUBSET of the four counts, so standard tokens are the
@@ -2848,6 +2956,7 @@ function calculateCost(metrics, pricing) {
 		inputTokens: metrics.inputTokens - premium.inputTokens,
 		outputTokens: metrics.outputTokens - premium.outputTokens,
 		cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+		cacheCreation1hTokens: metrics.cacheCreation1hTokens - premium.cacheCreation1hTokens,
 		cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens
 	};
 	return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);

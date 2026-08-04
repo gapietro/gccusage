@@ -12,47 +12,55 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000001,
     "outputCostPerToken": 0.000005,
     "cacheCreationCostPerToken": 0.00000125,
+    "cacheCreation1hCostPerToken": 0.000002,
     "cacheReadCostPerToken": 1e-7
   },
   "claude-haiku-4-5": {
     "inputCostPerToken": 0.000001,
     "outputCostPerToken": 0.000005,
     "cacheCreationCostPerToken": 0.00000125,
+    "cacheCreation1hCostPerToken": 0.000002,
     "cacheReadCostPerToken": 1e-7
   },
   "claude-3-7-sonnet-20250219": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7
   },
   "claude-3-haiku-20240307": {
     "inputCostPerToken": 2.5e-7,
     "outputCostPerToken": 0.00000125,
     "cacheCreationCostPerToken": 3e-7,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-8
   },
   "claude-3-opus-20240229": {
     "inputCostPerToken": 0.000015,
     "outputCostPerToken": 0.000075,
     "cacheCreationCostPerToken": 0.00001875,
+    "cacheCreation1hCostPerToken": 0.00003,
     "cacheReadCostPerToken": 0.0000015
   },
   "claude-4-opus-20250514": {
     "inputCostPerToken": 0.000015,
     "outputCostPerToken": 0.000075,
     "cacheCreationCostPerToken": 0.00001875,
+    "cacheCreation1hCostPerToken": 0.00003,
     "cacheReadCostPerToken": 0.0000015
   },
   "claude-4-sonnet-20250514": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7,
     "above200k": {
       "inputCostPerToken": 0.000006,
       "outputCostPerToken": 0.0000225,
       "cacheCreationCostPerToken": 0.0000075,
+      "cacheCreation1hCostPerToken": 0.000012,
       "cacheReadCostPerToken": 6e-7
     }
   },
@@ -60,11 +68,13 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7,
     "above200k": {
       "inputCostPerToken": 0.000006,
       "outputCostPerToken": 0.0000225,
       "cacheCreationCostPerToken": 0.0000075,
+      "cacheCreation1hCostPerToken": 0.000012,
       "cacheReadCostPerToken": 6e-7
     }
   },
@@ -72,11 +82,13 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7,
     "above200k": {
       "inputCostPerToken": 0.000006,
       "outputCostPerToken": 0.0000225,
       "cacheCreationCostPerToken": 0.0000075,
+      "cacheCreation1hCostPerToken": 0.000012,
       "cacheReadCostPerToken": 6e-7
     }
   },
@@ -84,23 +96,27 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000002,
     "outputCostPerToken": 0.00001,
     "cacheCreationCostPerToken": 0.0000025,
+    "cacheCreation1hCostPerToken": 0.000004,
     "cacheReadCostPerToken": 2e-7
   },
   "claude-sonnet-4-6": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7
   },
   "claude-sonnet-4-5-20250929-v1:0": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7,
     "above200k": {
       "inputCostPerToken": 0.000006,
       "outputCostPerToken": 0.0000225,
       "cacheCreationCostPerToken": 0.0000075,
+      "cacheCreation1hCostPerToken": 0.000012,
       "cacheReadCostPerToken": 6e-7
     }
   },
@@ -108,83 +124,97 @@ export const FALLBACK_PRICING: PricingTable = {
     "inputCostPerToken": 0.000015,
     "outputCostPerToken": 0.000075,
     "cacheCreationCostPerToken": 0.00001875,
+    "cacheCreation1hCostPerToken": 0.00003,
     "cacheReadCostPerToken": 0.0000015
   },
   "claude-opus-4-1-20250805": {
     "inputCostPerToken": 0.000015,
     "outputCostPerToken": 0.000075,
     "cacheCreationCostPerToken": 0.00001875,
+    "cacheCreation1hCostPerToken": 0.00003,
     "cacheReadCostPerToken": 0.0000015
   },
   "claude-opus-4-20250514": {
     "inputCostPerToken": 0.000015,
     "outputCostPerToken": 0.000075,
     "cacheCreationCostPerToken": 0.00001875,
+    "cacheCreation1hCostPerToken": 0.00003,
     "cacheReadCostPerToken": 0.0000015
   },
   "claude-opus-4-5-20251101": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-5": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-6": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-6-20260205": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-7": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-7-20260416": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-fable-5": {
     "inputCostPerToken": 0.00001,
     "outputCostPerToken": 0.00005,
     "cacheCreationCostPerToken": 0.0000125,
+    "cacheCreation1hCostPerToken": 0.00002,
     "cacheReadCostPerToken": 0.000001
   },
   "claude-opus-5": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-opus-4-8": {
     "inputCostPerToken": 0.000005,
     "outputCostPerToken": 0.000025,
     "cacheCreationCostPerToken": 0.00000625,
+    "cacheCreation1hCostPerToken": 0.00001,
     "cacheReadCostPerToken": 5e-7
   },
   "claude-sonnet-4-20250514": {
     "inputCostPerToken": 0.000003,
     "outputCostPerToken": 0.000015,
     "cacheCreationCostPerToken": 0.00000375,
+    "cacheCreation1hCostPerToken": 0.000006,
     "cacheReadCostPerToken": 3e-7,
     "above200k": {
       "inputCostPerToken": 0.000006,
       "outputCostPerToken": 0.0000225,
       "cacheCreationCostPerToken": 0.0000075,
+      "cacheCreation1hCostPerToken": 0.000012,
       "cacheReadCostPerToken": 6e-7
     }
   }

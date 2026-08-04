@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runStatusline } from "../statusline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { stripAnsi } from "../utils/terminal.js";
+
+// package.json sets "type": "module", so __dirname does not exist here.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DIST = path.resolve(HERE, "../../dist/index.js");
+const distExists = fs.existsSync(DIST);
 
 /**
  * The end-to-end acceptance criterion for #82: with the pricing feed
@@ -109,5 +116,118 @@ describe("rendering with the pricing feed unreachable", () => {
 
     expect(bar).toMatch(/\$\d+\.\d{2}\?/);
     expect(bar).not.toMatch(/\$0\.00\?/);
+  });
+});
+
+/**
+ * End-to-end proof for #118: a cache write made with the 1-hour TTL must be
+ * billed at the 1-hour rate, not the 5-minute rate every cache write used to
+ * get regardless of what TTL it asked for. Unit tests already cover the
+ * parser (pricing-fetcher), the transcript reader (jsonl-reader) and the
+ * cost calculator in isolation; this is the only place that drives the
+ * shipped BUNDLE (dist/index.js, spawned as a real child process via
+ * execFileSync — not vitest's resolution of ../statusline.js, which is what
+ * every other test in this file runs against) through the whole chain —
+ * parser, snapshot, reader, aggregator, calculator — unmocked, on a cold
+ * pricing cache, offline. Follows the pattern in pricing-blackhole.test.ts
+ * and statusline-width.test.ts.
+ *
+ * costSource can only reach a spawned process through a real settings.json —
+ * there is no function argument to set it through, unlike runStatusline
+ * above — so this writes one under XDG_CONFIG_HOME. stdin carries no `cost`
+ * object, so the session total can only come from the transcript below, not
+ * from a pass-through of a stdin-supplied figure.
+ */
+describe.skipIf(!distExists)("1-hour cache write pricing (#118)", () => {
+  // claude-opus-5's committed offline snapshot (src/data/fallback-pricing.ts):
+  //   cacheCreationCostPerToken:   6.25e-6  (5-minute TTL)
+  //   cacheCreation1hCostPerToken: 1e-5     (1-hour TTL)
+  //
+  // 1000 tokens written with each TTL, run through formatDollars
+  // (src/utils/format.ts):
+  //   1-hour:   1000 * 1e-5    = 0.01    -> not < 0.01, < 1 -> toFixed(2) -> "$0.01"
+  //   5-minute: 1000 * 6.25e-6 = 0.00625 -> < 0.01 -> literal          -> "$0.00"
+  // ("5-minute" is what the pre-fix code produced for every cache write,
+  // whatever TTL the transcript actually recorded.)
+  //
+  // These are two DIFFERENT rendered strings, not the same string reached
+  // two ways — the failure mode this branch hit four times already (see
+  // MEMORY.md's "vacuous tests" note). The session's only tokens are these
+  // cache-creation tokens (input/output both 0), so nothing else contributes
+  // cents that could round the two cases to the same displayed figure.
+  //
+  // Only ever called with a 1-hour count (all-1-hour, no 5-minute remainder),
+  // so it takes one parameter rather than carrying a second that every call
+  // site passes as 0 (#118 review, M4).
+  function writeCacheWriteTranscript(ephemeral1h: number): void {
+    const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, `${SESSION_ID}.jsonl`),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: new Date().toISOString(),
+        sessionId: SESSION_ID,
+        message: {
+          model: "claude-opus-5",
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: ephemeral1h,
+            cache_creation: {
+              ephemeral_5m_input_tokens: 0,
+              ephemeral_1h_input_tokens: ephemeral1h,
+            },
+          },
+        },
+      }) + "\n",
+    );
+  }
+
+  function renderOfflineWithCacheWrite(ephemeral1h: number): string {
+    writeCacheWriteTranscript(ephemeral1h);
+
+    const configDir = path.join(tmpDir, "config", "gccusage");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, "settings.json"),
+      JSON.stringify({ costSource: "calculated" }),
+    );
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: tmpDir,
+      XDG_CONFIG_HOME: path.join(tmpDir, "config"),
+      XDG_CACHE_HOME: path.join(tmpDir, "cache"),
+      // No pricing.json is seeded, so getPricingForRender reports the cache
+      // stale and the render triggers maybeSpawnPricingRefresh's detached,
+      // unref'd out-of-band child. That child does not block this process —
+      // the whole point of #84 — but it would otherwise reach the real
+      // LiteLLM feed from inside a test run. Point it at a closed local port
+      // so the refresh fails (ECONNREFUSED) instantly instead: "offline"
+      // should mean actually offline.
+      GCCUSAGE_PRICING_URL: "http://127.0.0.1:1/pricing.json",
+    };
+
+    return execFileSync(process.execPath, [DIST], {
+      input: JSON.stringify({
+        session_id: SESSION_ID,
+        model: { id: "claude-opus-5", display_name: "claude-opus-5" },
+        // No cost.total_cost_usd: the session total must be computed from
+        // the transcript, not passed through from stdin.
+      }),
+      env,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  }
+
+  it("bills a 1000-token 1-hour cache write at the 1-hour rate, not the 5-minute rate", () => {
+    const bar = stripAnsi(renderOfflineWithCacheWrite(1000));
+
+    expect(bar, `expected $0.01 for a 1000-token 1-hour cache write: ${bar}`).toContain("$0.01");
+    // The pre-fix code billed every cache write at the 5-minute rate, which
+    // for this session (cache tokens only) renders as $0.00 (0.00625 < 0.01).
+    expect(bar, `rendered the pre-fix 5-minute-rate figure: ${bar}`).not.toMatch(/\$0\.00(?!\/hr)/);
   });
 });

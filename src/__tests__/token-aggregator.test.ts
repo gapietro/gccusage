@@ -54,6 +54,7 @@ function entry(
     input_tokens?: number;
     output_tokens?: number;
     cache_creation_input_tokens?: number;
+    cache_creation_1h_input_tokens?: number;
     cache_read_input_tokens?: number;
   },
 ): JsonlEntry {
@@ -84,6 +85,7 @@ describe("aggregateTokens premium bucketing (#103)", () => {
       inputTokens: 0,
       outputTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
     });
     expect(totals.premium!.inputTokens).toBe(0);
@@ -154,5 +156,28 @@ describe("aggregateTokens premium bucketing (#103)", () => {
 
     expect(byModel.get("claude-opus-5")!.premium!.inputTokens).toBe(460_000);
     expect(byModel.get("claude-sonnet-5")!.premium!.inputTokens).toBe(400_000);
+  });
+});
+
+describe("aggregateTokens 1-hour cache write bucketing (#118)", () => {
+  // Two entries with DIFFERING 1-hour counts: a fixture where every entry
+  // used the same 1-hour count would still pass if the accumulation summed
+  // the wrong field, as long as it summed *something* proportional. Distinct
+  // counts (400 and 100) make the total (500) unreachable by that class of
+  // mistake.
+  it("sums cacheCreation1hTokens across entries, alongside the full cacheCreationTokens", () => {
+    const { totals } = aggregateTokens([
+      entry("claude-opus-5", {
+        cache_creation_input_tokens: 1000,
+        cache_creation_1h_input_tokens: 400,
+      }),
+      entry("claude-opus-5", {
+        cache_creation_input_tokens: 500,
+        cache_creation_1h_input_tokens: 100,
+      }),
+    ]);
+
+    expect(totals.cacheCreation1hTokens).toBe(500);
+    expect(totals.cacheCreationTokens).toBe(1500);
   });
 });

@@ -20,6 +20,7 @@ const PINNED_PRICING = {
     inputCostPerToken: 1 / 1_000_000,
     outputCostPerToken: 0,
     cacheCreationCostPerToken: 0,
+    cacheCreation1hCostPerToken: 2 / 1_000_000,
     cacheReadCostPerToken: 0,
   },
 };
@@ -260,6 +261,7 @@ describe("pricing cache validation", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
   };
 
@@ -325,6 +327,7 @@ describe("pricing cache validation", () => {
     inputCostPerToken: 20e-6,
     outputCostPerToken: 100e-6,
     cacheCreationCostPerToken: 25e-6,
+    cacheCreation1hCostPerToken: 40e-6,
     cacheReadCostPerToken: 2e-6,
   };
 
@@ -346,6 +349,7 @@ describe("pricing cache version validation", () => {
     inputCostPerToken: 3 / 1_000_000,
     outputCostPerToken: 15 / 1_000_000,
     cacheCreationCostPerToken: 3.75 / 1_000_000,
+    cacheCreation1hCostPerToken: 6 / 1_000_000,
     cacheReadCostPerToken: 0.3 / 1_000_000,
   };
 
@@ -374,6 +378,40 @@ describe("pricing cache version validation", () => {
     expect(entry).not.toBeNull();
     expect(entry!.data["claude-x"]).toEqual(SANE);
   });
+
+  // The existing "version does not match" test uses PRICING_CACHE_VERSION + 1,
+  // which is version-RELATIVE: it keeps passing after any bump without ever
+  // proving the bump did its job. This pins the literal old version.
+  //
+  // The entry is deliberately given cacheCreation1hCostPerToken — a shape
+  // COST_KEYS bounds would accept on its own — so the only thing that can
+  // reject this fixture is the envelope's version literal. Without that field
+  // the bounds check rejects the entry independently of the envelope, and
+  // reverting PRICING_CACHE_VERSION to 1 would no longer turn this test red
+  // (confirmed: that was the exact vacuity found in the first pass). A
+  // realistic pre-#118 file — entry missing the field, as an old parser would
+  // actually have written — is still rejected by BOTH layers; that
+  // belt-and-suspenders behavior is what made the original fixture blind to
+  // this specific mutation.
+  it("rejects a v1 cache envelope even when its entries are otherwise valid", () => {
+    write(
+      "pricing.json",
+      JSON.stringify({
+        version: 1,
+        timestamp: Date.now(),
+        data: {
+          "claude-opus-5": {
+            inputCostPerToken: 0.000005,
+            outputCostPerToken: 0.000025,
+            cacheCreationCostPerToken: 0.00000625,
+            cacheCreation1hCostPerToken: 0.00001,
+            cacheReadCostPerToken: 0.0000005,
+          },
+        },
+      }),
+    );
+    expect(loadPricingCacheEntry()).toBeNull();
+  });
 });
 
 describe("pricing cache tier validation (#103)", () => {
@@ -388,12 +426,14 @@ describe("pricing cache tier validation (#103)", () => {
             inputCostPerToken: 0.000005,
             outputCostPerToken: 0.000025,
             cacheCreationCostPerToken: 0.00000625,
+            cacheCreation1hCostPerToken: 0.00001,
             cacheReadCostPerToken: 0.0000005,
             // Premium below standard: not a price.
             above200k: {
               inputCostPerToken: 0.0000001,
               outputCostPerToken: 0.0000002,
               cacheCreationCostPerToken: 0.0000003,
+              cacheCreation1hCostPerToken: 0.0000002,
               cacheReadCostPerToken: 0.0000004,
             },
           },

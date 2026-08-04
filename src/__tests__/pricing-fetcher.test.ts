@@ -45,6 +45,7 @@ const CACHED_TABLE: PricingTable = {
     inputCostPerToken: 1 / 1_000_000,
     outputCostPerToken: 2 / 1_000_000,
     cacheCreationCostPerToken: 1 / 1_000_000,
+    cacheCreation1hCostPerToken: 2 / 1_000_000,
     cacheReadCostPerToken: 0.1 / 1_000_000,
   },
 };
@@ -200,6 +201,7 @@ describe("parseLitellmPricing above-200k tier (#103)", () => {
       inputCostPerToken: 0.000006,
       outputCostPerToken: 0.0000225,
       cacheCreationCostPerToken: 0.0000075,
+      cacheCreation1hCostPerToken: 0.000012,
       cacheReadCostPerToken: 0.0000006,
     });
     // The base rates must be untouched by the tier.
@@ -246,5 +248,119 @@ describe("parseLitellmPricing above-200k tier (#103)", () => {
     const tier = table["claude-sonnet-4-5"]!.above200k!;
     expect(tier.cacheCreationCostPerToken).toBeCloseTo(0.000006 * 1.25, 12);
     expect(tier.cacheReadCostPerToken).toBeCloseTo(0.000006 * 0.1, 12);
+  });
+});
+
+describe("1-hour cache creation rate", () => {
+  it("uses the published above_1hr rate", () => {
+    // 1.2e-5 is deliberately NOT input x 2 (which would be 1e-5) — a
+    // resolveCache1hRate that ignored `published` and always returned the
+    // derivation would still pass an expectation of 1e-5. It stays above
+    // cacheCreationCost (6.25e-6) so no repair fires and the published value
+    // passes straight through, diverging from the derivation. Do not "tidy"
+    // this back to a realistic 2x rate; that would silently restore the gap.
+    const table = parseLitellmPricing({
+      "claude-test-a": {
+        input_cost_per_token: 5e-6,
+        output_cost_per_token: 2.5e-5,
+        cache_creation_input_token_cost: 6.25e-6,
+        cache_creation_input_token_cost_above_1hr: 1.2e-5,
+      },
+    });
+    expect(table["claude-test-a"]!.cacheCreation1hCostPerToken).toBe(1.2e-5);
+  });
+
+  it("derives input x 2 when the feed publishes no 1-hour rate", () => {
+    const table = parseLitellmPricing({
+      "claude-test-b": {
+        input_cost_per_token: 3e-6,
+        output_cost_per_token: 1.5e-5,
+        cache_creation_input_token_cost: 3.75e-6,
+      },
+    });
+    expect(table["claude-test-b"]!.cacheCreation1hCostPerToken).toBe(6e-6);
+  });
+
+  // Real broken record: claude-3-opus-20240229 publishes a 1-hour rate BELOW
+  // its own 5-minute rate. A longer TTL cannot cost less, so it is repaired to
+  // the derivation (1.5e-5 x 2 = 3e-5), which is Anthropic's real published
+  // rate for that model.
+  it("repairs a 1-hour rate that undercuts its own 5-minute rate", () => {
+    const table = parseLitellmPricing({
+      "claude-3-opus-20240229": {
+        input_cost_per_token: 1.5e-5,
+        output_cost_per_token: 7.5e-5,
+        cache_creation_input_token_cost: 1.875e-5,
+        cache_creation_input_token_cost_above_1hr: 6e-6,
+      },
+    });
+    expect(table["claude-3-opus-20240229"]!.cacheCreation1hCostPerToken).toBe(3e-5);
+  });
+
+  // Documents the DELIBERATE gap in the monotonicity-only rule (spec D2).
+  // claude-3-haiku publishes 6e-6 against a 3e-7 five-minute rate — 20x, and
+  // wrong — but it is ABOVE its sibling, so monotonicity does not catch it.
+  // Claude Code cannot run Haiku 3, so the bad rate is unreachable. If someone
+  // later swaps monotonicity for a plausibility band, this test fails and
+  // forces them back to spec D2 rather than letting the change pass silently.
+  it("does NOT repair an implausible rate that is merely too high", () => {
+    const table = parseLitellmPricing({
+      "claude-3-haiku-20240307": {
+        input_cost_per_token: 2.5e-7,
+        output_cost_per_token: 1.25e-6,
+        cache_creation_input_token_cost: 3e-7,
+        cache_creation_input_token_cost_above_1hr: 6e-6,
+      },
+    });
+    expect(table["claude-3-haiku-20240307"]!.cacheCreation1hCostPerToken).toBe(6e-6);
+  });
+
+  it("reads the above-200k cross-product rate onto the tier", () => {
+    // The cross-product value (1.5e-5) is deliberately NOT tierInput x 2
+    // (which would be 1.2e-5) and is ABOVE the tier's cache-creation cost
+    // (7.5e-6), so this test cannot be satisfied by any path other than
+    // actually reading TIER_FIELDS.cacheCreation1hAbove200k: misreading the
+    // base field (6e-6, below cacheCreationCost) repairs to 1.2e-5, and a
+    // parser that ignored the field entirely and derived tierInput x 2 also
+    // lands on 1.2e-5. Both wrong answers coincide with each other but not
+    // with the correct 1.5e-5 — a derivation cannot masquerade as a read.
+    const table = parseLitellmPricing({
+      "claude-sonnet-4-5": {
+        input_cost_per_token: 3e-6,
+        output_cost_per_token: 1.5e-5,
+        cache_creation_input_token_cost: 3.75e-6,
+        cache_creation_input_token_cost_above_1hr: 6e-6,
+        input_cost_per_token_above_200k_tokens: 6e-6,
+        output_cost_per_token_above_200k_tokens: 2.25e-5,
+        cache_creation_input_token_cost_above_200k_tokens: 7.5e-6,
+        cache_creation_input_token_cost_above_1hr_above_200k_tokens: 1.5e-5,
+      },
+    });
+    expect(table["claude-sonnet-4-5"]!.above200k!.cacheCreation1hCostPerToken).toBe(1.5e-5);
+  });
+
+  it("derives the tier's 1-hour rate from the TIER input when absent", () => {
+    // The BASE 1-hour field is 9e-6 here, deliberately NOT tierInput x 2
+    // (which would be 1.2e-5, coinciding with the correct derivation below).
+    // If parseTier misread this base field instead of the (absent) tier
+    // field, it would feed 9e-6 into resolveCache1hRate against the tier's
+    // own cacheCreationCost (7.5e-6): 9e-6 is NOT below 7.5e-6, so no repair
+    // fires and 9e-6 passes straight through — diverging from 1.2e-5. Merely
+    // deleting the base field does not close this: `published` would then be
+    // undefined and fall through to the same correct derivation, proving
+    // nothing. Do not "tidy" this back to a realistic 2x rate.
+    const table = parseLitellmPricing({
+      "claude-sonnet-4-20250514": {
+        input_cost_per_token: 3e-6,
+        output_cost_per_token: 1.5e-5,
+        cache_creation_input_token_cost: 3.75e-6,
+        cache_creation_input_token_cost_above_1hr: 9e-6,
+        input_cost_per_token_above_200k_tokens: 6e-6,
+        output_cost_per_token_above_200k_tokens: 2.25e-5,
+        cache_creation_input_token_cost_above_200k_tokens: 7.5e-6,
+      },
+    });
+    // 6e-6 (tier input) x 2 — the exact value the three sonnet-4-5 keys publish.
+    expect(table["claude-sonnet-4-20250514"]!.above200k!.cacheCreation1hCostPerToken).toBe(1.2e-5);
   });
 });

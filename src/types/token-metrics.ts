@@ -2,6 +2,17 @@ export interface TokenCounts {
   inputTokens: number;
   outputTokens: number;
   cacheCreationTokens: number;
+  /**
+   * The SUBSET of `cacheCreationTokens` written with the 1-hour TTL. 5-minute
+   * tokens are the difference. A subset and not a sibling bucket for the same
+   * reason `premium` is: every consumer of `cacheCreationTokens` keeps seeing
+   * the full count, so no token widget starts under-reporting the day costing
+   * gains a dimension (#118).
+   *
+   * Because `premium` is itself a `TokenCounts`, this composes into the full
+   * {5m,1h} x {standard,above-200k} matrix with no special-casing.
+   */
+  cacheCreation1hTokens: number;
   cacheReadTokens: number;
 }
 

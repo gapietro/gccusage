@@ -14,6 +14,7 @@ const PINNED_PRICING = {
     inputCostPerToken: 1 / 1_000_000,
     outputCostPerToken: 0,
     cacheCreationCostPerToken: 0,
+    cacheCreation1hCostPerToken: 2 / 1_000_000,
     cacheReadCostPerToken: 0,
   },
 };
