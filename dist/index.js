@@ -2712,8 +2712,24 @@ function getTodayAggregate(now = new Date()) {
 
 //#endregion
 //#region src/data/cost-calculator.ts
+function rateCounts(counts, rates) {
+	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + counts.cacheCreationTokens * rates.cacheCreationCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
+}
+/**
+* `metrics.premium` is a SUBSET of the four counts, so standard tokens are the
+* difference. When the model publishes no tier the premium tokens fall back to
+* base rates — an under-count we flag rather than guess at (#103).
+*/
 function calculateCost(metrics, pricing) {
-	return metrics.inputTokens * pricing.inputCostPerToken + metrics.outputTokens * pricing.outputCostPerToken + metrics.cacheCreationTokens * pricing.cacheCreationCostPerToken + metrics.cacheReadTokens * pricing.cacheReadCostPerToken;
+	const premium = metrics.premium;
+	if (!premium) return rateCounts(metrics, pricing);
+	const standard = {
+		inputTokens: metrics.inputTokens - premium.inputTokens,
+		outputTokens: metrics.outputTokens - premium.outputTokens,
+		cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
+		cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens
+	};
+	return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);
 }
 /**
 * Returns the skipped models alongside the costs rather than a bare Map. The
@@ -2724,18 +2740,26 @@ function calculateCost(metrics, pricing) {
 function calculateCostByModel(byModel, pricing) {
 	const costs = new Map();
 	const unpriced = [];
+	const approximated = [];
 	for (const [model, metrics] of byModel) {
 		const modelPricing = findPricing(model, pricing);
-		if (modelPricing) costs.set(model, calculateCost(metrics, modelPricing));
-		else if (hasTokens(metrics)) unpriced.push(model);
+		if (modelPricing) {
+			costs.set(model, calculateCost(metrics, modelPricing));
+			if (!modelPricing.above200k && hasPremiumTokens(metrics)) approximated.push(model);
+		} else if (hasTokens(metrics)) unpriced.push(model);
 	}
 	return {
 		costs,
-		unpriced
+		unpriced,
+		approximated
 	};
 }
 function hasTokens(metrics) {
 	return metrics.inputTokens > 0 || metrics.outputTokens > 0 || metrics.cacheCreationTokens > 0 || metrics.cacheReadTokens > 0;
+}
+function hasPremiumTokens(metrics) {
+	const premium = metrics.premium;
+	return premium !== void 0 && (premium.inputTokens > 0 || premium.outputTokens > 0 || premium.cacheCreationTokens > 0 || premium.cacheReadTokens > 0);
 }
 function calculateTotalCost(costByModel) {
 	let total = 0;
