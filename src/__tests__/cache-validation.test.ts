@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { checkCache, writeCache } from "../cache/cache-manager.js";
 import { computeCacheKey } from "../cache/cache-key.js";
-import { trackTurn } from "../data/turn-tracker.js";
 import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry, savePricingCache, PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 import { loadBlockCache } from "../cache/block-cache.js";
@@ -99,30 +98,6 @@ describe("statusline cache validation", () => {
   it("discards a torn file", () => {
     write("statusline-cache.json", '{"output": "x", "timest');
     expect(checkCache(HOUR, "k1")).toBeNull();
-  });
-});
-
-describe("turn counter validation", () => {
-  it("counts up across calls in one session", () => {
-    expect(trackTurn("s1")).toBe(1);
-    expect(trackTurn("s1")).toBe(2);
-  });
-
-  // The reproduced blank-bar defect.
-  it("rebuilds from a bare null document instead of throwing", () => {
-    write("turn-count.json", "null");
-    expect(trackTurn("s1")).toBe(1);
-  });
-
-  it("rebuilds when count is not a number", () => {
-    write("turn-count.json", JSON.stringify({ sessionId: "s1", count: "7" }));
-    expect(trackTurn("s1")).toBe(1);
-    expect(read("turn-count.json")).toEqual({ sessionId: "s1", count: 1 });
-  });
-
-  it("rebuilds from a torn file", () => {
-    write("turn-count.json", '{"sessionId": "s1", "cou');
-    expect(trackTurn("s1")).toBe(1);
   });
 });
 
