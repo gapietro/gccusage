@@ -446,33 +446,18 @@ describe("block cache validation", () => {
 });
 
 describe("no NaN survives a hostile cache directory (#92)", () => {
-  it("renders a correct bar with the turn counter, statusline cache, and daily shard all corrupted", async () => {
+  it("renders a correct bar with the statusline cache and daily shard both corrupted", async () => {
     const stdin = {
       session_id: "hostile",
       model: { id: "claude-opus-4-5", display_name: "Opus" },
       cost: { total_cost_usd: 1.5 },
     };
 
-    // This pins trackTurn's null-guard (`existing && existing.sessionId ===
-    // sessionId`), not schema validation: `readJsonValidated` already maps a
-    // bare "null" document to the JS value `null` regardless of how strict
-    // `TurnDataSchema` is (a `v.object` schema rejects `null` as the wrong
-    // type; a permissive schema accepts it and its *output* is `null` too —
-    // both paths return the same `null` from `readJsonValidated`). Removing
-    // the null-guard reproduces the pre-#92 defect and turns this into a
-    // `TypeError: Cannot read properties of null (reading 'sessionId')` that
-    // propagates straight out of runStatusline here, since this test calls it
-    // directly rather than through src/index.ts's main().catch(), which is
-    // what turns the same throw into an empty bar and exit 0 in production.
-    // (The schema-strictness invariant this comment used to claim is pinned
-    // separately, by the Infinity-count regression below.)
-    //
-    // The turn store is only read when the layout contains `turn-counter`
-    // (#99), so this leg renders with HOSTILE_SETTINGS below rather than
-    // DEFAULT_SETTINGS. With the default layout the sabotage is never read
-    // and this leg would assert nothing.
-    fs.mkdirSync(path.join(tmpDir, "gccusage", "turns"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "gccusage", "turns", "hostile.json"), "null");
+    // This used to sabotage a third store, the turn shard, to pin trackTurn's
+    // null-guard. That store was deleted in #129 — the turn count is derived
+    // from the transcript now and persists nothing. The bare-null-document
+    // case it covered is pinned directly by the block-cache and pricing-cache
+    // describes above, which assert `readJsonValidated` maps "null" to null.
 
     // The key gate in checkCache must clear so only the schema can reject
     // this entry — otherwise the gate rejects it for a reason unrelated to
@@ -519,17 +504,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
       JSON.stringify({ sessionId: "ghost", date: today, costUsd: "not-a-number", updatedAt: now.getTime() }),
     );
 
-    // DEFAULT_SETTINGS plus a turn-counter, so the corrupted turn shard is
-    // actually read. Everything else about the layout is unchanged.
-    const HOSTILE_SETTINGS = {
-      ...DEFAULT_SETTINGS,
-      lines: [
-        ...DEFAULT_SETTINGS.lines,
-        { widgets: [{ type: "turn-counter" }], flex: "left" as const },
-      ],
-    };
-
-    const output = await runStatusline(stdin, HOSTILE_SETTINGS);
+    const output = await runStatusline(stdin, DEFAULT_SETTINGS);
 
     expect(output).not.toContain("NaN");
     expect(output).not.toContain("undefined");
@@ -537,42 +512,5 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // The real session cost still renders — degrading is not the same as
     // rendering nothing, which is what the null turn-count used to do.
     expect(output).toContain("$1.50");
-  });
-
-  it("rejects an Infinity turn count instead of rendering it", async () => {
-    const stdin = {
-      session_id: "hostile-count",
-      model: { id: "claude-opus-4-5", display_name: "Opus" },
-      cost: { total_cost_usd: 1.5 },
-    };
-
-    // The invariant the null-document test above no longer pins:
-    // `JSON.parse("1e400")` is `Infinity`, and a bare `v.number()` schema
-    // accepts it — the shard reads as "valid" and `count` renders as the
-    // literal text "#Infinity" (turn-counter.ts's `!count || count < 1` guard
-    // does not catch it: `Infinity` is truthy and not less than 1).
-    // `TurnDataSchema` constrains `count` to `v.safeInteger()`, which rejects
-    // this shard outright, so trackTurn rebuilds it fresh at 1 instead of
-    // trusting the corrupted value.
-    fs.mkdirSync(path.join(tmpDir, "gccusage", "turns"), { recursive: true });
-    fs.writeFileSync(
-      path.join(tmpDir, "gccusage", "turns", "hostile-count.json"),
-      '{"sessionId":"hostile-count","count":1e400,"updatedAt":0}',
-    );
-
-    // DEFAULT_SETTINGS plus a turn-counter, so the corrupted turn shard is
-    // actually read.
-    const HOSTILE_COUNT_SETTINGS = {
-      ...DEFAULT_SETTINGS,
-      lines: [
-        ...DEFAULT_SETTINGS.lines,
-        { widgets: [{ type: "turn-counter" }], flex: "left" as const },
-      ],
-    };
-
-    const output = await runStatusline(stdin, HOSTILE_COUNT_SETTINGS);
-
-    expect(output).not.toContain("Infinity");
-    expect(output).toContain("#1");
   });
 });
