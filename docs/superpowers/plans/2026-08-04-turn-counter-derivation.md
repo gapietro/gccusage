@@ -635,6 +635,45 @@ In `src/__tests__/cache-validation.test.ts`, replace the entire
   });
 ```
 
+**Addendum (fix round 1):** a third test, alongside the `1e400` prune test
+above, is required to distinguish `v.finite()` from `v.safeInteger()` on
+`updatedAt` — see Step 10's correction note. It uses the same shape as the
+`1e400` prune test with `1e300` substituted, a distinct filename (`absurd.json`)
+and a distinct `sessionId`/`session_id` (`"absurd"` / `"sweeper-2"`) so it
+does not collide with the `1e400` fixture:
+
+```ts
+  it("prunes a daily shard whose updatedAt is finite but absurd", async () => {
+    // `v.finite()` alone would accept 1e300 — it is a real number — and
+    // `now - 1e300` is just as never-stale as `now - Infinity`. Only
+    // `v.safeInteger()` rejects it. This is the case that distinguishes the
+    // two constraints, so it must exist separately from the 1e400 test.
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    const absurd = path.join(tmpDir, "gccusage", "daily", "absurd.json");
+    fs.writeFileSync(
+      absurd,
+      '{"sessionId":"absurd","date":"2020-01-01","costUsd":1,"baselineUsd":0,"updatedAt":1e300}',
+    );
+
+    // Any render that reads the store triggers the prune sweep.
+    await runStatusline(
+      {
+        session_id: "sweeper-2",
+        model: { id: "claude-opus-4-5", display_name: "Opus" },
+        cost: { total_cost_usd: 1.5 },
+      },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(fs.existsSync(absurd)).toBe(false);
+  });
+```
+
+Before applying Step 10's schema fix, this test must be confirmed to FAIL
+against the `v.finite()`-only version (it did: `absurd.json` still existed
+after the sweep) — otherwise `1e300` would be rejected by something else and
+the diagnosis would be wrong.
+
 - [ ] **Step 9: Run tests to verify they fail**
 
 Run: `npx vitest run src/__tests__/cache-validation.test.ts -t "Infinity"`
@@ -647,6 +686,23 @@ Expected: BOTH FAIL.
 
 - [ ] **Step 10: Fix the schemas**
 
+**Correction (fix round 1, review of commit `61e4b2d`):** the original version
+of this step used `v.finite()` for all three numeric fields, including
+`updatedAt`, and justified it below as "these are dollar amounts and
+millisecond timestamps, so they are legitimately non-integer." That reasoning
+is true of `costUsd`/`baselineUsd` and **false** of `updatedAt`. `v.finite()`
+closes the `Infinity` instance but not the class: `{"updatedAt": 1e300}` is
+finite, passes the pipe, and `now - 1e300` is just as never-stale as
+`now - Infinity` — the shard stays immortal. `updatedAt` is always an integer
+millisecond stamp from `Date.now()` / `getTime()`, so it needs the stricter
+`v.safeInteger()`, the same constraint the deleted `TurnDataSchema` used for
+its own timestamp field. This was caught by review, not by the original test
+suite — the acceptance criteria only tested `1e400` (`Infinity`), which
+`v.finite()` does reject; `1e300` is the case that distinguishes the two
+constraints, and a review-round test now covers it (see Step 8's addendum
+below). The code block below reflects the corrected version, with `#NNN`
+resolved to the actual issue number this task filed, **#130**.
+
 In `src/data/daily-cost-tracker.ts`, replace `ShardSchema` (lines 26-34) with:
 
 ```ts
@@ -656,16 +712,22 @@ const ShardSchema = v.object({
   // `v.finite()`, not bare `v.number()`: `JSON.parse("1e400")` is `Infinity`
   // and `v.number()` accepts it. An infinite cost reaches `formatDollars` —
   // `amount.toFixed(0)` with no finite check — as the literal text
-  // "$Infinity" (#NNN).
+  // "$Infinity" (#130).
   costUsd: v.pipe(v.number(), v.finite()), // latest cumulative session cost
   baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0), // cumulative cost at the start of `date`
   // Absent in legacy files, and an unrecognised value is treated the same way.
   source: v.fallback(v.optional(CostSourceSchema), undefined),
   // A second, independent failure from the same parse: `now - Infinity` is
   // `-Infinity`, which is always less than STALE_SESSION_MS, making the shard
-  // unpruneable forever. The fallback to 0 makes a rejected value read as
-  // infinitely stale instead, so it is pruned on the next sweep (#NNN).
-  updatedAt: v.fallback(v.pipe(v.number(), v.finite()), 0),
+  // unpruneable forever. `v.finite()` alone is not enough here, unlike
+  // `costUsd`/`baselineUsd` above — 1e300 is finite, so it would pass the
+  // pipe, and `now - 1e300` is just as never-stale as `now - Infinity`.
+  // `updatedAt` is always an integer millisecond stamp from `Date.now()` /
+  // `getTime()`, so it gets the stricter `v.safeInteger()`, the same
+  // constraint the deleted `TurnDataSchema` used for its own timestamp. The
+  // fallback to 0 makes a rejected value read as infinitely stale instead, so
+  // it is pruned on the next sweep (#130).
+  updatedAt: v.fallback(v.pipe(v.number(), v.safeInteger()), 0),
 });
 ```
 
@@ -677,15 +739,16 @@ const LegacyEntrySchema = v.object({
   costUsd: v.pipe(v.number(), v.finite()),
   baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0),
   source: v.fallback(v.optional(CostSourceSchema), undefined),
-  updatedAt: v.fallback(v.optional(v.pipe(v.number(), v.finite())), undefined),
+  updatedAt: v.fallback(v.optional(v.pipe(v.number(), v.safeInteger())), undefined),
 });
 ```
 
-Replace `#NNN` with the real issue number from Step 1.
-
-`v.finite()` rather than `v.safeInteger()`: these are dollar amounts and
-millisecond timestamps, so they are legitimately non-integer. `v.finite()`
-rejects `Infinity`, `-Infinity` and `NaN`, which is the whole hazard.
+`v.finite()` for `costUsd`/`baselineUsd`: these are dollar amounts, so they
+are legitimately non-integer, and `v.finite()` rejects `Infinity`,
+`-Infinity` and `NaN` — the whole hazard for a value that only ever feeds
+`formatDollars`. `v.safeInteger()` for `updatedAt`: it is never fractional in
+practice, and only the stricter constraint closes the `1e300` gap that
+`v.finite()` leaves open for the staleness computation.
 
 - [ ] **Step 11: Run tests to verify they pass**
 
@@ -739,30 +802,77 @@ Revert `costUsd` to `v.number()`, run the file, confirm the `$Infinity` test goe
 
 - [ ] **Step 15: Build and commit — two commits, in this order**
 
-The whole suite is green before either commit is made. Splitting them keeps the
-derivation and the schema fix independently revertable and separately
-reviewable, without ever leaving a red commit on the branch.
+**Correction (fix round 1, review of commit `0011abe`):** the original
+version of this step put ALL of `cache-validation.test.ts`'s changes — Step
+8's new tests, the old test's deletion, and Step 12's `#92`-test cleanup —
+into a single "whole file" `git add`, and assigned it to commit 2 alongside
+the schema fix. That leaves commit 1 red on its own: at that point
+`cache-validation.test.ts` still contains the old
+`it("rejects an Infinity turn count instead of rendering it", ...)`, which
+writes a turn shard and asserts `expect(output).toContain("#1")`; with
+`turnCount` now derived and no transcript for session `"hostile-count"`, the
+count is 0, `turn-counter.ts`'s `!count || count < 1` guard renders nothing,
+and the assertion fails. The plan promised both commits would be green in
+isolation ("without ever leaving a red commit on the branch") and this
+version broke that promise. **Both commits must be independently green** —
+verify each by checking it out into a throwaway worktree (or equivalent) and
+running the full suite there, building from a tree that contains only that
+commit's own source (a build run against the whole working directory, with
+the other commit's changes still sitting unstaged, will bake code into the
+bundle that the commit's own diff doesn't show — caught once already in this
+task, see the report for Task 3).
+
+The fix is to split `cache-validation.test.ts`'s own changes across the two
+commits, matching the source-level split already documented in Steps 8 and
+12:
+
+- **Commit 1** gets the turn-store-*removal* half of `cache-validation.test.ts`:
+  the old `"rejects an Infinity turn count instead of rendering it"` test
+  deleted outright (no replacement here), and the `#92` test's turn leg
+  stripped per Step 12 (rename, drop the two turn-shard `fs` calls, drop
+  `HOSTILE_SETTINGS`, swap in `DEFAULT_SETTINGS`, swap in the replacement
+  comment) — plus `src/data/pipeline.ts`, `src/__tests__/turn-count-render.test.ts`,
+  the four Step-4 deletions, and this commit's own build. `daily-cost-tracker.ts`
+  is untouched here; nothing in commit 1 exercises a corrupted daily shard, so
+  the suite is green with the schema still unfixed.
+- **Commit 2** gets the turn-store-*addition* half: Step 8's three new tests
+  (the `1e400` prune test, the `1e300` prune test from Step 8's addendum, and
+  the `$Infinity`-cost test) — plus `src/data/daily-cost-tracker.ts`'s schema
+  fix and this commit's own build.
+
+Concretely, this means building and committing `cache-validation.test.ts`
+itself in two passes: strip the three new tests out of the working copy (so
+only the deletion + `#92`-cleanup remains), build with `daily-cost-tracker.ts`
+reverted to its pre-Step-10 state, verify the suite green, commit 1; then
+restore the full file (all three new tests present) and the schema fix,
+build again, verify the suite green, commit 2.
 
 First the derivation:
 
 ```bash
 npm run build
-git add src/data/pipeline.ts src/__tests__/turn-count-render.test.ts
+git add src/data/pipeline.ts src/__tests__/turn-count-render.test.ts src/__tests__/cache-validation.test.ts
 git add -f dist/index.js
 git commit -m "Derive turnCount from the transcript, delete the turn store (#129)"
 ```
+
+At this point `git diff --stat src/data/daily-cost-tracker.ts` must be empty
+— if it shows a diff, the schema fix leaked into commit 1's build.
 
 Note the deletions from Step 4 were already staged by `git rm`, so they ride
 along with this first commit — that is correct, they are part of the same
 change.
 
-Then the schema fix:
+Then the schema fix — restore `cache-validation.test.ts`'s three new tests
+(they were only removed from the *working copy* for commit 1's build, not
+deleted from the intended change) and reapply the schema fix to
+`daily-cost-tracker.ts` before building:
 
 ```bash
 npm run build
 git add src/data/daily-cost-tracker.ts src/__tests__/cache-validation.test.ts
 git add -f dist/index.js
-git commit -m "Reject Infinity in the daily cost store (#NNN)
+git commit -m "Reject Infinity in the daily cost store (#130)
 
 Found while deleting turn-tracker.ts for #129, which removed the repo's only
 two uses of v.safeInteger(). The same shape was unguarded in the daily store,
@@ -770,6 +880,18 @@ which unlike the turn store is in the default layout: an Infinity updatedAt
 made a shard unpruneable forever, and an Infinity costUsd rendered as the
 literal text \$Infinity."
 ```
+
+**Correction (fix round 1):** the `\$Infinity` above is written escaped
+because it sits inside a fenced code block quoting a shell heredoc for
+documentation purposes — when this command is actually typed into a
+double-quoted `git commit -m "$(cat <<'EOF' ... EOF)"` heredoc, `\$` is what
+survives correctly. The version originally run for this task used a
+single-quoted heredoc delimiter (`<<'EOF'`) with `\$Infinity` inside it, and
+because a single-quoted heredoc does no shell expansion at all, the backslash
+was never consumed — it landed in the actual commit message as the four
+literal characters `\$Infinity` instead of `$Infinity`. Use `\$Infinity` only
+if the heredoc delimiter is unquoted (`<<EOF`, which *would* expand `$` and
+needs the escape); with a quoted delimiter, write `$Infinity` verbatim.
 
 Verify both landed and the tree is clean:
 
