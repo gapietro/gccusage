@@ -1,6 +1,6 @@
 {
   "name": "gccusage",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Powerline-style statusline for Claude Code — model info, costs, context usage, git status, and more",
   "type": "module",
   "bin": {
@@ -61,6 +61,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "license": "MIT",
