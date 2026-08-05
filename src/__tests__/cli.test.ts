@@ -175,6 +175,7 @@ describe("gccusage today", () => {
 describe("gccusage setup", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
+  let originalXdg: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   const settingsPath = (): string => path.join(tmpDir, ".claude", "settings.json");
@@ -184,7 +185,9 @@ describe("gccusage setup", () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-"));
     originalHome = process.env["HOME"];
+    originalXdg = process.env["XDG_CACHE_HOME"];
     process.env["HOME"] = tmpDir;
+    process.env["XDG_CACHE_HOME"] = tmpDir;
     fs.mkdirSync(path.join(tmpDir, ".claude"), { recursive: true });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -193,6 +196,8 @@ describe("gccusage setup", () => {
     logSpy.mockRestore();
     if (originalHome === undefined) delete process.env["HOME"];
     else process.env["HOME"] = originalHome;
+    if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = originalXdg;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -256,5 +261,29 @@ describe("gccusage setup", () => {
 
     await expect(runCli(["setup"])).rejects.toThrow(settingsPath());
     await expect(runCli(["setup"])).rejects.toThrow("re-run `gccusage setup`");
+  });
+
+  it("removes the orphaned turn store left by the pre-#129 tracker", async () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cacheDir, "turns", "abc.json"),
+      '{"sessionId":"abc","count":7,"updatedAt":0}',
+    );
+    fs.writeFileSync(
+      path.join(cacheDir, "turn-count.json"),
+      '{"sessionId":"abc","count":7,"updatedAt":0}',
+    );
+
+    await runCli(["setup"]);
+
+    expect(fs.existsSync(path.join(cacheDir, "turns"))).toBe(false);
+    expect(fs.existsSync(path.join(cacheDir, "turn-count.json"))).toBe(false);
+  });
+
+  it("does not fail when there is no turn store to remove", async () => {
+    // The common case for anyone who never configured turn-counter, and for
+    // every user after the first cleanup. Must not throw.
+    await expect(runCli(["setup"])).resolves.toBeUndefined();
   });
 });

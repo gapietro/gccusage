@@ -2,13 +2,14 @@ import { getTodayAggregate } from "./cache/today-aggregate-cache.js";
 import { fetchPricing, refreshPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
 import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
+import { getCacheDir } from "./utils/paths.js";
 import type { TokenMetrics } from "./types/token-metrics.js";
 
 export async function runCli(args: string[]): Promise<void> {
@@ -174,6 +175,28 @@ function readExistingSettings(
   return { settings: parsed as Record<string, unknown>, raw };
 }
 
+/**
+ * Remove the turn store the pre-#129 tracker left behind.
+ *
+ * `trackTurn` owned both the 48h prune and the legacy-file unlink, so deleting
+ * it stranded whatever was on disk. This runs in `setup` rather than on the
+ * render path: an unconditional unlink per render is exactly the I/O #99
+ * removed, and the leftovers are ~110 bytes of inert JSON.
+ *
+ * Best effort. A cache directory we cannot clean is not a reason to fail the
+ * command that configures the statusline.
+ */
+function removeLegacyTurnStore(): void {
+  const cacheDir = getCacheDir();
+  for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) {
+    try {
+      rmSync(target, { recursive: true, force: true });
+    } catch {
+      // Best effort — see above.
+    }
+  }
+}
+
 function runSetup(): void {
   // Resolve the absolute path to this script's dist/index.js
   const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
@@ -194,6 +217,8 @@ function runSetup(): void {
 
   // Indented with a trailing newline: this is a file the user reads and edits.
   writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+
+  removeLegacyTurnStore();
 
   console.log("gccusage setup complete!\n");
   console.log(`  Settings: ${settingsPath}`);

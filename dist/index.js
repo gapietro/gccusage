@@ -7,7 +7,7 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -6083,6 +6083,26 @@ function readExistingSettings(settingsPath) {
 		raw
 	};
 }
+/**
+* Remove the turn store the pre-#129 tracker left behind.
+*
+* `trackTurn` owned both the 48h prune and the legacy-file unlink, so deleting
+* it stranded whatever was on disk. This runs in `setup` rather than on the
+* render path: an unconditional unlink per render is exactly the I/O #99
+* removed, and the leftovers are ~110 bytes of inert JSON.
+*
+* Best effort. A cache directory we cannot clean is not a reason to fail the
+* command that configures the statusline.
+*/
+function removeLegacyTurnStore() {
+	const cacheDir = getCacheDir();
+	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
+		rmSync(target, {
+			recursive: true,
+			force: true
+		});
+	} catch {}
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
 	const settingsPath = resolve(homedir(), ".claude", "settings.json");
@@ -6096,6 +6116,7 @@ function runSetup() {
 		command
 	};
 	writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	removeLegacyTurnStore();
 	console.log("gccusage setup complete!\n");
 	console.log(`  Settings: ${settingsPath}`);
 	console.log(`  Command:  ${command}`);
