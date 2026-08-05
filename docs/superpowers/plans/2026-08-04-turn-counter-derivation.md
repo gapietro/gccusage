@@ -288,16 +288,28 @@ git commit -m "Add countHumanTurns, deriving turns from the transcript (#129)"
 
 ---
 
-### Task 3: Wire the pipeline and delete the tracker
+### Task 3: Wire the pipeline, delete the tracker, and close the Infinity holes
 
 **Files:**
 - Modify: `src/data/pipeline.ts:18-19` (imports), `src/data/pipeline.ts:140-146` (the gate)
 - Delete: `src/data/turn-tracker.ts`, `src/config/layout.ts`, `src/__tests__/turn-tracker.test.ts`, `src/__tests__/layout-gate.test.ts`
+- Modify: `src/data/daily-cost-tracker.ts:26-34` (`ShardSchema`), `:43-49` (`LegacyEntrySchema`)
+- Modify: `src/__tests__/cache-validation.test.ts:448-578`
 - Test: `src/__tests__/turn-count-render.test.ts` (create)
 
 **Interfaces:**
 - Consumes: `countHumanTurns` from Task 2.
 - Produces: `RenderContext.turnCount` is now the human-prompt count. Its type is unchanged (`number`, `src/types/render-context.ts:49`), so no consumer signature changes.
+
+**Why these are one task.** Deleting `turn-tracker.ts` is what removes the
+repo's only two uses of `v.safeInteger()`, and it breaks the two
+`cache-validation.test.ts` tests that used the turn store as their sabotage
+vehicle. Splitting the deletion from the repair would commit a knowingly-red
+suite. The two halves are causally linked, so they land together and the suite
+is green at every commit.
+
+This task ends in **two commits** — the derivation, then the schema fix — both
+made only after the full suite passes.
 
 - [ ] **Step 1: Write the failing regression test**
 
@@ -472,10 +484,10 @@ git rm src/__tests__/turn-tracker.test.ts src/__tests__/layout-gate.test.ts
 Run: `npx vitest run src/__tests__/turn-count-render.test.ts`
 Expected: PASS, all five tests.
 
-- [ ] **Step 6: Run the whole suite to find the fallout**
+- [ ] **Step 6: Run the whole suite to see the expected fallout**
 
 Run: `npx vitest run`
-Expected: FAIL in `src/__tests__/cache-validation.test.ts` — two tests reference the deleted turn store. Task 4 fixes those. Note the exact failures; do not fix them here.
+Expected: FAIL in `src/__tests__/cache-validation.test.ts` — two tests reference the deleted turn store. Steps 7-15 repair them. **Do not commit yet.**
 
 Any *other* failure is unexpected and must be understood before continuing — particularly anything importing `../config/layout.js`. Confirm with:
 
@@ -485,39 +497,12 @@ grep -rn "turn-tracker\|config/layout" src/ scripts/
 
 Expected: no matches outside `cache-validation.test.ts`.
 
-- [ ] **Step 7: Build and commit**
-
-Commit even though `cache-validation.test.ts` is red — Task 4 is a single logical follow-up and splitting it here keeps each commit reviewable. Note the red state in the commit body.
-
-```bash
-npm run build
-git add src/data/pipeline.ts src/__tests__/turn-count-render.test.ts
-git add -f dist/index.js
-git commit -m "Derive turnCount from the transcript, delete the turn store (#129)
-
-cache-validation.test.ts is red at this commit: two of its tests use the
-deleted turn store as their sabotage vehicle. Retargeted in the next commit."
-```
-
----
-
-### Task 4: Retarget the hostile-cache tests and close the Infinity holes
-
-**Files:**
-- Modify: `src/data/daily-cost-tracker.ts:26-34` (`ShardSchema`), `:43-49` (`LegacyEntrySchema`)
-- Modify: `src/__tests__/cache-validation.test.ts:448-578`
-- Test: same file
-
-**Interfaces:**
-- Consumes: the deletions from Task 3.
-- Produces: nothing later tasks depend on.
-
-**Background.** Deleting `turn-tracker.ts` removed the repo's only two uses of `v.safeInteger()`. The same shape exists unguarded in `daily-cost-tracker.ts`, in a store that — unlike the turn store — is in the default layout. Two distinct defects:
+**Background for Steps 7-13.** Deleting `turn-tracker.ts` removed the repo's only two uses of `v.safeInteger()`. The same shape exists unguarded in `daily-cost-tracker.ts`, in a store that — unlike the turn store — is in the default layout. Two distinct defects:
 
 1. `updatedAt: v.fallback(v.number(), 0)` (line 33). `JSON.parse("1e400")` is `Infinity`, `v.number()` accepts it, and the prune at line 173 computes `now.getTime() - Infinity === -Infinity`, which is never `>= STALE_SESSION_MS`. The shard is unpruneable forever.
 2. `costUsd: v.number()` (line 29). An `Infinity` here reaches `formatDollars`, which is `amount.toFixed(0)` with no finite check — so the bar renders the literal text **`$Infinity`**.
 
-- [ ] **Step 1: File the spun-off issue**
+- [ ] **Step 7: File the spun-off issue**
 
 ```bash
 gh issue create \
@@ -572,7 +557,7 @@ EOF
 
 Record the issue number it prints; call it `NNN` below.
 
-- [ ] **Step 2: Write the failing tests**
+- [ ] **Step 8: Write the failing tests**
 
 In `src/__tests__/cache-validation.test.ts`, replace the entire
 `it("rejects an Infinity turn count instead of rendering it", ...)` block
@@ -632,7 +617,7 @@ In `src/__tests__/cache-validation.test.ts`, replace the entire
   });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 9: Run tests to verify they fail**
 
 Run: `npx vitest run src/__tests__/cache-validation.test.ts -t "Infinity"`
 Expected: BOTH FAIL.
@@ -642,7 +627,7 @@ Expected: BOTH FAIL.
 
 **If either passes here, stop.** The defect is not what the design predicted and the spec needs revisiting before the fix goes in.
 
-- [ ] **Step 4: Fix the schemas**
+- [ ] **Step 10: Fix the schemas**
 
 In `src/data/daily-cost-tracker.ts`, replace `ShardSchema` (lines 26-34) with:
 
@@ -684,13 +669,13 @@ Replace `#NNN` with the real issue number from Step 1.
 millisecond timestamps, so they are legitimately non-integer. `v.finite()`
 rejects `Infinity`, `-Infinity` and `NaN`, which is the whole hazard.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 11: Run tests to verify they pass**
 
 Run: `npx vitest run src/__tests__/cache-validation.test.ts`
 Expected: the two Infinity tests PASS. The `#92` hostile-directory test at line
-449 still FAILS — Step 6 fixes it.
+449 still FAILS — Step 12 fixes it.
 
-- [ ] **Step 6: Drop the turn-store leg from the `#92` hostile test**
+- [ ] **Step 12: Drop the turn-store leg from the `#92` hostile test**
 
 In the same file, in `it("renders a correct bar with the turn counter, statusline cache, and daily shard all corrupted", ...)`:
 
@@ -724,17 +709,36 @@ null-guard) with:
     // describes above, which assert `readJsonValidated` maps "null" to null.
 ```
 
-- [ ] **Step 7: Run the whole suite**
+- [ ] **Step 13: Run the whole suite**
 
 Run: `npx vitest run`
 Expected: PASS, everything.
 
-- [ ] **Step 8: Verify the schema fix is not vacuous**
+- [ ] **Step 14: Verify the schema fix is not vacuous**
 
 Revert `updatedAt` to `v.fallback(v.number(), 0)`, run the file, confirm the prune test goes RED. Restore.
 Revert `costUsd` to `v.number()`, run the file, confirm the `$Infinity` test goes RED. Restore.
 
-- [ ] **Step 9: Build and commit**
+- [ ] **Step 15: Build and commit — two commits, in this order**
+
+The whole suite is green before either commit is made. Splitting them keeps the
+derivation and the schema fix independently revertable and separately
+reviewable, without ever leaving a red commit on the branch.
+
+First the derivation:
+
+```bash
+npm run build
+git add src/data/pipeline.ts src/__tests__/turn-count-render.test.ts
+git add -f dist/index.js
+git commit -m "Derive turnCount from the transcript, delete the turn store (#129)"
+```
+
+Note the deletions from Step 4 were already staged by `git rm`, so they ride
+along with this first commit — that is correct, they are part of the same
+change.
+
+Then the schema fix:
 
 ```bash
 npm run build
@@ -749,9 +753,18 @@ made a shard unpruneable forever, and an Infinity costUsd rendered as the
 literal text \$Infinity."
 ```
 
+Verify both landed and the tree is clean:
+
+```bash
+git log --oneline -2 && git status --porcelain
+```
+
+Expected: the two commits above, and no output from `git status` other than
+`?? AUDIT.md`.
+
 ---
 
-### Task 5: Remove the orphaned turn store in `gccusage setup`
+### Task 4: Remove the orphaned turn store in `gccusage setup`
 
 **Files:**
 - Modify: `src/cli.ts` (imports, and `runSetup` at line 177)
@@ -870,7 +883,7 @@ git commit -m "Remove the orphaned turn store in gccusage setup (#129)"
 
 ---
 
-### Task 6: Documentation, fixtures, and the full gate
+### Task 5: Documentation, fixtures, and the full gate
 
 **Files:**
 - Modify: `src/__tests__/fixtures/widget-expectations.ts:102-105`
@@ -1014,7 +1027,7 @@ EOF
 )"
 ```
 
-Replace `#NNN` with the issue number from Task 4 Step 1.
+Replace `#NNN` with the issue number from Task 3 Step 7.
 
 ---
 
