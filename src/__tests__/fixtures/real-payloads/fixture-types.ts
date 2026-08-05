@@ -60,8 +60,12 @@ export interface RealPayloadFixture {
     burnRate: BurnRate | null;
   };
   /**
-   * Deliberately chosen test inputs, NOT recordings pulled automatically from
-   * `derived`. `turnCount` used to live here because the pre-#129
+   * Values supplied by hand rather than captured during fixture generation —
+   * as opposed to `derived`, which is recorded automatically. That
+   * distinction still holds in general, but overstates the current
+   * `turnCount` specifically: as explained below, its value is an unverified
+   * leftover, not a considered choice. `turnCount` used to live here because
+   * the pre-#129
    * `turn-tracker.ts` persisted a counter sharded per session id
    * (`<cacheDir>/turns/<shardKey(sessionId)>.json`), and a fresh shard always
    * started at count 1: generating fixtures for three different session ids

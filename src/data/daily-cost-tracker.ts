@@ -27,9 +27,14 @@ const ShardSchema = v.object({
   sessionId: v.string(),
   date: v.string(), // local date the baseline belongs to
   // `v.finite()`, not bare `v.number()`: `JSON.parse("1e400")` is `Infinity`
-  // and `v.number()` accepts it. An infinite cost reaches `formatDollars` —
-  // `amount.toFixed(0)` with no finite check — as the literal text
-  // "$Infinity" (#130).
+  // and `v.number()` accepts it. `formatDollars` itself is now guarded
+  // (#131) and renders a non-finite amount as "$?" rather than the literal
+  // text "$Infinity", so this constraint is no longer the only thing
+  // standing between a garbage shard value and the rendered bar. It still
+  // earns its place as defence in depth at the storage boundary: without it,
+  // an infinite `costUsd` would flow into `Math.max(0, costUsd -
+  // baselineUsd)` below and corrupt that arithmetic, not just the string a
+  // formatter later produces from it.
   costUsd: v.pipe(v.number(), v.finite()), // latest cumulative session cost
   baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0), // cumulative cost at the start of `date`
   // Absent in legacy files, and an unrecognised value is treated the same way.

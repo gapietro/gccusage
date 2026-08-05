@@ -10,7 +10,13 @@
 // cost it cannot state confidently — see `sessionCostUncertain` in
 // session-cost.ts / today-spend.ts, which append a bare "?" to a real
 // computed amount; this is the same marker for the case where there is no
-// amount to append it to at all.
+// amount to append it to at all. A closer precedent is
+// per-model-breakdown.ts's `${formatModelName(model)}:$?`, which emits the
+// identical "$?" for a model with no pricing entry — a related but distinct
+// meaning ("no price available" vs "the number was not a number"). The two
+// can't collide into "$??": the uncertainty suffix only appends when
+// `sessionCostSource === "calculated"` (pipeline.ts), while this guard's
+// path is only reachable when the source is "stdin".
 export function formatDollars(amount: number): string {
   if (!Number.isFinite(amount)) return "$?";
   if (amount < 0.01) return "$0.00";
