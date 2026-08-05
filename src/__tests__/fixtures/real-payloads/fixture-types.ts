@@ -60,17 +60,25 @@ export interface RealPayloadFixture {
     burnRate: BurnRate | null;
   };
   /**
-   * Deliberately chosen test inputs, NOT recordings. `turnCount` lives here,
-   * separate from `derived`, because `src/data/turn-tracker.ts`'s
-   * `trackTurn()` is now sharded per session id (`<cacheDir>/turns/<shardKey
-   * (sessionId)>.json`, #99) rather than a single global file — but that
-   * does not make a recorded value meaningful. Generating fixtures for three
-   * different session ids in one process creates a *fresh* shard per session
-   * id, and a fresh shard always starts at count 1: a "recorded" turnCount
-   * would still only encode generation order (which fixture ran first),
-   * never anything resembling a real session's accumulated turn count.
-   * Everything under `derived`, by contrast, IS a real recording and must
-   * never be hand-edited.
+   * Deliberately chosen test inputs, NOT recordings pulled automatically from
+   * `derived`. `turnCount` used to live here because the pre-#129
+   * `turn-tracker.ts` persisted a counter sharded per session id
+   * (`<cacheDir>/turns/<shardKey(sessionId)>.json`), and a fresh shard always
+   * started at count 1: generating fixtures for three different session ids
+   * in one process would have produced a "recorded" turnCount that only
+   * encoded generation order (which fixture ran first), never a real
+   * session's accumulated turn count.
+   *
+   * #129 deleted that store: `turnCount` is now `countHumanTurns
+   * (sessionEntries)`, derived fresh on every render straight from the
+   * transcript's `origin.kind === "human"` entries, with nothing persisted
+   * and nothing to shard or reset. A regenerated fixture's turnCount is
+   * therefore just as real a recording as anything under `derived` — it
+   * stays under `controlled` because `context-from-fixture.ts` reconstructs
+   * a `RenderContext` by hand from the recorded fields rather than
+   * re-running `buildRenderContext()`, so the value still has to be supplied
+   * explicitly. Everything under `derived`, by contrast, IS a real recording
+   * and must never be hand-edited.
    */
   controlled: {
     turnCount: number;

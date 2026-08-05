@@ -1114,7 +1114,7 @@ git commit -m "Document what turn-counter actually counts (#129)"
 
 ```bash
 gh pr create --title "Derive the turn count from the transcript (#129)" --body "$(cat <<'EOF'
-Closes #129. Also closes #NNN, filed during this work.
+Closes #129. Also closes #130, filed during this work.
 
 `turn-counter` rendered `context.turnCount` with a `#` label, implying a turn
 number. It never was one: `runStatusline` returns from the statusline cache
@@ -1167,7 +1167,7 @@ EOF
 )"
 ```
 
-Replace `#NNN` with the issue number from Task 3 Step 7.
+Replaced `#NNN` with **#130**, the issue number from Task 3 Step 7.
 
 ---
 

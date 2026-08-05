@@ -101,6 +101,6 @@ export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   "compact-countdown": { text: "~697.0k left", why: "windowSize - used - 33k reserve" },
   "turn-counter": {
     text: "#9",
-    why: "controlled.turnCount fixture input (9) — the turn tracker is sharded per session id (#99), but a fresh shard always starts at count 1, so a value recorded across interleaved fixture generation would only encode generation order, not a real accumulated count",
+    why: "controlled.turnCount fixture input (9). Derived per render from the transcript's origin.kind === 'human' entries (#129), so it is a property of the captured session rather than of generation order — the pre-#129 tracker started every fresh shard at 1, so a recorded value encoded only when the fixture was generated",
   },
 };

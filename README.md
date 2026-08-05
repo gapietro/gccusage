@@ -308,7 +308,7 @@ rather than showing a blank segment.
 | `lines-changed` | Lines added/removed in session |
 | `api-latency` | Cumulative API wait time across the whole session (`API total: 8m 26s`) — not a single request's latency |
 | `session-timer` | Time since the Claude Code process started (`Up: 1hr 46m`); resets when the session is resumed |
-| `turn-counter` | Conversation turn count (`#9`) |
+| `turn-counter` | Number of prompts you've sent this session (`#9`) — derived from the transcript, so it doesn't drift with render count |
 | `block-timer` | Time elapsed in the current 5-hour usage block (`Block: 2hr 13m`) |
 | `vim-mode` | Current vim mode (NORMAL/INSERT) |
 | `custom-command` | Run a shell command and display output |

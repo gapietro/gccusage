@@ -53,25 +53,30 @@ For each selected raw line:
 (e.g. a schema field is added), regenerate it — see "Refreshing" below —
 don't patch the JSON by hand.
 
-## `derived` vs `controlled`: why turnCount is NOT under `derived`
+## `derived` vs `controlled`: why turnCount lives in a separate block
 
-`src/data/turn-tracker.ts`'s `trackTurn()` is now sharded per session id
-(`<cacheDir>/turns/<shardKey(sessionId)>.json`, #99) rather than a single
-global file, and is gated to run only when the active layout includes
-`turn-counter` (also #99) — so it does not even touch the store on most
-runs. Neither change makes a recorded value meaningful for this corpus.
-Running the generator for three different real session ids in one process
-creates a *fresh* shard per session id, and a fresh shard always starts at
-`count: 1` — so a "recorded" `turnCount` would still only encode generation
-order (which fixture ran first), not real pipeline output. A real turn count
-accumulates over a live session and can't be reconstructed retroactively
-once that's happened.
+`turnCount` was kept out of `derived` because the pre-#129 `turn-tracker.ts`
+persisted a counter in a shard file per session id
+(`<cacheDir>/turns/<shardKey(sessionId)>.json`), gated to run only when the
+active layout included `turn-counter`. Running the generator for three real
+session ids in one process created a *fresh* shard per session id, and a
+fresh shard always started at `count: 1` — so a "recorded" `turnCount` would
+have encoded only generation order (which fixture ran first), not real
+pipeline output. A real turn count accumulated over a live session and
+couldn't be reconstructed retroactively once that had happened.
 
-So `turnCount` lives under a separate `controlled` block, not `derived`, and
-is set to a **deliberately chosen** value: `9`, the figure actually observed
-for the `opus5` session in a standalone single-session probe run (i.e. run in
-isolation, not interleaved with the other two fixtures' session ids in the
-same process — the only way to get a real number out of that cache).
+#129 deleted that store: `turnCount` is now `countHumanTurns(sessionEntries)`,
+derived fresh on every render directly from the transcript's
+`origin.kind === "human"` entries, with nothing persisted and nothing to
+shard or reset. A regenerated fixture's `turnCount` is therefore just as much
+a real recording as anything under `derived` — but it still lives under
+`controlled` here, because `context-from-fixture.ts` reconstructs a
+`RenderContext` by hand from the recorded fields rather than re-running
+`buildRenderContext()`, so the value must be supplied explicitly either way.
+It is set to a **deliberately chosen** value: `9`, the figure actually
+observed for the `opus5` session in a standalone single-session probe run
+(i.e. run in isolation, not interleaved with the other two fixtures' session
+ids in the same process).
 `fixture-types.ts` documents this on the `controlled` field. Everything under
 `derived`, by contrast, IS a real recording from `buildRenderContext()` and
 must never be hand-edited.
@@ -132,15 +137,11 @@ grep -rlE "/Users/" src/__tests__/fixtures/real-payloads/*.json || echo CLEAN
    so it can't be run by accident against a machine other than the one that
    captured the corpus.
 3. Run it with `npx vitest run src/__tests__/zz-capture.test.ts`. There is no
-   longer a single global `turn-count.json` to worry about resetting (#99
-   sharded the store per session id under `<cacheDir>/turns/`), and the
-   turn-tracker gate (also #99) means the generator touches that store at
-   all only if the settings it renders with include the `turn-counter`
-   widget — with the default layout `trackTurn` never runs and this concern
-   does not apply. If the generator does render with `turn-counter` enabled,
-   it will still create real per-session shards on the machine running it
-   (see "`derived` vs `controlled`" above for why those shards' counts can't
-   be used as a recorded fixture value).
+   turn store to worry about anymore — #129 deleted `turn-tracker.ts` and the
+   layout gate that guarded it; `turnCount` is derived fresh from the
+   transcript's `origin.kind === "human"` entries on every
+   `buildRenderContext()` call, so there is nothing persisted and nothing to
+   shard or reset between fixtures.
 4. Re-run the sanitization scan above (OS username, original session/prompt
    ids, other project/session names, any non-placeholder `/Users/` or
    `/home/` path) and extend `sanitize()` if anything matches.
