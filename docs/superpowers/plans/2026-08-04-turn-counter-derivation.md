@@ -194,6 +194,12 @@ describe("countHumanTurns", () => {
   const TOOL_RESULT = { type: "user" }; // content is a tool_result array; no origin
   const META = { type: "user" }; // isMeta text; no origin
   const ASSISTANT = { type: "assistant", originKind: undefined };
+  // Isolates the `type === "user"` half of the conjunct. No real transcript
+  // pairs a non-user type with origin.kind "human" today (0 of 3,212 origin
+  // objects across 400 sampled transcripts sit on a non-user line), but
+  // nothing in jsonl-reader gates originKind on type — so without this
+  // fixture, deleting the type check breaks no test.
+  const HUMAN_WRONG_TYPE = { type: "assistant", originKind: "human" };
 
   it("counts only entries whose origin is human", () => {
     expect(countHumanTurns([HUMAN, NOTIFICATION, TOOL_RESULT, HUMAN])).toBe(2);
@@ -213,6 +219,10 @@ describe("countHumanTurns", () => {
 
   it("excludes assistant entries even though they dominate the transcript", () => {
     expect(countHumanTurns([ASSISTANT, ASSISTANT, ASSISTANT, HUMAN])).toBe(1);
+  });
+
+  it("excludes a non-user entry even when it carries a human origin", () => {
+    expect(countHumanTurns([HUMAN_WRONG_TYPE, HUMAN])).toBe(1);
   });
 
   it("returns 0 for a transcript predating the origin field", () => {
@@ -271,9 +281,9 @@ Expected: PASS.
 
 Make each of these three mutations in turn, run the file, confirm RED, then revert:
 
-1. Drop the `entry.type === "user"` clause → the assistant test goes red.
+1. Drop the `entry.type === "user"` clause — leave just `if (entry.originKind === "human") count++;` → the new HUMAN_WRONG_TYPE test goes red.
 2. Change `=== "human"` to `!== undefined` → the notification and coordinator tests go red.
-3. Change `=== "human"` to `entry.type === "user"` → the notification, tool-result and coordinator tests go red.
+3. Replace `entry.originKind === "human"` with `entry.type === "user"`, making the condition `entry.type === "user" && entry.type === "user"` (redundant) → the notification, tool-result and coordinator tests go red.
 
 If any mutation leaves the suite green, the corresponding test is vacuous and must be strengthened before proceeding.
 
