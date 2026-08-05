@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
 import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
 import { getCacheDir } from "./utils/paths.js";
+import { VERSION } from "./version.js";
 import type { TokenMetrics } from "./types/token-metrics.js";
 
 export async function runCli(args: string[]): Promise<void> {
@@ -22,8 +23,22 @@ export async function runCli(args: string[]): Promise<void> {
     case "setup":
       runSetup();
       break;
+    // The flag spellings are aliases, not the canonical names, because
+    // `gccusage help` predates them and is what the README documents. They
+    // exist because `--help` and `--version` are the near-universal reflex and
+    // both previously fell to `default:` — an error on stderr and exit 1 for
+    // the two commands a user is most likely to try first (CLI-001).
     case "help":
+    case "--help":
+    case "-h":
       printHelp();
+      break;
+    case "version":
+    case "--version":
+    case "-v":
+      // Bare, with no name prefix, so `gccusage --version` is directly
+      // consumable by a script — the same shape as `npm --version`.
+      console.log(VERSION);
       break;
     // Internal: what the detached refresher child runs. Undocumented in help
     // because it is an implementation detail of the render path, not a
@@ -240,7 +255,8 @@ Usage:
   gccusage              Statusline mode (reads stdin JSON)
   gccusage setup        Configure Claude Code to use gccusage
   gccusage today        Show today's usage report
-  gccusage help         Show this help
+  gccusage help         Show this help (also --help, -h)
+  gccusage version      Print the version (also --version, -v)
 
 Quick Start:
   git clone https://github.com/gapietro/gccusage.git
