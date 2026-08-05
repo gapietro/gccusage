@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateTokens, getFirstTimestamp } from "../data/token-aggregator.js";
+import { aggregateTokens, getFirstTimestamp, countHumanTurns } from "../data/token-aggregator.js";
 import type { JsonlEntry } from "../data/jsonl-reader.js";
 
 describe("aggregateTokens", () => {
@@ -179,5 +179,53 @@ describe("aggregateTokens 1-hour cache write bucketing (#118)", () => {
 
     expect(totals.cacheCreation1hTokens).toBe(500);
     expect(totals.cacheCreationTokens).toBe(1500);
+  });
+});
+
+describe("countHumanTurns", () => {
+  // Shapes taken from real transcripts (three sessions sampled for the design
+  // spec). Every one of these is `type: "user"` — which is why counting
+  // `type === "user"` over-counts by ~5x and origin.kind is the real signal.
+  //
+  // There is deliberately no case for `promptSource`. Its human variants
+  // (typed / suggestion_accepted / queued) all carry origin.kind "human", and
+  // the field is not on JsonlEntry at all — a test distinguishing them would
+  // compare two identical fixtures and could not be broken by any mutation to
+  // the rule it claims to guard.
+  const HUMAN = { type: "user", originKind: "human" };
+  const NOTIFICATION = { type: "user", originKind: "task-notification" };
+  const COORDINATOR = { type: "user", originKind: "coordinator" }; // subagent sidechain
+  const TOOL_RESULT = { type: "user" }; // content is a tool_result array; no origin
+  const META = { type: "user" }; // isMeta text; no origin
+  const ASSISTANT = { type: "assistant", originKind: undefined };
+
+  it("counts only entries whose origin is human", () => {
+    expect(countHumanTurns([HUMAN, NOTIFICATION, TOOL_RESULT, HUMAN])).toBe(2);
+  });
+
+  it("excludes task notifications", () => {
+    expect(countHumanTurns([NOTIFICATION, NOTIFICATION, NOTIFICATION])).toBe(0);
+  });
+
+  it("excludes tool results and meta entries, which carry no origin", () => {
+    expect(countHumanTurns([TOOL_RESULT, META, TOOL_RESULT])).toBe(0);
+  });
+
+  it("excludes subagent sidechain prompts", () => {
+    expect(countHumanTurns([COORDINATOR, HUMAN])).toBe(1);
+  });
+
+  it("excludes assistant entries even though they dominate the transcript", () => {
+    expect(countHumanTurns([ASSISTANT, ASSISTANT, ASSISTANT, HUMAN])).toBe(1);
+  });
+
+  it("returns 0 for a transcript predating the origin field", () => {
+    // The accepted degradation: turn-counter.ts's `!count || count < 1` guard
+    // then renders nothing, which beats rendering a wrong number.
+    expect(countHumanTurns([{ type: "user" }, { type: "assistant" }])).toBe(0);
+  });
+
+  it("returns 0 for an empty transcript", () => {
+    expect(countHumanTurns([])).toBe(0);
   });
 });

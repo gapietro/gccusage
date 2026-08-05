@@ -80,3 +80,25 @@ export function getFirstTimestamp(entries: JsonlEntry[]): number | null {
   }
   return null;
 }
+
+/**
+ * The number of prompts the user actually typed.
+ *
+ * `type: "user"` alone is not a turn: tool results and harness injections
+ * (`<task-notification>`) are written as user entries too, and outnumber real
+ * prompts roughly 5:1 — 756 tool results and 124 notifications against 28
+ * prompts, on the 3,564-line session sampled for #129. `origin.kind` is the
+ * field that separates them, and it also excludes subagent sidechains, whose
+ * prompts come from a `coordinator` rather than a human.
+ *
+ * Recomputed per render rather than accumulated. That is the fix for #129: a
+ * counter persisted across renders incremented once per statusline-cache miss,
+ * which is neither a turn nor a render.
+ */
+export function countHumanTurns(entries: JsonlEntry[]): number {
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.type === "user" && entry.originKind === "human") count++;
+  }
+  return count;
+}
