@@ -281,9 +281,17 @@ Expected: PASS.
 
 Make each of these three mutations in turn, run the file, confirm RED, then revert:
 
-1. Drop the `entry.type === "user"` clause — leave just `if (entry.originKind === "human") count++;` → the new HUMAN_WRONG_TYPE test goes red.
-2. Change `=== "human"` to `!== undefined` → the notification and coordinator tests go red.
-3. Replace `entry.originKind === "human"` with `entry.type === "user"`, making the condition `entry.type === "user" && entry.type === "user"` (redundant) → the notification, tool-result and coordinator tests go red.
+1. Drop the `entry.type === "user"` clause — leave just `if (entry.originKind === "human") count++;` → "excludes a non-user entry even when it carries a human origin" goes red.
+2. Change `=== "human"` to `!== undefined` — the condition becomes `type === "user" && originKind !== undefined` → these three tests go red:
+   - "counts only entries whose origin is human"
+   - "excludes task notifications"
+   - "excludes subagent sidechain prompts"
+3. Replace `entry.originKind === "human"` with `entry.type === "user"`, making the condition `entry.type === "user" && entry.type === "user"` (redundant, same as just checking type) → these five tests go red:
+   - "counts only entries whose origin is human"
+   - "excludes task notifications"
+   - "excludes tool results and meta entries, which carry no origin"
+   - "excludes subagent sidechain prompts"
+   - "returns 0 for a transcript predating the origin field"
 
 If any mutation leaves the suite green, the corresponding test is vacuous and must be strengthened before proceeding.
 
