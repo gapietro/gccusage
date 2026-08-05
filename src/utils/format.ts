@@ -25,13 +25,23 @@ export function formatDollars(amount: number): string {
   return `$${amount.toFixed(0)}`;
 }
 
+// Same reasoning as `formatDollars` above, and the same "?" convention — but
+// this guard is NOT made redundant by `StatusJsonSchema` now rejecting
+// non-finite numbers (#137). Token counts also arrive from JSONL transcripts
+// through `jsonl-reader`, whose own `typeof x === "number"` guards never touch
+// that schema. Without it, `(Infinity / 1e6).toFixed(2)` renders "InfinityM".
 export function formatTokens(count: number): string {
+  if (!Number.isFinite(count)) return "?";
   if (count < 1000) return `${count}`;
   if (count < 1_000_000) return `${(count / 1000).toFixed(1)}k`;
   return `${(count / 1_000_000).toFixed(2)}M`;
 }
 
+// `Math.floor(Infinity)` is `Infinity`, so an unguarded non-finite span
+// produced "Infinityhr NaNm" — two broken numbers out of one bad input,
+// because the minutes come from `Infinity % 3600`, which is NaN.
 export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms)) return "?";
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

@@ -855,36 +855,57 @@ function lenient(schema) {
 function lenientWithDefault(schema, value) {
 	return fallback(optional(schema, value), value);
 }
+/**
+* `v.finite()`, never bare `v.number()` — for EVERY number in this payload.
+*
+* JSON has no `Infinity` literal, which made "JSON cannot encode it, so
+* `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
+* numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
+* both `v.number()` and `typeof x === "number"` accept it.
+*
+* Applied at the boundary rather than in each formatter on purpose. #131
+* closed this for cost by guarding `formatDollars` and `formatCostPerHour`,
+* which left `formatTokens` rendering `InfinityM` for a window size and
+* `formatDuration` rendering `Infinityhr NaNm` — the class was being closed
+* one formatter at a time, and every widget added later re-opened it (#137).
+*
+* Costs only the offending field: every use sits inside `lenient` /
+* `lenientWithDefault`, so a rejected number falls back to undefined or its
+* default and the bar still draws, per the per-field posture of #83.
+*/
+function finiteNumber() {
+	return pipe(number(), finite());
+}
 const ModelSchema = union([string(), object({
 	id: lenient(string()),
 	display_name: lenient(string())
 })]);
 const CostSchema = object({
-	total_cost_usd: lenient(number()),
-	total_duration_ms: lenient(number()),
-	total_api_duration_ms: lenient(number()),
-	total_lines_added: lenient(number()),
-	total_lines_removed: lenient(number())
+	total_cost_usd: lenient(finiteNumber()),
+	total_duration_ms: lenient(finiteNumber()),
+	total_api_duration_ms: lenient(finiteNumber()),
+	total_lines_added: lenient(finiteNumber()),
+	total_lines_removed: lenient(finiteNumber())
 });
 const CurrentUsageSchema = object({
-	input_tokens: lenientWithDefault(number(), 0),
-	output_tokens: lenientWithDefault(number(), 0),
-	cache_creation_input_tokens: lenientWithDefault(number(), 0),
-	cache_read_input_tokens: lenientWithDefault(number(), 0)
+	input_tokens: lenientWithDefault(finiteNumber(), 0),
+	output_tokens: lenientWithDefault(finiteNumber(), 0),
+	cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
+	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
-const ContextWindowSchema = union([number(), object({
-	context_window_size: lenient(number()),
-	used_percentage: lenient(nullable(number())),
-	remaining_percentage: lenient(nullable(number())),
-	total_input_tokens: lenient(number()),
-	total_output_tokens: lenient(number()),
+const ContextWindowSchema = union([finiteNumber(), object({
+	context_window_size: lenient(finiteNumber()),
+	used_percentage: lenient(nullable(finiteNumber())),
+	remaining_percentage: lenient(nullable(finiteNumber())),
+	total_input_tokens: lenient(finiteNumber()),
+	total_output_tokens: lenient(finiteNumber()),
 	current_usage: lenient(nullable(CurrentUsageSchema))
 })]);
 const TokenUsageSchema = object({
-	input_tokens: lenientWithDefault(number(), 0),
-	output_tokens: lenientWithDefault(number(), 0),
-	cache_creation_input_tokens: lenientWithDefault(number(), 0),
-	cache_read_input_tokens: lenientWithDefault(number(), 0)
+	input_tokens: lenientWithDefault(finiteNumber(), 0),
+	output_tokens: lenientWithDefault(finiteNumber(), 0),
+	cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
+	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
 const VimSchema = object({ mode: lenient(string()) });
 const WorkspaceSchema = object({ project_dir: lenient(string()) });
@@ -4390,11 +4411,13 @@ function formatDollars(amount) {
 	return `$${amount.toFixed(0)}`;
 }
 function formatTokens(count) {
+	if (!Number.isFinite(count)) return "?";
 	if (count < 1e3) return `${count}`;
 	if (count < 1e6) return `${(count / 1e3).toFixed(1)}k`;
 	return `${(count / 1e6).toFixed(2)}M`;
 }
 function formatDuration(ms) {
+	if (!Number.isFinite(ms)) return "?";
 	const totalSeconds = Math.floor(ms / 1e3);
 	const hours = Math.floor(totalSeconds / 3600);
 	const minutes = Math.floor(totalSeconds % 3600 / 60);
