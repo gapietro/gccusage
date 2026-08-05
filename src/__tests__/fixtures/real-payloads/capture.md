@@ -55,14 +55,17 @@ don't patch the JSON by hand.
 
 ## `derived` vs `controlled`: why turnCount is NOT under `derived`
 
-`src/data/turn-tracker.ts`'s `trackTurn()` is a live, **single-slot** global
-cache (`~/.cache/gccusage/turn-count.json`, one `sessionId` field at a time).
-Running the generator for three different real session ids back-to-back in
-one process makes every call after the first see `data.sessionId !==
-sessionId`, reset the cache to `count: 0`, and increment to 1 — so a
-"recorded" `turnCount` in that scenario encodes generation order, not real
-pipeline output. A real turn count accumulates over a live session and can't
-be reconstructed retroactively once that's happened.
+`src/data/turn-tracker.ts`'s `trackTurn()` is now sharded per session id
+(`<cacheDir>/turns/<shardKey(sessionId)>.json`, #99) rather than a single
+global file, and is gated to run only when the active layout includes
+`turn-counter` (also #99) — so it does not even touch the store on most
+runs. Neither change makes a recorded value meaningful for this corpus.
+Running the generator for three different real session ids in one process
+creates a *fresh* shard per session id, and a fresh shard always starts at
+`count: 1` — so a "recorded" `turnCount` would still only encode generation
+order (which fixture ran first), not real pipeline output. A real turn count
+accumulates over a live session and can't be reconstructed retroactively
+once that's happened.
 
 So `turnCount` lives under a separate `controlled` block, not `derived`, and
 is set to a **deliberately chosen** value: `9`, the figure actually observed
@@ -128,11 +131,16 @@ grep -rlE "/Users/" src/__tests__/fixtures/real-payloads/*.json || echo CLEAN
    and writes the three JSON files) — it is deliberately not kept in the repo
    so it can't be run by accident against a machine other than the one that
    captured the corpus.
-3. Run it with `npx vitest run src/__tests__/zz-capture.test.ts`. **This
-   mutates the real, live `~/.cache/gccusage/turn-count.json`** on the
-   machine running the generator (see "`derived` vs `controlled`" above) —
-   expect the user's real statusline turn count to be reset as a side
-   effect.
+3. Run it with `npx vitest run src/__tests__/zz-capture.test.ts`. There is no
+   longer a single global `turn-count.json` to worry about resetting (#99
+   sharded the store per session id under `<cacheDir>/turns/`), and the
+   turn-tracker gate (also #99) means the generator touches that store at
+   all only if the settings it renders with include the `turn-counter`
+   widget — with the default layout `trackTurn` never runs and this concern
+   does not apply. If the generator does render with `turn-counter` enabled,
+   it will still create real per-session shards on the machine running it
+   (see "`derived` vs `controlled`" above for why those shards' counts can't
+   be used as a recorded fixture value).
 4. Re-run the sanitization scan above (OS username, original session/prompt
    ids, other project/session names, any non-placeholder `/Users/` or
    `/home/` path) and extend `sanitize()` if anything matches.

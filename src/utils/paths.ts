@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import * as crypto from "node:crypto";
 
 // os.homedir() honours HOME on POSIX and USERPROFILE on Windows, but returns an
 // empty string when HOME is set-but-empty. Fall back to the passwd entry so we
@@ -24,6 +25,18 @@ export function getClaudeDataDir(): string {
 
 export function getProjectsDir(): string {
   return path.join(getClaudeDataDir(), "projects");
+}
+
+// The UUIDs Claude Code sends. Anything else is hashed rather than trusted: a
+// session id arrives from stdin and must never reach a filesystem path
+// unchecked. Shared by the daily cost store and the turn store so there is one
+// implementation of that rule, not two.
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+export function shardKey(sessionId: string): string {
+  return SAFE_SESSION_ID.test(sessionId)
+    ? sessionId
+    : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
 
 export function getCacheDir(): string {

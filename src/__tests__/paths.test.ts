@@ -8,6 +8,7 @@ import {
   getClaudeDataDir,
   getProjectsDir,
   findTodayJsonlFileStats,
+  shardKey,
 } from "../utils/paths.js";
 
 let tmpHome: string;
@@ -131,5 +132,32 @@ describe("findTodayJsonlFileStats", () => {
     fs.utimesSync(filePath, yesterday, yesterday);
 
     expect(findTodayJsonlFileStats()).toHaveLength(0);
+  });
+});
+
+describe("shardKey", () => {
+  it("passes a Claude Code session UUID through verbatim", () => {
+    expect(shardKey("f824ed55-511f-4b26-ba97-20cd7efa5a13")).toBe(
+      "f824ed55-511f-4b26-ba97-20cd7efa5a13",
+    );
+  });
+
+  it("hashes an id containing path separators", () => {
+    const key = shardKey("../../etc/passwd");
+    expect(key).not.toContain("/");
+    expect(key).not.toContain(".");
+    expect(key).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("hashes an id longer than 128 characters", () => {
+    expect(shardKey("a".repeat(129))).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("is stable for the same input", () => {
+    expect(shardKey("../x")).toBe(shardKey("../x"));
+  });
+
+  it("separates ids that differ only past the safe-character boundary", () => {
+    expect(shardKey("a/b")).not.toBe(shardKey("a/c"));
   });
 });
