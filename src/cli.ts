@@ -156,14 +156,18 @@ function readExistingSettings(
   try {
     raw = readFileSync(settingsPath, "utf8");
   } catch (err) {
-    throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`);
+    throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`, {
+      cause: err,
+    });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`);
+    throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`, {
+      cause: err,
+    });
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {

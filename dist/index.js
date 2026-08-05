@@ -4217,8 +4217,8 @@ function migrateLegacyStore(now) {
 	const sessions = legacy?.sessions ?? [];
 	const date = legacy?.date ?? dateStr(now);
 	try {
-		for (const raw$1 of sessions) {
-			const parsed = safeParse(LegacyEntrySchema, raw$1);
+		for (const sessionRaw of sessions) {
+			const parsed = safeParse(LegacyEntrySchema, sessionRaw);
 			if (!parsed.success) continue;
 			const s = parsed.output;
 			const target = shardPath(s.sessionId);
@@ -6072,13 +6072,13 @@ function readExistingSettings(settingsPath) {
 	try {
 		raw = readFileSync(settingsPath, "utf8");
 	} catch (err) {
-		throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`);
+		throw new Error(`${settingsPath} could not be read (${messageOf(err)}). ${FIX_HINT}`, { cause: err });
 	}
 	let parsed;
 	try {
 		parsed = JSON.parse(raw);
 	} catch (err) {
-		throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`);
+		throw new Error(`${settingsPath} is not valid JSON (${messageOf(err)}). ${FIX_HINT}`, { cause: err });
 	}
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error(`${settingsPath} contains ${describeNonObject(parsed)}, not a JSON object. ${FIX_HINT}`);
 	return {

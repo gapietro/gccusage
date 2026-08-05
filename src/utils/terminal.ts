@@ -176,6 +176,10 @@ export function visibleLength(str: string): number {
  * already fixed. Finding boundaries is the job that must never be duplicated.
  * Keep it anchored so it can only ever test a whole span.
  */
+// Matching the ESC that begins every escape sequence is precisely this
+// module's job. #98 noted an orphaned eslint-disable for this same rule, lost
+// in #116; this is that suppression, written against a linter that enforces it.
+// oxlint-disable-next-line no-control-regex
 const SGR_ONLY = /^\u001b\[[0-9;:]*m$/;
 
 const RESET = "\u001b[0m";

@@ -132,8 +132,8 @@ function migrateLegacyStore(now: Date): void {
   const date = legacy?.date ?? dateStr(now);
 
   try {
-    for (const raw of sessions) {
-      const parsed = v.safeParse(LegacyEntrySchema, raw);
+    for (const sessionRaw of sessions) {
+      const parsed = v.safeParse(LegacyEntrySchema, sessionRaw);
       if (!parsed.success) continue;
       const s = parsed.output;
 
