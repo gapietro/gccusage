@@ -73,12 +73,23 @@ export interface RealPayloadFixture {
    * (sessionEntries)`, derived fresh on every render straight from the
    * transcript's `origin.kind === "human"` entries, with nothing persisted
    * and nothing to shard or reset. A regenerated fixture's turnCount is
-   * therefore just as real a recording as anything under `derived` — it
-   * stays under `controlled` because `context-from-fixture.ts` reconstructs
-   * a `RenderContext` by hand from the recorded fields rather than
-   * re-running `buildRenderContext()`, so the value still has to be supplied
-   * explicitly. Everything under `derived`, by contrast, IS a real recording
-   * and must never be hand-edited.
+   * therefore just as real a recording as anything under `derived`, and the
+   * original reason it was excluded (generation-order sensitivity) no
+   * longer applies — it COULD now be promoted into `derived` and captured
+   * automatically. It stays under `controlled` only because doing that means
+   * regenerating the fixture corpus (see capture.md's "Refreshing the
+   * corpus"), which was out of scope for this documentation pass — not
+   * because `context-from-fixture.ts` reconstructing `RenderContext` by hand
+   * requires it: that's true of every field under `derived` too (see
+   * context-from-fixture.ts:24-53), so it does not distinguish `turnCount`.
+   *
+   * The current value, `9`, is a leftover from before #129 — it was observed
+   * under the OLD shard-per-session-id counter, not under `countHumanTurns`,
+   * so it is not a recording of what the current derivation produces for
+   * this fixture's transcript. Harmless (`context-from-fixture.ts` treats it
+   * as a plain input either way), but not provenance to trust. Everything
+   * under `derived`, by contrast, IS a real recording and must never be
+   * hand-edited.
    */
   controlled: {
     turnCount: number;

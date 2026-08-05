@@ -194,7 +194,16 @@ describe("countHumanTurns", () => {
   // the rule it claims to guard.
   const HUMAN = { type: "user", originKind: "human" };
   const NOTIFICATION = { type: "user", originKind: "task-notification" };
-  const COORDINATOR = { type: "user", originKind: "coordinator" }; // subagent sidechain
+  // Subagent sidechain prompt. Defensive-only, same category as
+  // HUMAN_WRONG_TYPE below: in the current transcript layout, sidechain
+  // entries live under `<sessionId>/subagents/*.jsonl`, and `findJsonlFiles`
+  // (src/utils/paths.ts) does not recurse into subdirectories, so gccusage
+  // never actually parses them today — a 190-transcript corpus probe found
+  // `isSidechain: 0` and `originKind: "coordinator"` count 0 across every
+  // file gccusage reads. Kept, not deleted, as a guard against a future
+  // format change (e.g. sidechains moving into the main transcript file)
+  // reaching this function unfiltered.
+  const COORDINATOR = { type: "user", originKind: "coordinator" };
   const TOOL_RESULT = { type: "user" }; // content is a tool_result array; no origin
   const META = { type: "user" }; // isMeta text; no origin
   const ASSISTANT = { type: "assistant", originKind: undefined };

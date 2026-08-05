@@ -69,14 +69,30 @@ couldn't be reconstructed retroactively once that had happened.
 derived fresh on every render directly from the transcript's
 `origin.kind === "human"` entries, with nothing persisted and nothing to
 shard or reset. A regenerated fixture's `turnCount` is therefore just as much
-a real recording as anything under `derived` — but it still lives under
-`controlled` here, because `context-from-fixture.ts` reconstructs a
-`RenderContext` by hand from the recorded fields rather than re-running
-`buildRenderContext()`, so the value must be supplied explicitly either way.
-It is set to a **deliberately chosen** value: `9`, the figure actually
-observed for the `opus5` session in a standalone single-session probe run
-(i.e. run in isolation, not interleaved with the other two fixtures' session
-ids in the same process).
+a real recording as anything under `derived`, and the original reason it was
+excluded — generation-order sensitivity — no longer applies. It COULD now be
+promoted into `derived` and captured automatically alongside the rest of that
+block. It still lives under `controlled` here only because doing that means
+regenerating the fixture corpus (see "Refreshing the corpus" below), which was
+out of scope for this documentation pass — not because of any property that
+still sets it apart from `derived`. (`context-from-fixture.ts` reconstructing
+`RenderContext` by hand from recorded fields, rather than re-running
+`buildRenderContext()`, is true of every field under `derived` too — see
+`context-from-fixture.ts:24-53` — so it does not distinguish `turnCount` and
+is not the reason.)
+
+The current value, `9`, is a leftover from before #129: it was the figure
+observed for the `opus5` session under the OLD shard-per-session-id counter,
+in a standalone single-session probe run chosen specifically to dodge that
+counter's cross-session interleaving hazard (see above). Under the current
+derivation that provenance is no longer meaningful — `9` is not a recording of
+what `countHumanTurns` produces for this fixture's transcript, just a
+pre-existing test input that was never re-verified against the new code path.
+This is harmless: `context-from-fixture.ts` treats `controlled.turnCount` as a
+plain input value either way, not as something it trusts to match a live
+transcript, so the widget tests built on it remain valid regardless of what
+the number "means." It is flagged here so nobody mistakes `9` for a recording
+of real `countHumanTurns` output.
 `fixture-types.ts` documents this on the `controlled` field. Everything under
 `derived`, by contrast, IS a real recording from `buildRenderContext()` and
 must never be hand-edited.
@@ -148,7 +164,13 @@ grep -rlE "/Users/" src/__tests__/fixtures/real-payloads/*.json || echo CLEAN
 5. Confirm each fixture's `derived.metrics.session` still has non-zero token
    counts — an all-zero block means `buildRenderContext` found no matching
    transcripts and the fixture is useless.
-6. Re-pick a `controlled.turnCount` value the same deliberate way (a
-   standalone single-session probe, not read out of `derived`) if it needs to
-   change; never source it from the same interleaved generation run.
+6. Re-pick a `controlled.turnCount` value if it needs to change. Unlike the
+   old `turn-tracker.ts` era, an interleaved generation run is now a safe
+   source: `countHumanTurns` is a pure function of one session's own
+   transcript, with nothing shared across session ids to corrupt (see the
+   "why turnCount lives in a separate block" section above). The old
+   standalone-single-session-probe requirement was a workaround for the
+   deleted shard-per-session-id store always starting a fresh shard at
+   `count: 1`; that hazard no longer exists, so this step no longer carries
+   it.
 7. Delete the generator script again before committing.
