@@ -29,8 +29,9 @@ export function getProjectsDir(): string {
 
 // The UUIDs Claude Code sends. Anything else is hashed rather than trusted: a
 // session id arrives from stdin and must never reach a filesystem path
-// unchecked. Shared by the daily cost store and the turn store so there is one
-// implementation of that rule, not two.
+// unchecked. Used by the daily cost store (its only production caller since
+// #129 deleted the turn store, which used to share this so there was one
+// implementation of the rule, not two).
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function shardKey(sessionId: string): string {

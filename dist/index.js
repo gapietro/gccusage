@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import * as fs$8 from "node:fs";
 import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
@@ -8,8 +7,7 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, readFileSync } from "node:fs";
-import * as path$11 from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -225,6 +223,22 @@ function check(requirement, message$1) {
 		message: message$1,
 		"~run"(dataset, config$1) {
 			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "input", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function finite(message$1) {
+	return {
+		kind: "validation",
+		type: "finite",
+		reference: finite,
+		async: false,
+		expects: null,
+		requirement: Number.isFinite,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "finite", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -1633,11 +1647,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$11.join(xdg, "gccusage");
-	return path$11.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$11.join(getConfigDir(), "settings.json");
+	return path$10.join(getConfigDir(), "settings.json");
 }
 /** Shallow-merge only keys that exist in the source object. */
 function mergeIfPresent(defaults, raw, validated) {
@@ -1679,10 +1693,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$8.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$8.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1751,18 +1765,18 @@ function formatDeadline(ms) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$10.isAbsolute(home)) return home;
+	if (path$9.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$10.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$10.join(getHomeDir(), ".claude");
+	return path$9.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$10.join(getClaudeDataDir(), "projects");
+	return path$9.join(getClaudeDataDir(), "projects");
 }
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function shardKey(sessionId) {
@@ -1770,16 +1784,16 @@ function shardKey(sessionId) {
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$9.join(xdg, "gccusage");
+	return path$9.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$7.existsSync(dir)) fs$7.mkdirSync(dir, { recursive: true });
+	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$7.existsSync(dir)) return [];
+	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$7.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$10.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1787,15 +1801,15 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$7.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$10.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$9.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$10.basename(f, ".jsonl") === sessionId));
+			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
 		}
 	} catch {}
 	return files;
@@ -1808,18 +1822,18 @@ function findSessionJsonlFiles(sessionId) {
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
-	if (!fs$7.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$10.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$9.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$7.statSync(f);
+				const fstat = fs$6.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push({
 					path: f,
 					mtimeMs: fstat.mtimeMs,
@@ -1834,9 +1848,9 @@ function findTodayJsonlFileStats() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$6.existsSync(filePath)) return [];
+	if (!fs$5.existsSync(filePath)) return [];
 	try {
-		const content = fs$6.readFileSync(filePath, "utf-8");
+		const content = fs$5.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -1905,6 +1919,9 @@ function normalizeEntry(raw) {
 	if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
 	if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
 	if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
+	const origin = typeof raw["origin"] === "object" && raw["origin"] !== null ? raw["origin"] : void 0;
+	const originKind = origin?.["kind"];
+	if (typeof originKind === "string") entry.originKind = originKind;
 	const message = typeof raw["message"] === "object" && raw["message"] !== null ? raw["message"] : void 0;
 	const model = message?.["model"] ?? raw["model"];
 	const usage = message?.["usage"] ?? raw["usage"];
@@ -2036,6 +2053,25 @@ function getFirstTimestamp(entries) {
 	}
 	return null;
 }
+/**
+* The number of prompts the user actually typed.
+*
+* `type: "user"` alone is not a turn: tool results and harness injections
+* (`<task-notification>`) are written as user entries too, and outnumber real
+* prompts roughly 5:1 — 756 tool results and 124 notifications against 28
+* prompts, on the 3,564-line session sampled for #129. `origin.kind` is the
+* field that separates them, and it also excludes subagent sidechains, whose
+* prompts come from a `coordinator` rather than a human.
+*
+* Recomputed per render rather than accumulated. That is the fix for #129: a
+* counter persisted across renders incremented once per statusline-cache miss,
+* which is neither a turn nor a render.
+*/
+function countHumanTurns(entries) {
+	let count = 0;
+	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count++;
+	return count;
+}
 
 //#endregion
 //#region src/types/block-metrics.ts
@@ -2051,15 +2087,15 @@ let counter = 0;
 * trailing newline rather than the compact encoding `writeJsonAtomic` emits.
 */
 function writeFileAtomic(filePath, contents) {
-	const dir = path$9.dirname(filePath);
+	const dir = path$8.dirname(filePath);
 	ensureDir(dir);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$5.writeFileSync(tmpPath, contents, "utf-8");
+	fs$4.writeFileSync(tmpPath, contents, "utf-8");
 	try {
-		fs$5.renameSync(tmpPath, filePath);
+		fs$4.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$5.unlinkSync(tmpPath);
+			fs$4.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
@@ -2089,7 +2125,7 @@ function writeJsonAtomic(filePath, data) {
 function readJsonValidated(filePath, schema) {
 	let raw;
 	try {
-		raw = fs$5.readFileSync(filePath, "utf-8");
+		raw = fs$4.readFileSync(filePath, "utf-8");
 	} catch {
 		return null;
 	}
@@ -2107,7 +2143,7 @@ function readJsonValidated(filePath, schema) {
 //#region src/cache/block-cache.ts
 const BlockCacheSchema = object({ blockStartTime: number() });
 function getBlockCachePath() {
-	return path$8.join(getCacheDir(), "blocks", "current.json");
+	return path$7.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath$1 = getBlockCachePath();
@@ -2115,7 +2151,7 @@ function loadBlockCache() {
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
 		try {
-			fs$4.unlinkSync(cachePath$1);
+			fs$3.unlinkSync(cachePath$1);
 		} catch {}
 		return null;
 	}
@@ -2545,7 +2581,7 @@ const PricingCacheSchema = object({
 	data: record(string(), unknown())
 });
 function getCachePath$1() {
-	return path$7.join(getCacheDir(), "pricing.json");
+	return path$6.join(getCacheDir(), "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -2773,11 +2809,11 @@ const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 */
 const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
 function stampPath() {
-	return path$6.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
+	return path$5.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
 }
 function attemptedRecently() {
 	try {
-		const raw = fs$3.readFileSync(stampPath(), "utf-8");
+		const raw = fs$2.readFileSync(stampPath(), "utf-8");
 		const stamp = JSON.parse(raw);
 		if (typeof stamp?.timestamp !== "number") return false;
 		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
@@ -2851,7 +2887,7 @@ const TodayAggregateCacheSchema = object({
 	files: record(string(), FileAggregateSchema)
 });
 function cachePath() {
-	return path$5.join(getCacheDir(), "today-aggregates.json");
+	return path$4.join(getCacheDir(), "today-aggregates.json");
 }
 /** Local date, matching how `filterTodayEntries` picks its midnight. */
 function localDateKey(now) {
@@ -4119,10 +4155,10 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 const ShardSchema = object({
 	sessionId: string(),
 	date: string(),
-	costUsd: number(),
-	baselineUsd: fallback(number(), 0),
+	costUsd: pipe(number(), finite()),
+	baselineUsd: fallback(pipe(number(), finite()), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(number(), 0)
+	updatedAt: fallback(pipe(number(), safeInteger()), 0)
 });
 const LegacyStoreSchema = object({
 	date: fallback(optional(string()), void 0),
@@ -4130,17 +4166,17 @@ const LegacyStoreSchema = object({
 });
 const LegacyEntrySchema = object({
 	sessionId: string(),
-	costUsd: number(),
-	baselineUsd: fallback(number(), 0),
+	costUsd: pipe(number(), finite()),
+	baselineUsd: fallback(pipe(number(), finite()), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(optional(number()), void 0)
+	updatedAt: fallback(optional(pipe(number(), safeInteger())), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
 function getShardDir() {
-	return path$4.join(getCacheDir(), "daily");
+	return path$3.join(getCacheDir(), "daily");
 }
 function getLegacyPath() {
-	return path$4.join(getCacheDir(), "daily-costs.json");
+	return path$3.join(getCacheDir(), "daily-costs.json");
 }
 /**
 * One file per session, so a render only ever writes its own session's data.
@@ -4148,7 +4184,7 @@ function getLegacyPath() {
 * is no shared read-modify-write left to lose an update.
 */
 function shardPath(sessionId) {
-	return path$4.join(getShardDir(), `${shardKey(sessionId)}.json`);
+	return path$3.join(getShardDir(), `${shardKey(sessionId)}.json`);
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -4164,10 +4200,10 @@ function dateStr(d) {
 */
 function migrateLegacyStore(now) {
 	const legacyPath = getLegacyPath();
-	if (!fs$2.existsSync(legacyPath)) return;
+	if (!fs$1.existsSync(legacyPath)) return;
 	let raw;
 	try {
-		raw = fs$2.readFileSync(legacyPath, "utf-8");
+		raw = fs$1.readFileSync(legacyPath, "utf-8");
 	} catch {
 		return;
 	}
@@ -4186,7 +4222,7 @@ function migrateLegacyStore(now) {
 			if (!parsed.success) continue;
 			const s = parsed.output;
 			const target = shardPath(s.sessionId);
-			if (fs$2.existsSync(target)) continue;
+			if (fs$1.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
 				date,
@@ -4201,7 +4237,7 @@ function migrateLegacyStore(now) {
 		return;
 	}
 	try {
-		fs$2.unlinkSync(legacyPath);
+		fs$1.unlinkSync(legacyPath);
 	} catch {}
 }
 /**
@@ -4213,19 +4249,19 @@ function readEntries(now) {
 	migrateLegacyStore(now);
 	let files;
 	try {
-		files = fs$2.readdirSync(getShardDir());
+		files = fs$1.readdirSync(getShardDir());
 	} catch {
 		return [];
 	}
 	const entries = [];
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
-		const fullPath = path$4.join(getShardDir(), file);
+		const fullPath = path$3.join(getShardDir(), file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
 		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
 			try {
-				fs$2.unlinkSync(fullPath);
+				fs$1.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
@@ -4272,101 +4308,6 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 		total += Math.max(0, e.costUsd - e.baselineUsd);
 	}
 	return total;
-}
-
-//#endregion
-//#region src/data/turn-tracker.ts
-const TurnDataSchema = object({
-	sessionId: string(),
-	count: pipe(number(), safeInteger()),
-	updatedAt: fallback(pipe(number(), safeInteger()), 0)
-});
-const STALE_TURN_MS = 48 * 3600 * 1e3;
-function getTurnDir() {
-	return path$3.join(getCacheDir(), "turns");
-}
-/**
-* One file per session, so a render only ever writes its own session's data.
-* A single global file reset the count to 1 on every alternating render once
-* two sessions were open (#99) — the same defect the daily cost store had
-* before it was sharded in #81.
-*/
-function turnShardPath(sessionId) {
-	return path$3.join(getTurnDir(), `${shardKey(sessionId)}.json`);
-}
-function getLegacyTurnPath() {
-	return path$3.join(getCacheDir(), "turn-count.json");
-}
-/**
-* Bound the store's growth without adding a directory scan to every render.
-*
-* Called only when this session has no shard yet, which happens once per
-* session rather than once per render. Sharding otherwise trades a per-render
-* write for a per-render `readdir`, which is not a fix.
-*/
-function pruneStaleShards(now) {
-	try {
-		fs$1.unlinkSync(getLegacyTurnPath());
-	} catch {}
-	let files;
-	try {
-		files = fs$1.readdirSync(getTurnDir());
-	} catch {
-		return;
-	}
-	for (const file of files) {
-		if (!file.endsWith(".json")) continue;
-		const fullPath = path$3.join(getTurnDir(), file);
-		const entry = readJsonValidated(fullPath, TurnDataSchema);
-		if (!entry) continue;
-		if (now - entry.updatedAt < STALE_TURN_MS) continue;
-		try {
-			fs$1.unlinkSync(fullPath);
-		} catch {}
-	}
-}
-/**
-* Increment and return the turn count for the given session.
-* Resets when the session ID changes.
-*
-* Note this counts renders that missed the statusline cache, not turns:
-* `runStatusline` returns from cache before the pipeline runs. That predates
-* sharding and is unchanged here.
-*/
-function trackTurn(sessionId) {
-	if (!sessionId) return 0;
-	const filePath = turnShardPath(sessionId);
-	const now = Date.now();
-	const existing = readJsonValidated(filePath, TurnDataSchema);
-	if (existing === null) pruneStaleShards(now);
-	const data = existing && existing.sessionId === sessionId ? {
-		sessionId,
-		count: existing.count + 1,
-		updatedAt: now
-	} : {
-		sessionId,
-		count: 1,
-		updatedAt: now
-	};
-	writeJsonAtomic(filePath, data);
-	return data.count;
-}
-
-//#endregion
-//#region src/config/layout.ts
-/**
-* Whether `type` appears anywhere in the resolved layout.
-*
-* Deliberately coarse: it asks whether the widget is *configured*, not whether
-* it survives the shrink pass at render time. A widget dropped for width still
-* counts. Over-counting in that edge is acceptable — the point is to charge
-* nothing to the users who never configured the widget at all.
-*
-* `lines` is always present after the loader merge (`loader.ts:40`), so there
-* is no optional handling here.
-*/
-function layoutIncludesWidget(settings, type) {
-	return settings.lines.some((line) => line.widgets.some((w) => w.type === type));
 }
 
 //#endregion
@@ -4426,7 +4367,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUncertain,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth(),
-		turnCount: layoutIncludesWidget(settings, "turn-counter") ? trackTurn(stdin.session_id) : 0,
+		turnCount: countHumanTurns(sessionEntries),
 		alerts: {
 			sessionWarn: settings.alerts?.sessionWarn ?? 5,
 			sessionDanger: settings.alerts?.sessionDanger ?? 15,
@@ -4439,6 +4380,7 @@ async function buildRenderContext(stdin, settings) {
 //#endregion
 //#region src/utils/format.ts
 function formatDollars(amount) {
+	if (!Number.isFinite(amount)) return "$?";
 	if (amount < .01) return "$0.00";
 	if (amount < 1) return `$${amount.toFixed(2)}`;
 	if (amount < 100) return `$${amount.toFixed(2)}`;
@@ -4476,6 +4418,7 @@ function formatModelName(model) {
 * $100/hr because bar width is scarcer than that precision is useful.
 */
 function formatCostPerHour(costPerHour) {
+	if (!Number.isFinite(costPerHour)) return "$?/hr";
 	if (costPerHour < .01) return "$0.00/hr";
 	if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
 	return `$${costPerHour.toFixed(0)}/hr`;
@@ -6142,6 +6085,26 @@ function readExistingSettings(settingsPath) {
 		raw
 	};
 }
+/**
+* Remove the turn store the pre-#129 tracker left behind.
+*
+* `trackTurn` owned both the 48h prune and the legacy-file unlink, so deleting
+* it stranded whatever was on disk. This runs in `setup` rather than on the
+* render path: an unconditional unlink per render is exactly the I/O #99
+* removed, and the leftovers are ~110 bytes of inert JSON.
+*
+* Best effort. A cache directory we cannot clean is not a reason to fail the
+* command that configures the statusline.
+*/
+function removeLegacyTurnStore() {
+	const cacheDir = getCacheDir();
+	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
+		rmSync(target, {
+			recursive: true,
+			force: true
+		});
+	} catch {}
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
 	const settingsPath = resolve(homedir(), ".claude", "settings.json");
@@ -6155,6 +6118,7 @@ function runSetup() {
 		command
 	};
 	writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	removeLegacyTurnStore();
 	console.log("gccusage setup complete!\n");
 	console.log(`  Settings: ${settingsPath}`);
 	console.log(`  Command:  ${command}`);

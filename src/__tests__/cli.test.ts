@@ -28,6 +28,29 @@ describe("buildStatusLineCommand", () => {
   });
 });
 
+// Scoped narrowly: `failTurnsRmSync` defaults to false, so every fs call in
+// this file — and every fs call inside cli.ts / writeFileAtomic reached
+// through runCli — passes through to the real implementation for every test
+// except the one that flips the flag on around its own runCli call. Declared
+// via vi.hoisted because vi.mock factories cannot close over an ordinary
+// top-level variable (it would run before the variable is initialised).
+const mockFs = vi.hoisted(() => ({ failTurnsRmSync: false }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    rmSync: (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (mockFs.failTurnsRmSync && String(target).endsWith("turns")) {
+        const err = new Error("EACCES: permission denied, rmdir") as NodeJS.ErrnoException;
+        err.code = "EACCES";
+        throw err;
+      }
+      return actual.rmSync(target, options);
+    },
+  };
+});
+
 // `gccusage today` prices straight from the table, so an unpriced model was
 // dropped from both the total and the by-model list with nothing said (#82).
 vi.mock("../data/pricing-fetcher.js", () => ({
@@ -175,6 +198,7 @@ describe("gccusage today", () => {
 describe("gccusage setup", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
+  let originalXdg: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   const settingsPath = (): string => path.join(tmpDir, ".claude", "settings.json");
@@ -184,7 +208,9 @@ describe("gccusage setup", () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-"));
     originalHome = process.env["HOME"];
+    originalXdg = process.env["XDG_CACHE_HOME"];
     process.env["HOME"] = tmpDir;
+    process.env["XDG_CACHE_HOME"] = tmpDir;
     fs.mkdirSync(path.join(tmpDir, ".claude"), { recursive: true });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -193,6 +219,8 @@ describe("gccusage setup", () => {
     logSpy.mockRestore();
     if (originalHome === undefined) delete process.env["HOME"];
     else process.env["HOME"] = originalHome;
+    if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = originalXdg;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -256,5 +284,41 @@ describe("gccusage setup", () => {
 
     await expect(runCli(["setup"])).rejects.toThrow(settingsPath());
     await expect(runCli(["setup"])).rejects.toThrow("re-run `gccusage setup`");
+  });
+
+  it("removes the orphaned turn store left by the pre-#129 tracker", async () => {
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cacheDir, "turns", "abc.json"),
+      '{"sessionId":"abc","count":7,"updatedAt":0}',
+    );
+    fs.writeFileSync(
+      path.join(cacheDir, "turn-count.json"),
+      '{"sessionId":"abc","count":7,"updatedAt":0}',
+    );
+
+    await runCli(["setup"]);
+
+    expect(fs.existsSync(path.join(cacheDir, "turns"))).toBe(false);
+    expect(fs.existsSync(path.join(cacheDir, "turn-count.json"))).toBe(false);
+  });
+
+  it("completes setup even when the turn store cannot be deleted", async () => {
+    // Flips on the mocked rmSync (top of file) so it throws EACCES for the
+    // "turns" target — the case `{ force: true }` does NOT swallow. A cleanup
+    // failure must not cost the user the thing they ran the command for: the
+    // settings file still gets written.
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
+
+    mockFs.failTurnsRmSync = true;
+    try {
+      await expect(runCli(["setup"])).resolves.toBeUndefined();
+    } finally {
+      mockFs.failTurnsRmSync = false;
+    }
+
+    expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
   });
 });

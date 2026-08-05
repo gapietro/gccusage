@@ -3,7 +3,7 @@ import type { Settings } from "../config/schema.js";
 import type { RenderContext } from "../types/render-context.js";
 import { findSessionJsonlFiles } from "../utils/paths.js";
 import { parseJsonlFile } from "./jsonl-reader.js";
-import { aggregateTokens, getFirstTimestamp } from "./token-aggregator.js";
+import { aggregateTokens, getFirstTimestamp, countHumanTurns } from "./token-aggregator.js";
 import { detectBlock } from "./block-tracker.js";
 import { getPricingForRender } from "./pricing-fetcher.js";
 import { maybeSpawnPricingRefresh } from "./pricing-refresh.js";
@@ -15,8 +15,6 @@ import {
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
 import { trackDailyCost, type CostSource } from "./daily-cost-tracker.js";
-import { trackTurn } from "./turn-tracker.js";
-import { layoutIncludesWidget } from "../config/layout.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -137,13 +135,14 @@ export async function buildRenderContext(
     todayCostUncertain,
     sessionStartTime,
     terminalWidth: getTerminalWidth(),
-    // `trackTurn` reads and writes a file, and `turn-counter` is in no default
-    // layout — so for almost every user this was I/O for a number nothing
-    // displays (#99). Gate on the layout, the same shape as the `today` gate
-    // above. 0 is safe: `turn-counter` renders nothing below 1.
-    turnCount: layoutIncludesWidget(settings, "turn-counter")
-      ? trackTurn(stdin.session_id)
-      : 0,
+    // Derived from the transcript on every render rather than accumulated in a
+    // cache file. The old counter incremented once per statusline-cache miss,
+    // which is neither a turn nor a render (#129). On a cache hit nothing here
+    // runs at all — the previously rendered string is replayed — so the point
+    // is not that the count is recomputed then, but that it is no longer
+    // perturbed by how often the cache missed. Costs nothing: `sessionEntries`
+    // is already in memory for `aggregateTokens` above.
+    turnCount: countHumanTurns(sessionEntries),
     alerts: {
       sessionWarn: settings.alerts?.sessionWarn ?? 5,
       sessionDanger: settings.alerts?.sessionDanger ?? 15,

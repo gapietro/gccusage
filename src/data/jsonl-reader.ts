@@ -2,6 +2,14 @@ import * as fs from "node:fs";
 
 export interface JsonlEntry {
   type?: string;
+  /**
+   * `origin.kind` from the transcript line — "human" for a prompt the user
+   * actually typed, "task-notification" / "coordinator" / absent for the
+   * harness-injected `type: "user"` lines that outnumber real prompts roughly
+   * 5:1. This is the only field that separates them; content-shape sniffing
+   * does not, because tool results and injections are both `type: "user"`.
+   */
+  originKind?: string;
   model?: string;
   costUsd?: number;
   usage?: {
@@ -107,6 +115,15 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
   if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
   if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
   if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
+
+  // Same unwrapping shape as `message` below: a JSON `null` is typeof
+  // "object", so it must be excluded explicitly or reading `.kind` throws.
+  const origin =
+    typeof raw["origin"] === "object" && raw["origin"] !== null
+      ? (raw["origin"] as Record<string, unknown>)
+      : undefined;
+  const originKind = origin?.["kind"];
+  if (typeof originKind === "string") entry.originKind = originKind;
 
   // Current Claude Code transcripts nest model/usage under `message`;
   // the legacy flat format keeps them at the top level.

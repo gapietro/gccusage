@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateTokens, getFirstTimestamp } from "../data/token-aggregator.js";
+import { aggregateTokens, getFirstTimestamp, countHumanTurns } from "../data/token-aggregator.js";
 import type { JsonlEntry } from "../data/jsonl-reader.js";
 
 describe("aggregateTokens", () => {
@@ -179,5 +179,72 @@ describe("aggregateTokens 1-hour cache write bucketing (#118)", () => {
 
     expect(totals.cacheCreation1hTokens).toBe(500);
     expect(totals.cacheCreationTokens).toBe(1500);
+  });
+});
+
+describe("countHumanTurns", () => {
+  // Shapes taken from real transcripts (three sessions sampled for the design
+  // spec). Every one of these is `type: "user"` — which is why counting
+  // `type === "user"` over-counts by ~5x and origin.kind is the real signal.
+  //
+  // There is deliberately no case for `promptSource`. Its human variants
+  // (typed / suggestion_accepted / queued) all carry origin.kind "human", and
+  // the field is not on JsonlEntry at all — a test distinguishing them would
+  // compare two identical fixtures and could not be broken by any mutation to
+  // the rule it claims to guard.
+  const HUMAN = { type: "user", originKind: "human" };
+  const NOTIFICATION = { type: "user", originKind: "task-notification" };
+  // Subagent sidechain prompt. Defensive-only, same category as
+  // HUMAN_WRONG_TYPE below: in the current transcript layout, sidechain
+  // entries live under `<sessionId>/subagents/*.jsonl`, and `findJsonlFiles`
+  // (src/utils/paths.ts) does not recurse into subdirectories, so gccusage
+  // never actually parses them today — a 190-transcript corpus probe found
+  // `isSidechain: 0` and `originKind: "coordinator"` count 0 across every
+  // file gccusage reads. Kept, not deleted, as a guard against a future
+  // format change (e.g. sidechains moving into the main transcript file)
+  // reaching this function unfiltered.
+  const COORDINATOR = { type: "user", originKind: "coordinator" };
+  const TOOL_RESULT = { type: "user" }; // content is a tool_result array; no origin
+  const META = { type: "user" }; // isMeta text; no origin
+  const ASSISTANT = { type: "assistant", originKind: undefined };
+  // Isolates the `type === "user"` half of the conjunct. No real transcript
+  // pairs a non-user type with origin.kind "human" today (0 of 3,212 origin
+  // objects across 400 sampled transcripts sit on a non-user line), but
+  // nothing in jsonl-reader gates originKind on type — so without this
+  // fixture, deleting the type check breaks no test.
+  const HUMAN_WRONG_TYPE = { type: "assistant", originKind: "human" };
+
+  it("counts only entries whose origin is human", () => {
+    expect(countHumanTurns([HUMAN, NOTIFICATION, TOOL_RESULT, HUMAN])).toBe(2);
+  });
+
+  it("excludes task notifications", () => {
+    expect(countHumanTurns([NOTIFICATION, NOTIFICATION, NOTIFICATION])).toBe(0);
+  });
+
+  it("excludes tool results and meta entries, which carry no origin", () => {
+    expect(countHumanTurns([TOOL_RESULT, META, TOOL_RESULT])).toBe(0);
+  });
+
+  it("excludes subagent sidechain prompts", () => {
+    expect(countHumanTurns([COORDINATOR, HUMAN])).toBe(1);
+  });
+
+  it("excludes assistant entries even though they dominate the transcript", () => {
+    expect(countHumanTurns([ASSISTANT, ASSISTANT, ASSISTANT, HUMAN])).toBe(1);
+  });
+
+  it("excludes a non-user entry even when it carries a human origin", () => {
+    expect(countHumanTurns([HUMAN_WRONG_TYPE, HUMAN])).toBe(1);
+  });
+
+  it("returns 0 for a transcript predating the origin field", () => {
+    // The accepted degradation: turn-counter.ts's `!count || count < 1` guard
+    // then renders nothing, which beats rendering a wrong number.
+    expect(countHumanTurns([{ type: "user" }, { type: "assistant" }])).toBe(0);
+  });
+
+  it("returns 0 for an empty transcript", () => {
+    expect(countHumanTurns([])).toBe(0);
   });
 });

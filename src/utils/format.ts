@@ -1,4 +1,24 @@
+// `Number.prototype.toFixed` stringifies Infinity/-Infinity/NaN rather than
+// throwing (`Infinity.toFixed(0)` is the literal text "Infinity"), and a
+// non-finite `total_cost_usd` reaches this function straight from stdin —
+// there is no schema on that path to reject it. #130 constrained the daily
+// cost SHARD's `v.finite()` on read/write, but `trackDailyCost` computes
+// `Math.max(0, Infinity - 0)` and returns it in memory before anything ever
+// reads that shard, so the shard guard never sees it. "$0.00" is deliberately
+// not the fallback here: that would silently claim the cost is known and
+// zero, which is false. "$?" matches this repo's existing convention for a
+// cost it cannot state confidently — see `sessionCostUncertain` in
+// session-cost.ts / today-spend.ts, which append a bare "?" to a real
+// computed amount; this is the same marker for the case where there is no
+// amount to append it to at all. A closer precedent is
+// per-model-breakdown.ts's `${formatModelName(model)}:$?`, which emits the
+// identical "$?" for a model with no pricing entry — a related but distinct
+// meaning ("no price available" vs "the number was not a number"). The two
+// can't collide into "$??": the uncertainty suffix only appends when
+// `sessionCostSource === "calculated"` (pipeline.ts), while this guard's
+// path is only reachable when the source is "stdin".
 export function formatDollars(amount: number): string {
+  if (!Number.isFinite(amount)) return "$?";
   if (amount < 0.01) return "$0.00";
   if (amount < 1) return `$${amount.toFixed(2)}`;
   if (amount < 100) return `$${amount.toFixed(2)}`;
@@ -49,7 +69,15 @@ export function formatModelName(model: string): string {
  * and a total read consistently beside each other, and drops the cents above
  * $100/hr because bar width is scarcer than that precision is useful.
  */
+// Same defect and same fix as `formatDollars` above, in a sibling function
+// that does not call it and so does not inherit its guard: `burn-rate`
+// renders through this path (`costPerHour = costUsd / elapsedMinutes`), and a
+// non-finite `total_cost_usd` produces a non-finite `costPerHour` by the same
+// route. Confirmed reachable end-to-end: a stdin payload with
+// `total_cost_usd: 1e400` and `total_duration_ms` >= 10s puts `$Infinity/hr`
+// on the bar via this function, independently of the `formatDollars` fix.
 export function formatCostPerHour(costPerHour: number): string {
+  if (!Number.isFinite(costPerHour)) return "$?/hr";
   if (costPerHour < 0.01) return "$0.00/hr";
   if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
   return `$${costPerHour.toFixed(0)}/hr`;

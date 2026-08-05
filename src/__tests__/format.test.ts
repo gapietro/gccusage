@@ -24,6 +24,24 @@ describe("formatDollars", () => {
   it("formats large amounts", () => {
     expect(formatDollars(150.5)).toBe("$151");
   });
+
+  // A non-finite amount reaches this function straight from stdin, with no
+  // schema in between to reject it (see the comment on formatDollars). "$0.00"
+  // would be a silent lie — it claims a known, zero cost — so the guard must
+  // render something that says "unknown" instead.
+  describe("non-finite amounts (#131)", () => {
+    it("renders Infinity as an uncertainty marker, not the literal string", () => {
+      expect(formatDollars(Infinity)).toBe("$?");
+    });
+
+    it("renders -Infinity as the same marker", () => {
+      expect(formatDollars(-Infinity)).toBe("$?");
+    });
+
+    it("renders NaN as the same marker", () => {
+      expect(formatDollars(NaN)).toBe("$?");
+    });
+  });
 });
 
 describe("formatTokens", () => {
@@ -105,5 +123,21 @@ describe("formatCostPerHour", () => {
 
   it("drops the cents on large rates to save bar width", () => {
     expect(formatCostPerHour(120.5)).toBe("$121/hr");
+  });
+
+  // Same non-finite hazard as formatDollars, reachable via burn-rate's own
+  // division (costUsd / elapsedMinutes) rather than through formatDollars.
+  describe("non-finite rates (#131)", () => {
+    it("renders Infinity as an uncertainty marker, not the literal string", () => {
+      expect(formatCostPerHour(Infinity)).toBe("$?/hr");
+    });
+
+    it("renders -Infinity as the same marker", () => {
+      expect(formatCostPerHour(-Infinity)).toBe("$?/hr");
+    });
+
+    it("renders NaN as the same marker", () => {
+      expect(formatCostPerHour(NaN)).toBe("$?/hr");
+    });
   });
 });
