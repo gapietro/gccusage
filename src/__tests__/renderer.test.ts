@@ -950,7 +950,10 @@ describe("widget text sanitising (#115)", () => {
    * it. chalk emits SGR and nothing else, so this holds for the whole bar.
    */
   function expectOnlySgr(bar: string): void {
-    const escapes = bar.match(/\u001b(?:\[[0-?]*[ -\/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|.)/g) ?? [];
+    // Re-deriving the escape grammar here is the point; see the doc comment.
+    // oxlint-disable-next-line no-control-regex
+    const escapes = bar.match(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|.)/g) ?? [];
+    // oxlint-disable-next-line no-control-regex -- same, for the SGR test.
     expect(escapes.filter((e) => !/^\u001b\[[0-9;:]*m$/.test(e))).toEqual([]);
   }
 

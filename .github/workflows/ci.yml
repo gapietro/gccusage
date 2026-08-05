@@ -56,6 +56,32 @@ jobs:
 
       - run: npm test
 
+  lint:
+    runs-on: ubuntu-latest
+    # Asks a question the other jobs cannot: not "does it work" but "is it
+    # written the way this project writes things". Runs once and on one Node
+    # version — oxlint is a self-contained Rust binary, so its verdict cannot
+    # vary by runtime the way the test matrix's can.
+    #
+    # `--report-unused-disable-directives-severity=error` is the part worth
+    # keeping. #98 was opened because a suppression comment outlived the rule
+    # it suppressed; as an error rather than the default warning, that exact
+    # decay now fails the build instead of accumulating quietly.
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      # No build needed: oxlint reads source, never dist/. `--ignore-scripts`
+      # skips `prepare`, so this job stays a few seconds rather than paying for
+      # a bundle it will not look at.
+      - run: npm ci --ignore-scripts
+
+      - run: npm run lint
+
   coverage:
     runs-on: ubuntu-latest
     # Separate from the matrix on purpose. `npm test` above is the honest

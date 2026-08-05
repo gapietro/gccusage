@@ -443,6 +443,7 @@ Commands are cached for 30s by default with a 2s execution timeout. Set
 ```bash
 npm test                   # Run the test suite
 npm run test:watch         # Watch mode
+npm run lint               # Lint src/ and scripts/ with oxlint
 npm run build              # Build dist/index.js
 npm run typecheck          # Type check src/
 npm run typecheck:scripts  # Type check scripts/
@@ -450,6 +451,13 @@ npm run schema             # Regenerate config-schema.json from the code
 npm run pricing            # Refresh the offline pricing snapshot from LiteLLM
 npm run dev                # Run from source (requires Bun)
 ```
+
+Lint rules live in `.oxlintrc.json`, which records why each choice was made.
+It runs the `correctness` and `suspicious` tiers only, and there is no
+formatter — style here is held by review, not by a tool that would rewrite
+every file. Suppressions must be live: an `oxlint-disable` comment that no
+longer suppresses anything is an error, not a warning, so it cannot outlive
+the rule it was written for.
 
 `dist/index.js` is committed, not built on clone: `gccusage setup` points
 Claude Code straight at that file, so anyone upgrading with `git pull` runs it

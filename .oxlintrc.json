@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  "plugins": ["eslint", "typescript", "unicorn", "oxc"],
+
+  // `correctness` and `suspicious` only. The `pedantic` tier is deliberately
+  // absent: it produces 359 findings on this tree, 80 of them
+  // `no-inline-comments`. The inline comments in this codebase carry its
+  // design rationale, so that tier would fight the house style rather than
+  // enforce it.
+  //
+  // There is no formatter, by the same logic. Reformatting ~19.4k lines
+  // across 142 files would destroy `git blame` on a codebase whose comments
+  // are its documentation, to settle a question nobody is getting wrong.
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+
+  "rules": {
+    // Prefers `toSorted()` on the grounds that `sort()` mutates, but cannot
+    // tell a freshly-allocated array from a shared one. At the only
+    // production site it flags — `cache-key.ts`, sorting the array that
+    // `Object.entries().filter()` just returned — no other reference to that
+    // array exists and the rewrite is a semantic no-op. 18 hits, wrong at the
+    // one that matters.
+    "unicorn/no-array-sort": "off",
+
+    // Wants helpers hoisted out of the scope that uses them. 13 of its 14
+    // hits are test helpers placed beside the test they serve, which is
+    // deliberate and worth keeping.
+    "unicorn/consistent-function-scoping": "off"
+  },
+
+  // `src/` (including its 54 test files) and `scripts/` are both linted.
+  // Linting the tests is the point rather than an afterthought: this repo's
+  // history records seven distinct ways a test in it has asserted nothing.
+  "ignorePatterns": ["dist", "coverage", "node_modules"]
+}

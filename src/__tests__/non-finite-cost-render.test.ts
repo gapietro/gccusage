@@ -50,6 +50,9 @@ describe("non-finite stdin cost does not put \"Infinity\" on the bar (#131)", ()
       // total_duration_ms >= 10s is required for burn-rate to compute a rate
       // from stdin (see getStdinBurnRate in pipeline.ts) rather than render
       // nothing.
+      // 1e400 overflowing to Infinity is exactly what this test exercises, so
+      // the precision loss is deliberate and must not be "fixed".
+      // oxlint-disable-next-line no-loss-of-precision
       cost: { total_cost_usd: 1e400, total_duration_ms: 3_600_000 },
     };
 
