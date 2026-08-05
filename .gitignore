@@ -16,6 +16,13 @@ dist/*
 .claude/worktrees/
 .superpowers/
 
+# Implementation plans and design specs, kept locally but not published. They
+# were working documents for individual changes, not reference material: nothing
+# in the repo links to them, and the reasoning worth keeping was folded into the
+# code comments and commit messages at the time. Untracked rather than deleted —
+# they stay on disk.
+docs/
+
 # OS and editor cruft
 .DS_Store
 Thumbs.db
