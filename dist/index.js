@@ -4380,6 +4380,7 @@ async function buildRenderContext(stdin, settings) {
 //#endregion
 //#region src/utils/format.ts
 function formatDollars(amount) {
+	if (!Number.isFinite(amount)) return "$?";
 	if (amount < .01) return "$0.00";
 	if (amount < 1) return `$${amount.toFixed(2)}`;
 	if (amount < 100) return `$${amount.toFixed(2)}`;
@@ -4417,6 +4418,7 @@ function formatModelName(model) {
 * $100/hr because bar width is scarcer than that precision is useful.
 */
 function formatCostPerHour(costPerHour) {
+	if (!Number.isFinite(costPerHour)) return "$?/hr";
 	if (costPerHour < .01) return "$0.00/hr";
 	if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
 	return `$${costPerHour.toFixed(0)}/hr`;
