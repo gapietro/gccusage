@@ -1495,7 +1495,7 @@ const WidgetConfigSchema = object({
 	command: optional(string()),
 	text: optional(string()),
 	separator: optional(string()),
-	maxWidth: optional(number()),
+	cacheTtlMs: optional(number()),
 	priority: optional(number())
 });
 const FLEX_MODES = [
@@ -4909,12 +4909,13 @@ const customTextWidget = { render(_context, config) {
 //#endregion
 //#region src/widgets/custom-command.ts
 const commandCache = new Map();
+/** Exported so the published JSON Schema documents the real default (#97). */
 const DEFAULT_TTL_MS = 3e4;
 const DEFAULT_TIMEOUT_MS = 2e3;
 const customCommandWidget = { render(context, config) {
 	const command = config.command;
 	if (!command) return null;
-	const ttl = config.maxWidth ?? DEFAULT_TTL_MS;
+	const ttl = config.cacheTtlMs ?? DEFAULT_TTL_MS;
 	const now = Date.now();
 	const cached = commandCache.get(command);
 	if (cached && now - cached.timestamp < ttl) {

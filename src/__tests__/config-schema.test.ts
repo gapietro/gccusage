@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { buildConfigJsonSchema } from "../config/json-schema.js";
 import { getWidgetTypes } from "../widgets/registry.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { WidgetConfigSchema } from "../config/schema.js";
 
 const SCHEMA_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -77,6 +78,23 @@ describe("config-schema.json", () => {
     expect(powerline.separatorThin.default).toBe(DEFAULT_SETTINGS.powerline.separatorThin);
   });
 
+  it("offers exactly the widget options the validator accepts", () => {
+    // The equality check at the top compares the artifact to the generator,
+    // and the generator restates the widget options by hand — so the two
+    // agreed with each other while both disagreed with valibot. That is how
+    // #97 survived: `maxWidth` sat in the schema described as "Maximum width
+    // for this widget", while the only code reading it used it as a cache TTL
+    // in milliseconds. This is the assertion that ties the pair by name.
+    //
+    // Read off `generated`, not `committed`, unlike its neighbours: the
+    // artifact is downstream of the generator, so a generator edit that had
+    // not been regenerated yet would leave a `committed` version of this
+    // assertion silently green.
+    const properties = (generated as never as SchemaShape).properties.lines.items.properties.widgets
+      .items.properties;
+    expect(Object.keys(properties).sort()).toEqual(Object.keys(WidgetConfigSchema.entries).sort());
+  });
+
   it("describes the compact and alerts sections the loader accepts", () => {
     const properties = (committed as never as SchemaShape).properties;
     expect(Object.keys(properties.compact.properties).sort()).toEqual(
@@ -94,7 +112,9 @@ interface SchemaShape {
     lines: {
       items: {
         properties: {
-          widgets: { items: { properties: { type: { enum: string[] } } } };
+          widgets: {
+            items: { properties: Record<string, unknown> & { type: { enum: string[] } } };
+          };
         };
       };
     };

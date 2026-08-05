@@ -376,12 +376,17 @@ Some options apply only to particular widgets:
 | `command` | `custom-command` | Shell command to run; the widget renders nothing without it |
 | `separator` | `separator` | Separator string (default `" \| "`) |
 | `icon` | `model`, `git-branch` | Prefix glyph; empty by default, since the usual choices need a Nerd Font |
-| `maxWidth` | `custom-command` | Cache TTL in milliseconds, despite the name — see below |
+| `cacheTtlMs` | `custom-command` | How long to reuse the command's output, in milliseconds (default `30000`) |
 
-Two rough edges worth knowing before you meet them: `maxWidth` is read by
-`custom-command` as its cache TTL rather than as a width, and `format` is
-accepted by the config schema but no widget reads it, so setting it does
-nothing.
+One rough edge worth knowing before you meet it: `format` is accepted by the
+config schema but no widget reads it, so setting it does nothing.
+
+`cacheTtlMs` was called `maxWidth` until
+[issue #97](https://github.com/gapietro/gccusage/issues/97) — a width's name
+for a duration, and the JSON Schema duly described it as a width, so
+`maxWidth: 20` set a **20 millisecond** TTL and re-ran the shell command on
+every render. The field is gone; if your config still sets it, it is ignored
+and you get the 30s default. Rename it to `cacheTtlMs` to keep a custom TTL.
 
 `fg`/`bg` accept a hex color (`"#ff0000"` or the 3-digit `"#f00"`) or one of
 these named colors: `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`,
@@ -415,7 +420,7 @@ silently falling back to defaults. It looks like this:
 ```
 
 Commands are cached for 30s by default with a 2s execution timeout. Set
-`maxWidth` to change the cache TTL in milliseconds.
+`cacheTtlMs` to change the cache TTL in milliseconds.
 
 ## Troubleshooting
 
