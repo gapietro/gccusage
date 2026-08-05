@@ -26,11 +26,25 @@ const CostSourceSchema = v.picklist(["stdin", "calculated"]);
 const ShardSchema = v.object({
   sessionId: v.string(),
   date: v.string(), // local date the baseline belongs to
-  costUsd: v.number(), // latest cumulative session cost
-  baselineUsd: v.fallback(v.number(), 0), // cumulative cost at the start of `date`
+  // `v.finite()`, not bare `v.number()`: `JSON.parse("1e400")` is `Infinity`
+  // and `v.number()` accepts it. An infinite cost reaches `formatDollars` —
+  // `amount.toFixed(0)` with no finite check — as the literal text
+  // "$Infinity" (#130).
+  costUsd: v.pipe(v.number(), v.finite()), // latest cumulative session cost
+  baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0), // cumulative cost at the start of `date`
   // Absent in legacy files, and an unrecognised value is treated the same way.
   source: v.fallback(v.optional(CostSourceSchema), undefined),
-  updatedAt: v.fallback(v.number(), 0),
+  // A second, independent failure from the same parse: `now - Infinity` is
+  // `-Infinity`, which is always less than STALE_SESSION_MS, making the shard
+  // unpruneable forever. `v.finite()` alone is not enough here, unlike
+  // `costUsd`/`baselineUsd` above — 1e300 is finite, so it would pass the
+  // pipe, and `now - 1e300` is just as never-stale as `now - Infinity`.
+  // `updatedAt` is always an integer millisecond stamp from `Date.now()` /
+  // `getTime()`, so it gets the stricter `v.safeInteger()`, the same
+  // constraint the deleted `TurnDataSchema` used for its own timestamp. The
+  // fallback to 0 makes a rejected value read as infinitely stale instead, so
+  // it is pruned on the next sweep (#130).
+  updatedAt: v.fallback(v.pipe(v.number(), v.safeInteger()), 0),
 });
 
 type SessionCostEntry = v.InferOutput<typeof ShardSchema>;
@@ -42,10 +56,10 @@ const LegacyStoreSchema = v.object({
 
 const LegacyEntrySchema = v.object({
   sessionId: v.string(),
-  costUsd: v.number(),
-  baselineUsd: v.fallback(v.number(), 0),
+  costUsd: v.pipe(v.number(), v.finite()),
+  baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0),
   source: v.fallback(v.optional(CostSourceSchema), undefined),
-  updatedAt: v.fallback(v.optional(v.number()), undefined),
+  updatedAt: v.fallback(v.optional(v.pipe(v.number(), v.safeInteger())), undefined),
 });
 
 const STALE_SESSION_MS = 48 * 3600 * 1000;

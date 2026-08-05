@@ -228,6 +228,22 @@ function check(requirement, message$1) {
 	};
 }
 /* @__NO_SIDE_EFFECTS__ */
+function finite(message$1) {
+	return {
+		kind: "validation",
+		type: "finite",
+		reference: finite,
+		async: false,
+		expects: null,
+		requirement: Number.isFinite,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "finite", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
 function minValue(requirement, message$1) {
 	return {
 		kind: "validation",
@@ -239,6 +255,22 @@ function minValue(requirement, message$1) {
 		message: message$1,
 		"~run"(dataset, config$1) {
 			if (dataset.typed && !(dataset.value >= this.requirement)) _addIssue(this, "value", dataset, config$1, { received: dataset.value instanceof Date ? dataset.value.toJSON() : /* @__PURE__ */ _stringify(dataset.value) });
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function safeInteger(message$1) {
+	return {
+		kind: "validation",
+		type: "safe_integer",
+		reference: safeInteger,
+		async: false,
+		expects: null,
+		requirement: Number.isSafeInteger,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "safe integer", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -4123,10 +4155,10 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 const ShardSchema = object({
 	sessionId: string(),
 	date: string(),
-	costUsd: number(),
-	baselineUsd: fallback(number(), 0),
+	costUsd: pipe(number(), finite()),
+	baselineUsd: fallback(pipe(number(), finite()), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(number(), 0)
+	updatedAt: fallback(pipe(number(), safeInteger()), 0)
 });
 const LegacyStoreSchema = object({
 	date: fallback(optional(string()), void 0),
@@ -4134,10 +4166,10 @@ const LegacyStoreSchema = object({
 });
 const LegacyEntrySchema = object({
 	sessionId: string(),
-	costUsd: number(),
-	baselineUsd: fallback(number(), 0),
+	costUsd: pipe(number(), finite()),
+	baselineUsd: fallback(pipe(number(), finite()), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(optional(number()), void 0)
+	updatedAt: fallback(optional(pipe(number(), safeInteger())), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
 function getShardDir() {

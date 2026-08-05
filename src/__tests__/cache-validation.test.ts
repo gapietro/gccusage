@@ -513,4 +513,81 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // rendering nothing, which is what the null turn-count used to do.
     expect(output).toContain("$1.50");
   });
+
+  it("prunes a daily shard whose updatedAt is Infinity instead of keeping it forever", async () => {
+    // `JSON.parse("1e400")` is `Infinity` and a bare `v.number()` accepts it.
+    // The prune at daily-cost-tracker.ts:173 computes `now - Infinity`, which
+    // is `-Infinity` and never `>= STALE_SESSION_MS` — so an unguarded schema
+    // makes this shard immortal. The fallback to 0 is what makes a rejected
+    // value read as infinitely stale, and therefore prunable.
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    const immortal = path.join(tmpDir, "gccusage", "daily", "immortal.json");
+    fs.writeFileSync(
+      immortal,
+      '{"sessionId":"immortal","date":"2020-01-01","costUsd":1,"baselineUsd":0,"updatedAt":1e400}',
+    );
+
+    // Any render that reads the store triggers the prune sweep.
+    await runStatusline(
+      {
+        session_id: "sweeper",
+        model: { id: "claude-opus-4-5", display_name: "Opus" },
+        cost: { total_cost_usd: 1.5 },
+      },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(fs.existsSync(immortal)).toBe(false);
+  });
+
+  it("prunes a daily shard whose updatedAt is finite but absurd", async () => {
+    // `v.finite()` alone would accept 1e300 — it is a real number — and
+    // `now - 1e300` is just as never-stale as `now - Infinity`. Only
+    // `v.safeInteger()` rejects it. This is the case that distinguishes the
+    // two constraints, so it must exist separately from the 1e400 test.
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    const absurd = path.join(tmpDir, "gccusage", "daily", "absurd.json");
+    fs.writeFileSync(
+      absurd,
+      '{"sessionId":"absurd","date":"2020-01-01","costUsd":1,"baselineUsd":0,"updatedAt":1e300}',
+    );
+
+    // Any render that reads the store triggers the prune sweep.
+    await runStatusline(
+      {
+        session_id: "sweeper-2",
+        model: { id: "claude-opus-4-5", display_name: "Opus" },
+        cost: { total_cost_usd: 1.5 },
+      },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(fs.existsSync(absurd)).toBe(false);
+  });
+
+  it("rejects an Infinity daily cost instead of rendering $Infinity", async () => {
+    // formatDollars is `amount.toFixed(0)` with no finite check, so an
+    // Infinity that survives the schema reaches the bar as the literal text
+    // "$Infinity". `date` must be today and `updatedAt` fresh, or the shard is
+    // filtered out before its costUsd is ever read and this asserts nothing.
+    fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    fs.writeFileSync(
+      path.join(tmpDir, "gccusage", "daily", "infinite-cost.json"),
+      `{"sessionId":"infinite-cost","date":"${today}","costUsd":1e400,"baselineUsd":0,"updatedAt":${now.getTime()}}`,
+    );
+
+    const output = await runStatusline(
+      {
+        session_id: "reader",
+        model: { id: "claude-opus-4-5", display_name: "Opus" },
+        cost: { total_cost_usd: 1.5 },
+      },
+      DEFAULT_SETTINGS,
+    );
+
+    expect(output).not.toContain("Infinity");
+    expect(output).toContain("$1.50");
+  });
 });
