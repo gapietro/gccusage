@@ -1905,6 +1905,9 @@ function normalizeEntry(raw) {
 	if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
 	if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
 	if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
+	const origin = typeof raw["origin"] === "object" && raw["origin"] !== null ? raw["origin"] : void 0;
+	const originKind = origin?.["kind"];
+	if (typeof originKind === "string") entry.originKind = originKind;
 	const message = typeof raw["message"] === "object" && raw["message"] !== null ? raw["message"] : void 0;
 	const model = message?.["model"] ?? raw["model"];
 	const usage = message?.["usage"] ?? raw["usage"];

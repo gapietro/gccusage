@@ -247,3 +247,49 @@ describe("1-hour cache creation tokens", () => {
     expect(entries[0]!.usage!.cache_creation_1h_input_tokens).toBe(0);
   });
 });
+
+describe("origin.kind extraction", () => {
+  it("carries origin.kind through for a human prompt", () => {
+    const line = JSON.stringify({
+      type: "user",
+      origin: { kind: "human" },
+      promptSource: "typed",
+      message: { role: "user", content: "hello" },
+      timestamp: "2026-08-04T10:00:00.000Z",
+    });
+    const [entry] = parseJsonlContent(line);
+    expect(entry?.originKind).toBe("human");
+  });
+
+  it("carries origin.kind through for a task notification", () => {
+    const line = JSON.stringify({
+      type: "user",
+      origin: { kind: "task-notification" },
+      promptSource: "system",
+      message: { role: "user", content: "<task-notification>done</task-notification>" },
+    });
+    const [entry] = parseJsonlContent(line);
+    expect(entry?.originKind).toBe("task-notification");
+  });
+
+  it("leaves originKind undefined when the line has no origin", () => {
+    const line = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", content: "ok" }] },
+    });
+    const [entry] = parseJsonlContent(line);
+    expect(entry?.originKind).toBeUndefined();
+  });
+
+  it("leaves originKind undefined when origin.kind is not a string", () => {
+    const line = JSON.stringify({ type: "user", origin: { kind: 42 } });
+    const [entry] = parseJsonlContent(line);
+    expect(entry?.originKind).toBeUndefined();
+  });
+
+  it("leaves originKind undefined when origin is null", () => {
+    const line = JSON.stringify({ type: "user", origin: null });
+    const [entry] = parseJsonlContent(line);
+    expect(entry?.originKind).toBeUndefined();
+  });
+});
