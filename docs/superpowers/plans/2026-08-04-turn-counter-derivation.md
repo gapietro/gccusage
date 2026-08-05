@@ -182,8 +182,13 @@ describe("countHumanTurns", () => {
   // Shapes taken from real transcripts (three sessions sampled for the design
   // spec). Every one of these is `type: "user"` — which is why counting
   // `type === "user"` over-counts by ~5x and origin.kind is the real signal.
+  //
+  // There is deliberately no case for `promptSource`. Its human variants
+  // (typed / suggestion_accepted / queued) all carry origin.kind "human", and
+  // the field is not on JsonlEntry at all — a test distinguishing them would
+  // compare two identical fixtures and could not be broken by any mutation to
+  // the rule it claims to guard.
   const HUMAN = { type: "user", originKind: "human" };
-  const SUGGESTION = { type: "user", originKind: "human" }; // promptSource: suggestion_accepted
   const NOTIFICATION = { type: "user", originKind: "task-notification" };
   const COORDINATOR = { type: "user", originKind: "coordinator" }; // subagent sidechain
   const TOOL_RESULT = { type: "user" }; // content is a tool_result array; no origin
@@ -192,10 +197,6 @@ describe("countHumanTurns", () => {
 
   it("counts only entries whose origin is human", () => {
     expect(countHumanTurns([HUMAN, NOTIFICATION, TOOL_RESULT, HUMAN])).toBe(2);
-  });
-
-  it("counts suggestion-accepted prompts, which are still human", () => {
-    expect(countHumanTurns([HUMAN, SUGGESTION])).toBe(2);
   });
 
   it("excludes task notifications", () => {
