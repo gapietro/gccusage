@@ -28,6 +28,29 @@ describe("buildStatusLineCommand", () => {
   });
 });
 
+// Scoped narrowly: `failTurnsRmSync` defaults to false, so every fs call in
+// this file — and every fs call inside cli.ts / writeFileAtomic reached
+// through runCli — passes through to the real implementation for every test
+// except the one that flips the flag on around its own runCli call. Declared
+// via vi.hoisted because vi.mock factories cannot close over an ordinary
+// top-level variable (it would run before the variable is initialised).
+const mockFs = vi.hoisted(() => ({ failTurnsRmSync: false }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    rmSync: (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (mockFs.failTurnsRmSync && String(target).endsWith("turns")) {
+        const err = new Error("EACCES: permission denied, rmdir") as NodeJS.ErrnoException;
+        err.code = "EACCES";
+        throw err;
+      }
+      return actual.rmSync(target, options);
+    },
+  };
+});
+
 // `gccusage today` prices straight from the table, so an unpriced model was
 // dropped from both the total and the by-model list with nothing said (#82).
 vi.mock("../data/pricing-fetcher.js", () => ({
@@ -281,9 +304,21 @@ describe("gccusage setup", () => {
     expect(fs.existsSync(path.join(cacheDir, "turn-count.json"))).toBe(false);
   });
 
-  it("does not fail when there is no turn store to remove", async () => {
-    // The common case for anyone who never configured turn-counter, and for
-    // every user after the first cleanup. Must not throw.
-    await expect(runCli(["setup"])).resolves.toBeUndefined();
+  it("completes setup even when the turn store cannot be deleted", async () => {
+    // Flips on the mocked rmSync (top of file) so it throws EACCES for the
+    // "turns" target — the case `{ force: true }` does NOT swallow. A cleanup
+    // failure must not cost the user the thing they ran the command for: the
+    // settings file still gets written.
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
+
+    mockFs.failTurnsRmSync = true;
+    try {
+      await expect(runCli(["setup"])).resolves.toBeUndefined();
+    } finally {
+      mockFs.failTurnsRmSync = false;
+    }
+
+    expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
   });
 });
