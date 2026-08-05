@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -1693,10 +1692,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1788,12 +1787,12 @@ function getCacheDir() {
 	return path$9.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
+	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$6.existsSync(dir)) return [];
+	if (!fs$5.existsSync(dir)) return [];
 	try {
-		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
+		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1801,12 +1800,12 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
 			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
@@ -1822,18 +1821,18 @@ function findSessionJsonlFiles(sessionId) {
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (!fs$5.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	try {
-		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$6.statSync(fullPath);
+			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$6.statSync(f);
+				const fstat = fs$5.statSync(f);
 				if (fstat.mtimeMs >= todayMs) files.push({
 					path: f,
 					mtimeMs: fstat.mtimeMs,
@@ -1848,9 +1847,9 @@ function findTodayJsonlFileStats() {
 //#endregion
 //#region src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$5.existsSync(filePath)) return [];
+	if (!fs$4.existsSync(filePath)) return [];
 	try {
-		const content = fs$5.readFileSync(filePath, "utf-8");
+		const content = fs$4.readFileSync(filePath, "utf-8");
 		return parseJsonlContent(content);
 	} catch {
 		return [];
@@ -2090,12 +2089,12 @@ function writeFileAtomic(filePath, contents) {
 	const dir = path$8.dirname(filePath);
 	ensureDir(dir);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$4.writeFileSync(tmpPath, contents, "utf-8");
+	fs$3.writeFileSync(tmpPath, contents, "utf-8");
 	try {
-		fs$4.renameSync(tmpPath, filePath);
+		fs$3.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$4.unlinkSync(tmpPath);
+			fs$3.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
@@ -2125,7 +2124,7 @@ function writeJsonAtomic(filePath, data) {
 function readJsonValidated(filePath, schema) {
 	let raw;
 	try {
-		raw = fs$4.readFileSync(filePath, "utf-8");
+		raw = fs$3.readFileSync(filePath, "utf-8");
 	} catch {
 		return null;
 	}
@@ -2151,7 +2150,7 @@ function loadBlockCache() {
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
 		try {
-			fs$3.unlinkSync(cachePath$1);
+			fs$2.unlinkSync(cachePath$1);
 		} catch {}
 		return null;
 	}
@@ -2811,15 +2810,19 @@ const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
 function stampPath() {
 	return path$5.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
 }
+/**
+* `v.finite()`, not bare `v.number()`: `JSON.parse('{"timestamp":1e400}')`
+* yields `Infinity`, which the hand-rolled `typeof === "number"` guard this
+* replaced admitted. `Date.now() - Infinity` is `-Infinity`, always inside
+* the backoff window, and the stamp is only rewritten *after* the check — so
+* the file causing the wrong answer gated its own repair and pricing froze
+* permanently, silently (#133).
+*/
+const StampSchema = object({ timestamp: pipe(number(), finite()) });
 function attemptedRecently() {
-	try {
-		const raw = fs$2.readFileSync(stampPath(), "utf-8");
-		const stamp = JSON.parse(raw);
-		if (typeof stamp?.timestamp !== "number") return false;
-		return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
-	} catch {
-		return false;
-	}
+	const stamp = readJsonValidated(stampPath(), StampSchema);
+	if (stamp === null) return false;
+	return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
 }
 /**
 * Refreshes pricing out of band when the cache is stale, so the render path

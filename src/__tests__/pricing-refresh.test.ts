@@ -84,6 +84,22 @@ describe("maybeSpawnPricingRefresh", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it("spawns when the stamp timestamp is Infinity, instead of latching the backoff on", () => {
+    // Written as a raw string on purpose: `JSON.stringify({ timestamp: Infinity })`
+    // emits `null`, so building this through the writer cannot reproduce it.
+    // `JSON.parse` turns an out-of-range literal into `Infinity`, which a bare
+    // `typeof === "number"` guard admits — and `Date.now() - Infinity` is
+    // `-Infinity`, forever inside the backoff window (#133).
+    fs.mkdirSync(path.dirname(stampPath()), { recursive: true });
+    fs.writeFileSync(stampPath(), '{"timestamp":1e400}');
+
+    maybeSpawnPricingRefresh(true);
+
+    // The stamp is only rewritten AFTER this check, so a latched backoff is
+    // permanent: the file causing the wrong answer gates its own repair.
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it("never throws when the cache directory cannot be written", () => {
     process.env["XDG_CACHE_HOME"] = path.join(tmpDir, "nonexistent-file", "nope");
     fs.writeFileSync(path.join(tmpDir, "nonexistent-file"), "not a directory");
