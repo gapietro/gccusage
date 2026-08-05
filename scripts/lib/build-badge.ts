@@ -1,79 +1,29 @@
 /**
- * Build-number badge: `MMDD.<pushes to main that day>`.
+ * README badges: a stamped version badge and a live CI status badge.
  *
- * The count answers "how many times did main move today", so it resets with
- * the date rather than accumulating. `0802.1` follows `0801.9` — the count
- * orders builds within a day and the date orders the days.
+ * There used to be a third, a `MMDD.<pushes today>` build counter, stamped by
+ * a workflow that committed to `main` on every push. Protecting `main` with
+ * required status checks made that push impossible — `GH006: protected branch
+ * hook declined` — and the counter was decorative anyway. The CI badge
+ * replaces it: it reports something load-bearing (whether the suite is green)
+ * and costs no commits, because GitHub renders it from the workflow's own
+ * state.
  *
  * Everything here is pure so it can be tested without a filesystem; the entry
  * point in ../build-badge.ts does the reading and writing.
  */
 
-/**
- * The date the count belongs to is the *local* one.
- *
- * The Action runs on a UTC runner, where a 9pm push in New York already reads
- * as tomorrow — the badge would roll over mid-evening and reset a count that
- * had not finished its day. The repo already keys `daily-costs.json` on the
- * local date for the same reason, so the zone is named here in code rather
- * than left to a `TZ` the workflow might drop.
- */
-export const ZONE = "America/New_York";
-
 export const BADGE_START = "<!-- badges:start -->";
 export const BADGE_END = "<!-- badges:end -->";
 
-/** Shown until the first real push replaces it; never a fabricated number. */
-export const PENDING = "pending";
-
-export interface BuildState {
-  date: string;
-  count: number;
-  build: string;
-}
+/**
+ * Hardcoded rather than derived from the git remote: the badge has to resolve
+ * for anyone reading the README on npm or a mirror, where no remote exists.
+ * package.json's `repository` and `homepage` already pin the same slug.
+ */
+export const REPO_SLUG = "gapietro/gccusage";
 
 export type RenderResult = { ok: true; readme: string } | { ok: false; error: string };
-
-/**
- * The `YYYY-MM-DD` date in `zone` at instant `now`.
- *
- * `en-CA` is the shortest route to ISO-ordered parts from `Intl`; formatting
- * through `Intl` rather than reading `getMonth()` is what makes the zone
- * explicit instead of inherited from the runner's environment.
- */
-export function todayInZone(now: Date, zone: string = ZONE): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
-/** `2026-08-01` + 3 → `0801.3`. */
-export function formatBuild(date: string, count: number): string {
-  return `${date.slice(5, 7)}${date.slice(8, 10)}.${count}`;
-}
-
-function storedCount(state: unknown, today: string): number {
-  if (typeof state !== "object" || state === null) return 0;
-  const { date, count } = state as { date?: unknown; count?: unknown };
-  if (date !== today) return 0;
-  if (typeof count !== "number" || !Number.isInteger(count) || count < 1) return 0;
-  return count;
-}
-
-/**
- * The state this push should record.
- *
- * Anything unreadable — absent file, malformed JSON, a count that is not a
- * positive integer — is treated as a fresh day rather than an error. A badge
- * is not worth failing a push over, and the next push self-corrects.
- */
-export function nextBuild(state: unknown, today: string): BuildState {
-  const count = storedCount(state, today) + 1;
-  return { date: today, count, build: formatBuild(today, count) };
-}
 
 /**
  * Escape a value for a shields.io path segment, where `-` and `_` are
@@ -85,9 +35,22 @@ export function shieldsEscape(value: string): string {
   return value.replace(/-/g, "--").replace(/_/g, "__").replace(/ /g, "_");
 }
 
-function badge(label: string, message: string, color: string): string {
+function shieldsBadge(label: string, message: string, color: string): string {
   const url = `https://img.shields.io/badge/${shieldsEscape(label)}-${shieldsEscape(message)}-${color}`;
   return `![${label}](${url})`;
+}
+
+/**
+ * GitHub's own workflow badge, linked to the run history.
+ *
+ * Deliberately unstamped — it carries no value this script computes, so it is
+ * identical on every run and reflects the real state of `main` the moment
+ * someone loads the page, not the state at the last time anyone ran `npm run
+ * badge`. A stamped CI badge could claim green while main was red.
+ */
+function ciBadge(): string {
+  const workflow = `https://github.com/${REPO_SLUG}/actions/workflows/ci.yml`;
+  return `[![ci](${workflow}/badge.svg?branch=main)](${workflow})`;
 }
 
 /**
@@ -97,10 +60,7 @@ function badge(label: string, message: string, color: string): string {
  * returning the input would leave the badge permanently stale while every run
  * reported success.
  */
-export function renderBadges(
-  readme: string,
-  values: { version: string; build: string },
-): RenderResult {
+export function renderBadges(readme: string, values: { version: string }): RenderResult {
   const start = readme.indexOf(BADGE_START);
   const end = readme.indexOf(BADGE_END);
   if (start === -1) return { ok: false, error: `README is missing the ${BADGE_START} marker` };
@@ -111,8 +71,8 @@ export function renderBadges(
 
   const block = [
     BADGE_START,
-    badge("version", values.version, "blue"),
-    badge("build", values.build, values.build === PENDING ? "lightgrey" : "brightgreen"),
+    shieldsBadge("version", values.version, "blue"),
+    ciBadge(),
     BADGE_END,
   ].join("\n");
 

@@ -1,12 +1,16 @@
 /**
- * Stamp the README's version and build badges. Run by
- * .github/workflows/build-badge.yml on every push to main.
+ * Stamp the README's version badge from package.json.
+ *
+ * Run by hand at release time — `npm version` does not touch the README — not
+ * by a workflow. The build-counter workflow that used to run this on every
+ * push to `main` was retired when `main` became a protected branch: its commit
+ * could no longer land, and the counter it maintained was decorative. The CI
+ * badge that replaced it needs no stamping.
  *
  * Like the other scripts here it runs under Node with no build step, which
  * requires native TypeScript type stripping (unflagged in Node 23.6,
  * backported to 22.x). On an older Node it fails to parse before any of its
- * code runs, so it cannot report the problem itself; the workflow pins a Node
- * that qualifies.
+ * code runs, so it cannot report the problem itself.
  *
  *   npm run badge
  *
@@ -15,28 +19,16 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { nextBuild, renderBadges, todayInZone } from "./lib/build-badge.ts";
-
-const STATE_PATH = [".github", "build-number.json"];
+import { renderBadges } from "./lib/build-badge.ts";
 
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
 }
 
-function readState(file: string): unknown {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    // Absent or malformed: nextBuild treats it as a fresh day.
-    return undefined;
-  }
-}
-
 function main(): void {
   const root =
     process.env.GCCUSAGE_BADGE_ROOT ?? path.join(import.meta.dirname, "..");
-  const statePath = path.join(root, ...STATE_PATH);
   const readmePath = path.join(root, "README.md");
   const packagePath = path.join(root, "package.json");
 
@@ -57,16 +49,13 @@ function main(): void {
     return fail(`cannot read ${readmePath}: ${error instanceof Error ? error.message : error}`);
   }
 
-  const state = nextBuild(readState(statePath), todayInZone(new Date()));
-
-  // Render before writing anything, so a README that has lost its markers
-  // leaves both files as they were instead of burning a build number.
-  const rendered = renderBadges(readme, { version, build: state.build });
+  // Render before writing, so a README that has lost its markers is left
+  // exactly as it was rather than half-rewritten.
+  const rendered = renderBadges(readme, { version });
   if (!rendered.ok) return fail(rendered.error);
 
-  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
   fs.writeFileSync(readmePath, rendered.readme);
-  console.log(`build ${state.build} — version ${version}`);
+  console.log(`version ${version}`);
 }
 
 main();

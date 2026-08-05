@@ -6,114 +6,58 @@ import * as path from "node:path";
 import {
   BADGE_END,
   BADGE_START,
-  PENDING,
-  formatBuild,
-  nextBuild,
+  REPO_SLUG,
   renderBadges,
   shieldsEscape,
-  todayInZone,
 } from "../lib/build-badge.ts";
 import { nodeRunsTypeScript } from "./node-ts-support.ts";
 
 const readme = (badges: string): string =>
   ["# gccusage", "", BADGE_START, badges, BADGE_END, "", "A statusline.", ""].join("\n");
 
-describe("todayInZone", () => {
-  it("reports the New York date, not the UTC one, after 8pm local", () => {
-    // 2026-08-02T01:30:00Z is still 2026-08-01 21:30 in New York.
-    const now = new Date("2026-08-02T01:30:00Z");
-    expect(todayInZone(now, "America/New_York")).toBe("2026-08-01");
-    expect(todayInZone(now, "UTC")).toBe("2026-08-02");
-  });
-
-  it("pads single-digit months and days", () => {
-    expect(todayInZone(new Date("2026-01-05T17:00:00Z"), "America/New_York")).toBe("2026-01-05");
-  });
-});
-
-describe("nextBuild", () => {
-  it("increments the count on a push made the same day", () => {
-    expect(nextBuild({ date: "2026-08-01", count: 3, build: "0801.3" }, "2026-08-01")).toEqual({
-      date: "2026-08-01",
-      count: 4,
-      build: "0801.4",
-    });
-  });
-
-  it("resets to 1 on the first push of a new day", () => {
-    expect(nextBuild({ date: "2026-08-01", count: 9, build: "0801.9" }, "2026-08-02")).toEqual({
-      date: "2026-08-02",
-      count: 1,
-      build: "0802.1",
-    });
-  });
-
-  it("treats missing, malformed, and partial state as a fresh day", () => {
-    for (const state of [
-      undefined,
-      null,
-      "not an object",
-      {},
-      { date: "2026-08-01" },
-      { count: 3 },
-      { date: "2026-08-01", count: "3" },
-      { date: 20260801, count: 3 },
-      { date: "2026-08-01", count: Number.NaN },
-      { date: "2026-08-01", count: -2 },
-      { date: "2026-08-01", count: 1.5 },
-      { date: "", count: 0, build: "" },
-    ]) {
-      expect(nextBuild(state, "2026-08-01")).toEqual({
-        date: "2026-08-01",
-        count: 1,
-        build: "0801.1",
-      });
-    }
-  });
-
-  it("keeps build consistent with its own date and count", () => {
-    const state = nextBuild({ date: "2026-12-25", count: 11, build: "wrong" }, "2026-12-25");
-    expect(state.build).toBe(formatBuild(state.date, state.count));
-    expect(state.build).toBe("1225.12");
-  });
-});
-
-describe("formatBuild", () => {
-  it("drops the year and keeps MMDD zero-padded", () => {
-    expect(formatBuild("2026-01-05", 7)).toBe("0105.7");
-    expect(formatBuild("2026-11-30", 1)).toBe("1130.1");
-  });
-});
-
 describe("shieldsEscape", () => {
   it("doubles dashes and underscores so shields renders them literally", () => {
     expect(shieldsEscape("1.0.0-rc1")).toBe("1.0.0--rc1");
-    expect(shieldsEscape("0.2.0")).toBe("0.2.0");
+    expect(shieldsEscape("1.0.0")).toBe("1.0.0");
     expect(shieldsEscape("a_b")).toBe("a__b");
     expect(shieldsEscape("two words")).toBe("two_words");
   });
 });
 
 describe("renderBadges", () => {
-  it("writes both badges between the markers", () => {
-    const result = renderBadges(readme("![build](old)"), { version: "0.2.0", build: "0801.3" });
+  it("writes the version badge and the CI badge between the markers", () => {
+    const result = renderBadges(readme("![build](old)"), { version: "1.0.0" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.readme).toContain("https://img.shields.io/badge/version-0.2.0-blue");
-    expect(result.readme).toContain("https://img.shields.io/badge/build-0801.3-brightgreen");
+    expect(result.readme).toContain("https://img.shields.io/badge/version-1.0.0-blue");
+    expect(result.readme).toContain(
+      `https://github.com/${REPO_SLUG}/actions/workflows/ci.yml/badge.svg?branch=main`,
+    );
+    // The retired build counter must not come back with it.
     expect(result.readme).not.toContain("![build](old)");
+    expect(result.readme).not.toContain("badge/build-");
   });
 
-  it("is idempotent — a second run with the same values changes nothing", () => {
-    const once = renderBadges(readme(PENDING), { version: "0.2.0", build: "0801.3" });
+  it("links the CI badge to the run history rather than leaving it inert", () => {
+    const result = renderBadges(readme(""), { version: "1.0.0" });
+    // A bare `![ci](…badge.svg)` renders but goes nowhere, which is the whole
+    // point of showing build state — the reader has to be able to click into
+    // the failing run.
+    expect(result.ok && result.readme).toContain(
+      `](https://github.com/${REPO_SLUG}/actions/workflows/ci.yml)`,
+    );
+  });
+
+  it("is idempotent — a second run with the same version changes nothing", () => {
+    const once = renderBadges(readme("stale"), { version: "1.0.0" });
     expect(once.ok).toBe(true);
     if (!once.ok) return;
-    const twice = renderBadges(once.readme, { version: "0.2.0", build: "0801.3" });
+    const twice = renderBadges(once.readme, { version: "1.0.0" });
     expect(twice.ok && twice.readme).toBe(once.readme);
   });
 
   it("leaves everything outside the markers untouched", () => {
-    const result = renderBadges(readme("![build](old)"), { version: "0.2.0", build: "0801.3" });
+    const result = renderBadges(readme("![build](old)"), { version: "1.0.0" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.readme.startsWith("# gccusage\n")).toBe(true);
@@ -121,25 +65,18 @@ describe("renderBadges", () => {
   });
 
   it("escapes a version that would otherwise break the shields path", () => {
-    const result = renderBadges(readme(PENDING), { version: "1.0.0-rc1", build: "0801.3" });
+    const result = renderBadges(readme(""), { version: "1.0.0-rc1" });
     expect(result.ok && result.readme).toContain("badge/version-1.0.0--rc1-blue");
-  });
-
-  it("greys the badge out while the build is still pending", () => {
-    const pending = renderBadges(readme(PENDING), { version: "0.2.0", build: PENDING });
-    expect(pending.ok && pending.readme).toContain("badge/build-pending-lightgrey");
-    const real = renderBadges(readme(PENDING), { version: "0.2.0", build: "0801.1" });
-    expect(real.ok && real.readme).not.toContain("lightgrey");
   });
 
   it("fails loudly when a marker is missing rather than appending", () => {
     for (const broken of [
       "# gccusage\n\nno markers at all\n",
-      `# gccusage\n\n${BADGE_START}\n![build](x)\n`,
-      `# gccusage\n\n![build](x)\n${BADGE_END}\n`,
-      `# gccusage\n\n${BADGE_END}\n![build](x)\n${BADGE_START}\n`,
+      `# gccusage\n\n${BADGE_START}\n![x](y)\n`,
+      `# gccusage\n\n![x](y)\n${BADGE_END}\n`,
+      `# gccusage\n\n${BADGE_END}\n![x](y)\n${BADGE_START}\n`,
     ]) {
-      const result = renderBadges(broken, { version: "0.2.0", build: "0801.3" });
+      const result = renderBadges(broken, { version: "1.0.0" });
       expect(result.ok).toBe(false);
       expect(result.ok === false && result.error).toContain("badges:");
     }
@@ -151,9 +88,8 @@ describe.skipIf(!nodeRunsTypeScript)("build-badge entry point", () => {
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-badge-"));
-    fs.mkdirSync(path.join(dir, ".github"));
     fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ version: "1.2.3" }));
-    fs.writeFileSync(path.join(dir, "README.md"), readme(PENDING));
+    fs.writeFileSync(path.join(dir, "README.md"), readme("stale"));
   });
 
   afterEach(() => {
@@ -167,25 +103,26 @@ describe.skipIf(!nodeRunsTypeScript)("build-badge entry point", () => {
       env: { ...process.env, GCCUSAGE_BADGE_ROOT: dir },
     });
 
-  it("writes both files on a first run and increments on a second", () => {
+  it("stamps the version from package.json and writes no state file", () => {
     run();
-    const state = JSON.parse(fs.readFileSync(path.join(dir, ".github", "build-number.json"), "utf8"));
-    expect(state.count).toBe(1);
-    expect(fs.readFileSync(path.join(dir, "README.md"), "utf8")).toContain(
-      `badge/build-${state.build}-brightgreen`,
-    );
-    expect(fs.readFileSync(path.join(dir, "README.md"), "utf8")).toContain("badge/version-1.2.3-blue");
-
-    run();
-    const after = JSON.parse(fs.readFileSync(path.join(dir, ".github", "build-number.json"), "utf8"));
-    expect(after.count).toBe(2);
-    expect(after.build).toBe(formatBuild(after.date, 2));
+    const after = fs.readFileSync(path.join(dir, "README.md"), "utf8");
+    expect(after).toContain("badge/version-1.2.3-blue");
+    expect(after).toContain("actions/workflows/ci.yml/badge.svg");
+    // The retired counter's state file must not be recreated: it only existed
+    // to feed a workflow that can no longer push to a protected main.
+    expect(fs.existsSync(path.join(dir, ".github", "build-number.json"))).toBe(false);
   });
 
-  it("exits non-zero and leaves files alone when the README has no markers", () => {
+  it("is idempotent across runs, so re-stamping produces no diff", () => {
+    run();
+    const first = fs.readFileSync(path.join(dir, "README.md"), "utf8");
+    run();
+    expect(fs.readFileSync(path.join(dir, "README.md"), "utf8")).toBe(first);
+  });
+
+  it("exits non-zero and leaves the README alone when it has no markers", () => {
     fs.writeFileSync(path.join(dir, "README.md"), "# gccusage\n\nno markers\n");
     expect(() => run()).toThrow();
-    expect(fs.existsSync(path.join(dir, ".github", "build-number.json"))).toBe(false);
     expect(fs.readFileSync(path.join(dir, "README.md"), "utf8")).toBe("# gccusage\n\nno markers\n");
   });
 });

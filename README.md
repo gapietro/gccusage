@@ -2,7 +2,7 @@
 
 <!-- badges:start -->
 ![version](https://img.shields.io/badge/version-1.0.0-blue)
-![build](https://img.shields.io/badge/build-0805.1-brightgreen)
+[![ci](https://github.com/gapietro/gccusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gapietro/gccusage/actions/workflows/ci.yml)
 <!-- badges:end -->
 
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
