@@ -11,7 +11,9 @@ const ColorSchema = v.pipe(
   v.check(isValidColor, "must be a color name or #rgb/#rrggbb hex"),
 );
 
-const WidgetConfigSchema = v.object({
+// Exported so the published JSON Schema can be checked against the exact set
+// of options the validator accepts, rather than only against itself (#97).
+export const WidgetConfigSchema = v.object({
   type: v.string(),
   label: v.optional(v.string()),
   fg: v.optional(ColorSchema),
@@ -21,7 +23,11 @@ const WidgetConfigSchema = v.object({
   command: v.optional(v.string()),
   text: v.optional(v.string()),
   separator: v.optional(v.string()),
-  maxWidth: v.optional(v.number()),
+  // Read only by `custom-command`. It was called `maxWidth` until #97, which
+  // is a width's name for a duration: the JSON Schema said "Maximum width for
+  // this widget", so `maxWidth: 20` set a 20ms TTL and re-ran the shell
+  // command on every render. No widget has ever implemented a width here.
+  cacheTtlMs: v.optional(v.number()),
   priority: v.optional(v.number()),
 });
 

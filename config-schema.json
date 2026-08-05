@@ -79,9 +79,9 @@
                   "type": "string",
                   "description": "Separator string (separator widget)"
                 },
-                "maxWidth": {
+                "cacheTtlMs": {
                   "type": "number",
-                  "description": "Maximum width for this widget"
+                  "description": "How long custom-command reuses a command's output, in milliseconds (default 30000)"
                 },
                 "priority": {
                   "type": "number",

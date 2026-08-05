@@ -11,7 +11,8 @@ interface CacheEntry {
 // In-memory cache keyed by command string
 const commandCache = new Map<string, CacheEntry>();
 
-const DEFAULT_TTL_MS = 30000; // 30 seconds
+/** Exported so the published JSON Schema documents the real default (#97). */
+export const DEFAULT_TTL_MS = 30000; // 30 seconds
 const DEFAULT_TIMEOUT_MS = 2000; // 2 second execution timeout
 
 export const customCommandWidget: Widget = {
@@ -19,7 +20,7 @@ export const customCommandWidget: Widget = {
     const command = config.command;
     if (!command) return null;
 
-    const ttl = config.maxWidth ?? DEFAULT_TTL_MS; // reuse maxWidth as TTL for now
+    const ttl = config.cacheTtlMs ?? DEFAULT_TTL_MS;
     const now = Date.now();
 
     // Check cache

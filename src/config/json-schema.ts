@@ -2,6 +2,7 @@ import { getWidgetTypes } from "../widgets/registry.js";
 import { THEMES } from "../render/themes.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import { FLEX_MODES, COMPACT_MODES, COST_SOURCES } from "./schema.js";
+import { DEFAULT_TTL_MS as DEFAULT_COMMAND_TTL_MS } from "../widgets/custom-command.js";
 
 /**
  * Builds the published JSON Schema for user settings (`config-schema.json`).
@@ -65,7 +66,10 @@ export function buildConfigJsonSchema(): Record<string, unknown> {
                   command: { type: "string", description: "Shell command (custom-command widget)" },
                   text: { type: "string", description: "Static text (custom-text widget)" },
                   separator: { type: "string", description: "Separator string (separator widget)" },
-                  maxWidth: { type: "number", description: "Maximum width for this widget" },
+                  cacheTtlMs: {
+                    type: "number",
+                    description: `How long custom-command reuses a command's output, in milliseconds (default ${DEFAULT_COMMAND_TTL_MS})`,
+                  },
                   priority: {
                     type: "number",
                     description:
