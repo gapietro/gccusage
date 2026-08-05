@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as v from "valibot";
 import { getCacheDir, ensureDir } from "../utils/paths.js";
-import { writeJsonAtomic } from "../utils/atomic-json.js";
+import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 
 /**
  * How long to wait after an attempt before spawning another refresher.
@@ -25,17 +25,23 @@ function stampPath(): string {
   return path.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
 }
 
+/**
+ * `v.finite()`, not bare `v.number()`: `JSON.parse('{"timestamp":1e400}')`
+ * yields `Infinity`, which the hand-rolled `typeof === "number"` guard this
+ * replaced admitted. `Date.now() - Infinity` is `-Infinity`, always inside
+ * the backoff window, and the stamp is only rewritten *after* the check — so
+ * the file causing the wrong answer gated its own repair and pricing froze
+ * permanently, silently (#133).
+ */
+const StampSchema = v.object({ timestamp: v.pipe(v.number(), v.finite()) });
+
 function attemptedRecently(): boolean {
-  try {
-    const raw = fs.readFileSync(stampPath(), "utf-8");
-    const stamp = JSON.parse(raw) as { timestamp?: unknown };
-    if (typeof stamp?.timestamp !== "number") return false;
-    return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
-  } catch {
-    // No stamp, or an unreadable one: treat as never attempted. Failing open
-    // here only costs one spawn, and the stamp write below re-arms the guard.
-    return false;
-  }
+  // No stamp, an unreadable one, or one that fails the schema: treat as never
+  // attempted. Failing open here only costs one spawn, and the stamp write
+  // below re-arms the guard.
+  const stamp = readJsonValidated(stampPath(), StampSchema);
+  if (stamp === null) return false;
+  return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
 }
 
 /**
