@@ -26,6 +26,28 @@ function lenientWithDefault<const S extends v.GenericSchema<unknown, number>>(
   return v.fallback(v.optional(schema, value), value);
 }
 
+/**
+ * `v.finite()`, never bare `v.number()` — for EVERY number in this payload.
+ *
+ * JSON has no `Infinity` literal, which made "JSON cannot encode it, so
+ * `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
+ * numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
+ * both `v.number()` and `typeof x === "number"` accept it.
+ *
+ * Applied at the boundary rather than in each formatter on purpose. #131
+ * closed this for cost by guarding `formatDollars` and `formatCostPerHour`,
+ * which left `formatTokens` rendering `InfinityM` for a window size and
+ * `formatDuration` rendering `Infinityhr NaNm` — the class was being closed
+ * one formatter at a time, and every widget added later re-opened it (#137).
+ *
+ * Costs only the offending field: every use sits inside `lenient` /
+ * `lenientWithDefault`, so a rejected number falls back to undefined or its
+ * default and the bar still draws, per the per-field posture of #83.
+ */
+function finiteNumber() {
+  return v.pipe(v.number(), v.finite());
+}
+
 const ModelSchema = v.union([
   v.string(),
   v.object({
@@ -35,38 +57,40 @@ const ModelSchema = v.union([
 ]);
 
 const CostSchema = v.object({
-  total_cost_usd: lenient(v.number()),
-  total_duration_ms: lenient(v.number()),
-  total_api_duration_ms: lenient(v.number()),
-  total_lines_added: lenient(v.number()),
-  total_lines_removed: lenient(v.number()),
+  total_cost_usd: lenient(finiteNumber()),
+  total_duration_ms: lenient(finiteNumber()),
+  total_api_duration_ms: lenient(finiteNumber()),
+  total_lines_added: lenient(finiteNumber()),
+  total_lines_removed: lenient(finiteNumber()),
 });
 
 const CurrentUsageSchema = v.object({
-  input_tokens: lenientWithDefault(v.number(), 0),
-  output_tokens: lenientWithDefault(v.number(), 0),
-  cache_creation_input_tokens: lenientWithDefault(v.number(), 0),
-  cache_read_input_tokens: lenientWithDefault(v.number(), 0),
+  input_tokens: lenientWithDefault(finiteNumber(), 0),
+  output_tokens: lenientWithDefault(finiteNumber(), 0),
+  cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
+  cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0),
 });
 
 const ContextWindowSchema = v.union([
-  v.number(),
+  // The legacy flat form: a plain token count. `deriveContextUsage` tests it
+  // with `typeof cw === "number" && cw > 0`, which `Infinity` passes.
+  finiteNumber(),
   v.object({
-    context_window_size: lenient(v.number()),
-    used_percentage: lenient(v.nullable(v.number())),
-    remaining_percentage: lenient(v.nullable(v.number())),
-    total_input_tokens: lenient(v.number()),
-    total_output_tokens: lenient(v.number()),
+    context_window_size: lenient(finiteNumber()),
+    used_percentage: lenient(v.nullable(finiteNumber())),
+    remaining_percentage: lenient(v.nullable(finiteNumber())),
+    total_input_tokens: lenient(finiteNumber()),
+    total_output_tokens: lenient(finiteNumber()),
     current_usage: lenient(v.nullable(CurrentUsageSchema)),
   }),
 ]);
 
 // Legacy flat token_usage (for backwards compat with test inputs)
 const TokenUsageSchema = v.object({
-  input_tokens: lenientWithDefault(v.number(), 0),
-  output_tokens: lenientWithDefault(v.number(), 0),
-  cache_creation_input_tokens: lenientWithDefault(v.number(), 0),
-  cache_read_input_tokens: lenientWithDefault(v.number(), 0),
+  input_tokens: lenientWithDefault(finiteNumber(), 0),
+  output_tokens: lenientWithDefault(finiteNumber(), 0),
+  cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
+  cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0),
 });
 
 const VimSchema = v.object({
