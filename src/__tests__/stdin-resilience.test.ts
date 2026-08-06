@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
@@ -6,7 +6,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseStatusJson } from "../data/stdin-reader.js";
 import { stripAnsi } from "../utils/terminal.js";
-import { PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
+import {
+  reserveRefusedUrl,
+  suppressPricingRefresh,
+  type RefresherSuppression,
+} from "./helpers/pricing-refresher.js";
 
 /**
  * Claude Code owns this payload format and evolves it. Before #83 the schema
@@ -130,19 +134,31 @@ const DIST = path.resolve(HERE, "../../dist/index.js");
 const distExists = fs.existsSync(DIST);
 
 let dir: string;
+let cacheHome: string;
+let refusedPricingUrl: string;
+let refresher: RefresherSuppression;
+
+beforeAll(async () => {
+  refusedPricingUrl = await reserveRefusedUrl();
+});
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-stdin-"));
-  const cacheDir = path.join(dir, "cache", "gccusage");
-  fs.mkdirSync(cacheDir, { recursive: true });
-  // Seeded so the render never considers a pricing refresh.
-  fs.writeFileSync(
-    path.join(cacheDir, "pricing.json"),
-    JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now(), data: {} }),
-  );
+  cacheHome = path.join(dir, "cache");
+  fs.mkdirSync(path.join(cacheHome, "gccusage"), { recursive: true });
+
+  // This used to seed pricing.json with `data: {}` and a comment claiming the
+  // render would then never consider a refresh. It did the opposite:
+  // `loadPricingCacheEntry` discards a table with no entries
+  // (pricing-cache.ts:66), so the render saw no cache at all, treated pricing
+  // as stale, and spawned the detached refresher into this directory on every
+  // render — which is how these temp dirs came back after `rmSync` deleted
+  // them (TEST-002). The stamp below is what actually suppresses it.
+  refresher = suppressPricingRefresh(cacheHome, refusedPricingUrl);
 });
 
 afterEach(() => {
+  refresher.assertNotSpawned();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -153,7 +169,7 @@ function render(payload: string, sessionId: string): string {
       ...process.env,
       HOME: dir,
       XDG_CONFIG_HOME: path.join(dir, "config"),
-      XDG_CACHE_HOME: path.join(dir, "cache"),
+      ...refresher.env,
       COLUMNS: "200",
     },
     encoding: "utf8",

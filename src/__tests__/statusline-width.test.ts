@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { stripAnsi } from "../utils/terminal.js";
-import { PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
+import {
+  reserveRefusedUrl,
+  suppressPricingRefresh,
+  type RefresherSuppression,
+} from "./helpers/pricing-refresher.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -16,6 +20,13 @@ const distExists = fs.existsSync(DIST);
 const WIDE_LABEL = "W".repeat(140);
 
 let dir: string;
+let cacheHome: string;
+let refusedPricingUrl: string;
+let refresher: RefresherSuppression;
+
+beforeAll(async () => {
+  refusedPricingUrl = await reserveRefusedUrl();
+});
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-width-"));
@@ -31,18 +42,19 @@ beforeEach(() => {
     }),
   );
 
-  // Seed the pricing cache so the child never reaches the network. Without
-  // this, fetchPricing waits out a 5s timeout per spawn whenever the network
-  // is slow or blocked.
-  const cacheDir = path.join(dir, "cache", "gccusage");
-  fs.mkdirSync(cacheDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(cacheDir, "pricing.json"),
-    JSON.stringify({ version: PRICING_CACHE_VERSION, timestamp: Date.now(), data: {} }),
-  );
+  // Keeping the child off the network is the goal, but seeding pricing.json
+  // with `data: {}` never achieved it: `loadPricingCacheEntry` discards a
+  // table with no entries (pricing-cache.ts:66), so the render saw no cache,
+  // treated pricing as stale, and spawned the detached refresher into this
+  // directory every time — which then reappeared after `rmSync` had deleted
+  // it, and fetched the live feed to do so (TEST-002).
+  cacheHome = path.join(dir, "cache");
+  fs.mkdirSync(path.join(cacheHome, "gccusage"), { recursive: true });
+  refresher = suppressPricingRefresh(cacheHome, refusedPricingUrl);
 });
 
 afterEach(() => {
+  refresher.assertNotSpawned();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -51,7 +63,7 @@ function runStatusline(columns: string | undefined): string {
     ...process.env,
     HOME: dir,
     XDG_CONFIG_HOME: path.join(dir, "config"),
-    XDG_CACHE_HOME: path.join(dir, "cache"),
+    ...refresher.env,
   };
   if (columns === undefined) delete env["COLUMNS"];
   else env["COLUMNS"] = columns;

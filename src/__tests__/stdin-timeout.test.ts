@@ -1,10 +1,15 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, beforeEach } from "vitest";
 import { PassThrough } from "node:stream";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  reserveRefusedUrl,
+  suppressPricingRefresh,
+  type RefresherSuppression,
+} from "./helpers/pricing-refresher.js";
 import {
   readStdin,
   resolveTimeoutMs,
@@ -143,15 +148,28 @@ const PAYLOAD = JSON.stringify({
 
 describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
   let dir: string;
+  let cacheHome: string;
+  let refusedPricingUrl: string;
+  let refresher: RefresherSuppression;
+
+  beforeAll(async () => {
+    refusedPricingUrl = await reserveRefusedUrl();
+  });
 
   beforeEach(() => {
-    // A fresh HOME and cache per test: no daily store carried between cases,
+    // A fresh HOME and cache per test: no daily store carried between tests,
     // and no statusline cache hit serving one test's bar to another.
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-stdin-"));
-    fs.mkdirSync(path.join(dir, "cache"), { recursive: true });
+    cacheHome = path.join(dir, "cache");
+    fs.mkdirSync(cacheHome, { recursive: true });
+    refresher = suppressPricingRefresh(cacheHome, refusedPricingUrl);
   });
 
   afterEach(() => {
+    // Before the delete: a spawn detected here is deterministic, whereas the
+    // leak it causes is not observable from inside the suite at all (#122,
+    // TEST-002).
+    refresher.assertNotSpawned();
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -165,7 +183,7 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
         env: {
           ...process.env,
           HOME: dir,
-          XDG_CACHE_HOME: path.join(dir, "cache"),
+          ...refresher.env,
           GCCUSAGE_STDIN_TIMEOUT_MS: String(opts.timeoutMs),
           COLUMNS: "120",
         },
@@ -226,7 +244,7 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
     // degraded bar is written under the empty payload's key and a second
     // timeout inside the TTL serves it back without reading stdin at all.
     expect(
-      fs.existsSync(path.join(dir, "cache", "gccusage", "statusline-cache.json")),
+      fs.existsSync(path.join(cacheHome, "gccusage", "statusline-cache.json")),
     ).toBe(false);
   });
 

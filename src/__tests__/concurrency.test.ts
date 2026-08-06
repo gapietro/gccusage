@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PRICING_REFRESH_STAMP_FILE } from "../data/pricing-refresh.js";
+import {
+  reserveRefusedUrl,
+  suppressPricingRefresh,
+  type RefresherSuppression,
+} from "./helpers/pricing-refresher.js";
 
 /**
  * REL-001 — concurrent renders losing daily-cost updates — reached production
@@ -30,53 +33,25 @@ const ROUNDS = 3;
 const COST_STEP = 0.25;
 
 let dir: string;
-let stampPath: string;
-let seededStamp: string;
 let refusedPricingUrl: string;
+let refresher: RefresherSuppression;
 
 beforeAll(async () => {
-  // A port that was bound and then released. Connecting to it is refused
-  // immediately, so a refresher that escapes the stamp below still fails fast
-  // and writes nothing — and never reaches the live pricing feed, which a
-  // test about daily-cost shards has no business contacting.
-  const probe = net.createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", () => resolve()));
-  const port = (probe.address() as net.AddressInfo).port;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  refusedPricingUrl = `http://127.0.0.1:${port}/pricing.json`;
+  refusedPricingUrl = await reserveRefusedUrl();
 });
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-concurrency-"));
-
-  // Suppress the detached pricing refresher (#122). `maybeSpawnPricingRefresh`
-  // spawns a child that is `detached`, `unref`'d and stdio-ignored — it
-  // returns no pid and nothing can await it — into the very directory
-  // `afterEach` deletes. A recent attempt stamp makes it return before the
-  // spawn, which is the only way to bound that child's lifetime from here.
-  stampPath = path.join(dir, "gccusage", PRICING_REFRESH_STAMP_FILE);
-  fs.mkdirSync(path.dirname(stampPath), { recursive: true });
-  seededStamp = JSON.stringify({ timestamp: Date.now() });
-  fs.writeFileSync(stampPath, seededStamp);
+  // XDG_CACHE_HOME is the temp dir itself here, not a `cache/` subdirectory
+  // as in the stdin and width tests — which is exactly why the helper takes
+  // the value the caller passes to the child rather than deriving one.
+  refresher = suppressPricingRefresh(dir, refusedPricingUrl);
 });
 
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/**
- * Fails if any render spawned the refresher, because the parent rewrites the
- * stamp immediately before spawning. Without this, a change that defeats the
- * suppression restores a 1-in-6 `ENOTEMPTY` in teardown and a temp directory
- * that reappears after `rmSync` returns — a leak that is invisible from here
- * and was found only by counting stale directories in `/var/folders`.
- */
-function expectNoRefresherSpawned(): void {
-  expect(
-    fs.readFileSync(stampPath, "utf-8"),
-    "a detached pricing refresher was spawned into the temp dir this test deletes",
-  ).toBe(seededStamp);
-}
 
 function render(sessionId: string, costUsd: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -86,8 +61,7 @@ function render(sessionId: string, costUsd: number): Promise<void> {
       env: {
         ...process.env,
         HOME: dir,
-        XDG_CACHE_HOME: dir,
-        GCCUSAGE_PRICING_URL: refusedPricingUrl,
+        ...refresher.env,
       },
       stdio: ["pipe", "ignore", "ignore"],
     });
@@ -183,7 +157,7 @@ describe.skipIf(!distExists)("concurrent renders", () => {
       expect(total, `round ${round}: lost update`).toBeCloseTo(SESSIONS * costThisRound, 2);
     }
 
-    expectNoRefresherSpawned();
+    refresher.assertNotSpawned();
   }, 120_000);
 
   it("keeps one session's spend out of another's shard", async () => {
@@ -201,6 +175,6 @@ describe.skipIf(!distExists)("concurrent renders", () => {
     expect(shards).toHaveLength(2);
     expect(shards.map((s) => s.costUsd).sort((a, b) => a - b)).toEqual([1, 3]);
 
-    expectNoRefresherSpawned();
+    refresher.assertNotSpawned();
   }, 60_000);
 });
