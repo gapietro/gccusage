@@ -438,6 +438,25 @@ Commands are cached for 30s by default with a 2s execution timeout. Set
 
 **Cache issues**: Delete `~/.cache/gccusage/statusline-cache.json` to force a fresh render.
 
+**The statusline disappeared entirely**: gccusage degrades to printing nothing
+if it fails internally — a missing bar beats a stack trace in your prompt — and
+Claude Code erases the statusline when a command produces no output. So a blank
+bar means gccusage hit an error, not that it is uninstalled. To see what:
+
+```bash
+echo '{"session_id":"x","cost":{"total_cost_usd":1}}' | GCCUSAGE_DEBUG=1 gccusage
+```
+
+`GCCUSAGE_DEBUG=1` prints the swallowed error and its stack to stderr. It is
+off by default so nothing can leak into your prompt, and it changes nothing
+else about how gccusage behaves. Errors in your *input* — an unusable payload,
+a bad config, a stdin read failure — already show up as a `⚠ gccusage` line on
+the bar itself and do not need the flag.
+
+Other environment variables, all optional: `GCCUSAGE_STDIN_TIMEOUT_MS`
+(default 5000) bounds how long gccusage waits for Claude Code's payload, and
+`GCCUSAGE_PRICING_URL` overrides the pricing feed.
+
 ## Development
 
 ```bash

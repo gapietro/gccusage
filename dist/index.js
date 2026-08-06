@@ -6256,7 +6256,8 @@ async function main() {
 	const output = await runStatusline(stdin, settings);
 	process.stdout.write(output);
 }
-main().catch(() => {
+main().catch((err) => {
+	if (process.env["GCCUSAGE_DEBUG"]) console.error("gccusage: render failed —", err instanceof Error ? err.stack ?? err.message : String(err));
 	process.exit(0);
 });
 

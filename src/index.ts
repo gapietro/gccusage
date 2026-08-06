@@ -92,7 +92,24 @@ async function main(): Promise<void> {
   process.stdout.write(output);
 }
 
-main().catch(() => {
-  // Graceful degradation — output nothing on error
+main().catch((err: unknown) => {
+  // Graceful degradation — output nothing on error. A missing statusline beats
+  // a stack trace in the prompt, and stdout is the bar, so an error cannot be
+  // printed there without becoming the bar.
+  //
+  // But silent-and-invisible is not the same as silent: this is the only
+  // failure mode that produces NO output at all, and Claude Code erases the bar
+  // on empty stdout, so from the user's side the tool has simply vanished with
+  // nothing to report (OPS-006). `GCCUSAGE_DEBUG=1` surfaces whatever was
+  // swallowed on stderr — which Claude Code discards, and which is exactly
+  // where a user piping a payload into the binary by hand will see it.
+  //
+  // Guarded by the env var rather than always-on: stderr from a statusline is
+  // not reliably discarded by every host that might run this, and a stack trace
+  // leaking into someone's prompt is the failure this whole handler exists to
+  // prevent.
+  if (process.env["GCCUSAGE_DEBUG"]) {
+    console.error("gccusage: render failed —", err instanceof Error ? (err.stack ?? err.message) : String(err));
+  }
   process.exit(0);
 });

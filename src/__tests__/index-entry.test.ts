@@ -42,14 +42,21 @@ interface Options {
 let restoreExitCode: number | string | null | undefined;
 let restoreArgv: string[];
 let restoreIsTTY: boolean | undefined;
+let restoreDebug: string | undefined;
 
 beforeEach(() => {
   restoreExitCode = process.exitCode;
   restoreArgv = process.argv;
   restoreIsTTY = process.stdin.isTTY;
+  restoreDebug = process.env["GCCUSAGE_DEBUG"];
 });
 
 afterEach(() => {
+  // The OPS-006 tests set and unset this. Leaking it either way would turn the
+  // "stays silent by default" test into a coin flip on file ordering.
+  if (restoreDebug === undefined) delete process.env["GCCUSAGE_DEBUG"];
+  else process.env["GCCUSAGE_DEBUG"] = restoreDebug;
+
   // Load-bearing: index.ts sets process.exitCode = 1 on the CLI-failure path,
   // and leaving it set would fail the whole vitest run from a passing test.
   process.exitCode = restoreExitCode;
@@ -273,6 +280,39 @@ describe("entry point: stdin stream failure (REL-004)", () => {
 });
 
 describe("entry point: global error handler", () => {
+  it("explains the swallowed failure on stderr under GCCUSAGE_DEBUG (OPS-006)", async () => {
+    // The whole point of the flag: without it this failure produces no output
+    // at all, and Claude Code erases the bar on empty stdout, so the tool looks
+    // uninstalled rather than broken. stderr is the right channel because
+    // stdout IS the bar.
+    process.env["GCCUSAGE_DEBUG"] = "1";
+    const h = await runEntry({
+      statusline: async () => {
+        throw new Error("pipeline exploded");
+      },
+    });
+
+    expect(h.stderr.join("\n")).toContain("pipeline exploded");
+    expect(h.stderr.join("\n")).toContain("gccusage: render failed");
+    // Still degrades identically — the flag adds a diagnosis, it does not
+    // change what the user's prompt does.
+    expect(h.exitCalls).toEqual([0]);
+    expect(h.stdout).toEqual([]);
+  });
+
+  it("stays completely silent when GCCUSAGE_DEBUG is unset", async () => {
+    delete process.env["GCCUSAGE_DEBUG"];
+    const h = await runEntry({
+      statusline: async () => {
+        throw new Error("pipeline exploded");
+      },
+    });
+
+    // Guards the default: a stack trace reaching stderr unconditionally is the
+    // failure this handler exists to prevent, on any host that surfaces it.
+    expect(h.stderr).toEqual([]);
+  });
+
   it("degrades to exit(0) with no output when the render throws", async () => {
     // Claude Code erases the whole bar on empty output, which is the intended
     // degradation: a missing statusline beats a stack trace in the prompt.
