@@ -1,6 +1,11 @@
 import { readStdin, parseStatusJson } from "./data/stdin-reader.js";
 import { loadSettings, getConfigPath } from "./config/loader.js";
-import { formatConfigError, formatStdinError, formatStdinTimeout } from "./config/error-line.js";
+import {
+  formatConfigError,
+  formatStdinError,
+  formatStdinReadError,
+  formatStdinTimeout,
+} from "./config/error-line.js";
 import { runStatusline } from "./statusline.js";
 import { runCli } from "./cli.js";
 
@@ -39,7 +44,22 @@ async function main(): Promise<void> {
   const isTTY = process.stdin.isTTY;
   let raw = "";
   if (!isTTY) {
-    const { raw: payload, timedOut, timeoutMs } = await readStdin();
+    // The stream can fail outright — EIO once the controlling terminal is gone,
+    // ECONNRESET on a socket stdin. That rejection used to propagate to the
+    // blanket catch at the bottom of this file, which writes nothing, and empty
+    // stdout makes Claude Code erase the bar rather than keep the previous one.
+    // Every other unusable-input path here renders a line; this was the last
+    // one that did not (REL-004, deferred from #87).
+    let result: Awaited<ReturnType<typeof readStdin>>;
+    try {
+      result = await readStdin();
+    } catch (err) {
+      process.stdout.write(
+        formatStdinReadError(err instanceof Error ? err.message : String(err)),
+      );
+      return;
+    }
+    const { raw: payload, timedOut, timeoutMs } = result;
     if (timedOut) {
       // Returning here — before the parse and before runStatusline — keeps the
       // statusline cache untouched, matching the two paths above. It matters:

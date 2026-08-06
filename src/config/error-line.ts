@@ -52,6 +52,24 @@ export function formatStdinTimeout(timeoutMs: number): string {
 }
 
 /**
+ * The stdin stream itself failed — EIO when the controlling terminal goes away,
+ * ECONNRESET on a socket stdin (REL-004).
+ *
+ * Distinct from the other two because nothing arrived *and* nothing will: the
+ * timeout line says "may be overloaded", which would misdescribe a stream that
+ * is already destroyed. Deferred when #87 landed, with the note that it "blanks
+ * the bar with no message — same defect class, different trigger"; it was the
+ * last input path still falling through to `main().catch()`, where empty stdout
+ * makes Claude Code erase the bar entirely rather than show anything.
+ *
+ * The message is included because it names the errno, which is the only clue
+ * to whether the terminal died or a pipe was reset.
+ */
+export function formatStdinReadError(error: string): string {
+  return `${BOLD_RED}⚠ gccusage${RESET}  could not read stdin — ${error}`;
+}
+
+/**
  * Not `formatDuration` from utils/format.ts: that floors to whole seconds and
  * renders a 200ms test deadline as "0s".
  */

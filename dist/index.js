@@ -1774,6 +1774,23 @@ function formatStdinTimeout(timeoutMs) {
 	return `${BOLD_RED}⚠ gccusage${RESET$2}  stdin did not arrive within ${formatDeadline(timeoutMs)} — Claude Code may be overloaded`;
 }
 /**
+* The stdin stream itself failed — EIO when the controlling terminal goes away,
+* ECONNRESET on a socket stdin (REL-004).
+*
+* Distinct from the other two because nothing arrived *and* nothing will: the
+* timeout line says "may be overloaded", which would misdescribe a stream that
+* is already destroyed. Deferred when #87 landed, with the note that it "blanks
+* the bar with no message — same defect class, different trigger"; it was the
+* last input path still falling through to `main().catch()`, where empty stdout
+* makes Claude Code erase the bar entirely rather than show anything.
+*
+* The message is included because it names the errno, which is the only clue
+* to whether the terminal died or a pipe was reset.
+*/
+function formatStdinReadError(error) {
+	return `${BOLD_RED}⚠ gccusage${RESET$2}  could not read stdin — ${error}`;
+}
+/**
 * Not `formatDuration` from utils/format.ts: that floors to whole seconds and
 * renders a 200ms test deadline as "0s".
 */
@@ -6217,7 +6234,14 @@ async function main() {
 	const isTTY = process.stdin.isTTY;
 	let raw = "";
 	if (!isTTY) {
-		const { raw: payload, timedOut, timeoutMs } = await readStdin();
+		let result;
+		try {
+			result = await readStdin();
+		} catch (err) {
+			process.stdout.write(formatStdinReadError(err instanceof Error ? err.message : String(err)));
+			return;
+		}
+		const { raw: payload, timedOut, timeoutMs } = result;
 		if (timedOut) {
 			process.stdout.write(formatStdinTimeout(timeoutMs));
 			return;

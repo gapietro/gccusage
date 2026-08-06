@@ -36,6 +36,7 @@ interface Options {
   statusline?: () => Promise<string>;
   cli?: () => Promise<void>;
   loadSettingsThrows?: Error;
+  stdinThrows?: unknown;
 }
 
 let restoreExitCode: number | string | null | undefined;
@@ -66,9 +67,10 @@ async function runEntry(options: Options = {}): Promise<Harness> {
   const stderr: string[] = [];
   const exitCalls: number[] = [];
 
-  const readStdin = vi.fn(async () =>
-    options.stdin ?? { raw: "{}", timedOut: false, timeoutMs: 5000 },
-  );
+  const readStdin = vi.fn(async () => {
+    if ("stdinThrows" in options) throw options.stdinThrows;
+    return options.stdin ?? { raw: "{}", timedOut: false, timeoutMs: 5000 };
+  });
   const parseStatusJson = vi.fn(() => options.parsed ?? { stdin: { session_id: "s" } });
   const loadSettings = vi.fn(() => {
     if (options.loadSettingsThrows) throw options.loadSettingsThrows;
@@ -84,6 +86,7 @@ async function runEntry(options: Options = {}): Promise<Harness> {
     formatConfigError: (error: string, path: string) => `CONFIG_ERROR(${error}@${path})`,
     formatStdinError: (error: string) => `STDIN_ERROR(${error})`,
     formatStdinTimeout: (ms: number) => `STDIN_TIMEOUT(${ms})`,
+    formatStdinReadError: (error: string) => `STDIN_READ_ERROR(${error})`,
   }));
   vi.doMock("../statusline.js", () => ({ runStatusline }));
   vi.doMock("../cli.js", () => ({ runCli }));
@@ -229,6 +232,43 @@ describe("entry point: statusline mode", () => {
     const h = await runEntry({ stdin: { raw, timedOut: false, timeoutMs: 5000 } });
 
     expect(h.parseStatusJson).toHaveBeenCalledWith(raw);
+  });
+});
+
+describe("entry point: stdin stream failure (REL-004)", () => {
+  it("renders a diagnostic instead of letting the rejection blank the bar", async () => {
+    // Before this, the rejection propagated to main().catch(), which writes
+    // nothing — and empty stdout makes Claude Code erase the bar rather than
+    // keep the previous one. Every other unusable-input path already rendered
+    // a line; this was the last one that did not.
+    const h = await runEntry({ stdinThrows: new Error("EIO: i/o error, read") });
+
+    expect(h.stdout).toEqual(["STDIN_READ_ERROR(EIO: i/o error, read)"]);
+    // Claude Code discards output from a non-zero exit, so the message would
+    // never reach the user if this exited 1.
+    expect(h.exitCalls).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("does not render or cache anything past the failed read", async () => {
+    const h = await runEntry({ stdinThrows: new Error("ECONNRESET") });
+
+    // This guards a DIFFERENT regression from the two tests around it, and the
+    // distinction is worth stating because it passes against the pre-fix code:
+    // there the rejection skipped these calls too, by escaping the function
+    // entirely. What it catches is catch-then-continue — handling the error and
+    // then falling through with an empty payload, which would render the
+    // degraded bar AND write it to the statusline cache under the empty
+    // payload's key, so the next render inside the TTL serves it back without
+    // reading stdin at all. Verified by that exact sabotage.
+    expect(h.parseStatusJson).not.toHaveBeenCalled();
+    expect(h.runStatusline).not.toHaveBeenCalled();
+  });
+
+  it("stringifies a non-Error rejection rather than printing [object Object]", async () => {
+    const h = await runEntry({ stdinThrows: "just a string" });
+
+    expect(h.stdout).toEqual(["STDIN_READ_ERROR(just a string)"]);
   });
 });
 
