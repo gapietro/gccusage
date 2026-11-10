@@ -4559,7 +4559,7 @@ const effortWidget = { render(context, config) {
 	const icon = config.icon ?? "";
 	const prefix = [icon, label].filter(Boolean).join(" ");
 	const text = prefix ? `${prefix} ${level}` : level;
-	const bg = config.bg ?? EFFORT_COLORS.get(level) ?? EFFORT_FALLBACK;
+	const bg = config.bg ?? EFFORT_COLORS.get(level.toLowerCase()) ?? EFFORT_FALLBACK;
 	return {
 		text,
 		fg: config.fg ?? "#ffffff",

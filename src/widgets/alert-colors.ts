@@ -32,7 +32,9 @@ export const COMPACT_COUNTDOWN_RED = "#a01822"; // red (distinct from context-pe
 // drawn in the previous segment's bg, so any color shared with today-spend's
 // runtime bg makes that arrow invisible. Both of these are therefore chosen
 // to differ from every color today-spend can render: #26a269 (default),
-// ALERT_AMBER (>= dailyWarn), ALERT_RED (>= dailyDanger).
+// ALERT_AMBER (>= dailyWarn), ALERT_RED (>= dailyDanger) — AND from
+// burn-rate's #555555, their left neighbour whenever burn-rate renders (#139;
+// currently ΔE ~42/44). Retuning either must clear all four.
 export const VIM_NORMAL = "#2ec27e"; // green, vs today-spend's #26a269
 export const VIM_INSERT = "#e5a50a"; // amber, vs today-spend's warn ALERT_AMBER
 

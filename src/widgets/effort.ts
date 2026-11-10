@@ -15,7 +15,14 @@ export const effortWidget: Widget = {
     const icon = config.icon ?? "";
     const prefix = [icon, label].filter(Boolean).join(" ");
     const text = prefix ? `${prefix} ${level}` : level;
-    const bg = config.bg ?? EFFORT_COLORS.get(level) ?? EFFORT_FALLBACK;
+    // Looked up case-insensitively so a casing change upstream ("MAX") keeps
+    // its colour instead of silently dropping to the fallback; the text is
+    // still shown as sent.
+    const bg = config.bg ?? EFFORT_COLORS.get(level.toLowerCase()) ?? EFFORT_FALLBACK;
+    // Deliberately NOT `shrinkable`: the level is payload text, and SGR can
+    // survive sanitizeAnsi, which is exactly the latent hazard shrink.ts
+    // documents for `trimTo` (it can cut a trailing reset off and leave colour
+    // bleeding across the bar). An overlong level is left to truncateAnsi.
     return { text, fg: config.fg ?? "#ffffff", bg };
   },
 };

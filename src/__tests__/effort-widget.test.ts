@@ -99,6 +99,15 @@ describe("effort widget (#139)", () => {
     expect(effortWidget.render(withEffort("high"), { type: "effort", label: "Effort" })?.text).toBe("Effort high");
   });
 
+  it.each([["MAX", EFFORT_MAX], ["High", EFFORT_HIGH], [" XHigh ", EFFORT_XHIGH]])(
+    "colours %j by its level regardless of case, showing the text as sent",
+    (level, bg) => {
+      const out = effortWidget.render(withEffort(level), { type: "effort" });
+      expect(out?.bg).toBe(bg);
+      expect(out?.text).toBe(level.trim());
+    },
+  );
+
   // The per-level test above reads its expected colour from the same Map the
   // widget uses, so it cannot catch two levels swapped inside the Map. Pin
   // the whole mapping to the named constants.
