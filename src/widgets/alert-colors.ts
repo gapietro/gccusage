@@ -24,8 +24,10 @@ export const ALERT_RED = "#c01c28"; // red
 export const COMPACT_COUNTDOWN_AMBER = "#b8860b"; // amber (distinct from context-percent's ALERT_AMBER)
 export const COMPACT_COUNTDOWN_RED = "#a01822"; // red (distinct from context-percent's ALERT_RED)
 
-// vim-mode sits directly after today-spend on line 2 — retiring api-latency
-// removed the segment that used to separate them. The powerline arrow is
+// vim-mode follows today-spend on line 2 — retiring api-latency removed the
+// segment that used to separate them, and while burn-rate now sits between
+// the two (#139), it declines until there is a rate to show, leaving them
+// adjacent again. The powerline arrow is
 // drawn in the previous segment's bg, so any color shared with today-spend's
 // runtime bg makes that arrow invisible. Both of these are therefore chosen
 // to differ from every color today-spend can render: #26a269 (default),

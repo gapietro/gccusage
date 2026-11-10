@@ -42,11 +42,37 @@ describe("DEFAULT_SETTINGS", () => {
       .filter((priority): priority is number => priority !== undefined);
     expect(new Set(priorities).size).toBe(priorities.length);
   });
+
+  it("places effort directly after model on line 1 (#139)", () => {
+    const line1 = DEFAULT_SETTINGS.lines[0]!.widgets.map((w) => w.type);
+    expect(line1).toContain("effort");
+    expect(line1.indexOf("effort")).toBe(line1.indexOf("model") + 1);
+  });
+
+  it("drops effort first when the bar compacts (#139)", () => {
+    // Proves effort ranks after every widget with an EXPLICIT priority, so
+    // renderCompact's greedy fill tries it last among them. It does not beat
+    // vim-mode, which the default layout leaves unprioritised: the renderer
+    // reads a missing priority as 99 (`config.priority ?? 99`), so in
+    // compact mode vim-mode still sorts after effort and is dropped first.
+    const all = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
+    const effort = all.find((w) => w.type === "effort");
+    expect(effort).toBeDefined();
+    const maxOther = Math.max(...all.filter((w) => w.type !== "effort").map((w) => w.priority ?? -Infinity));
+    expect(effort?.priority).toBeGreaterThan(maxOther);
+  });
+
+  it("puts burn-rate on line 2 directly after today-spend (#139)", () => {
+    expect(DEFAULT_SETTINGS.lines[0]!.widgets.map((w) => w.type)).not.toContain("burn-rate");
+    const line2 = DEFAULT_SETTINGS.lines[1]!.widgets.map((w) => w.type);
+    expect(line2).toContain("burn-rate");
+    expect(line2.indexOf("burn-rate")).toBe(line2.indexOf("today-spend") + 1);
+  });
 });
 
 describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // Several widgets (context-percent, compact-countdown, session-cost,
-  // today-spend, vim-mode) override bg from thresholds at render time, so a
+  // today-spend, vim-mode, effort) override bg from thresholds at render time, so a
   // static comparison of configured colors proves nothing. These tests render
   // the real widget outputs across a cross product of every threshold
   // dimension, push them through the renderer's own styling pass, and assert
@@ -59,16 +85,20 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // gets its own axis. Pinning any one of them hides collisions that only
   // appear in specific combinations — that blind spot is what issue #36 was
   // filed about. sessionWarn 5 / sessionDanger 15, dailyWarn 10 /
-  // dailyDanger 25, and vim-mode picks a color per mode.
+  // dailyDanger 25, vim-mode picks a color per mode, and effort picks one
+  // per level (undefined = model without effort support, segment declines;
+  // "ultra" = a level the palette doesn't know, painted with the fallback).
   const SESSION_SWEEP = [2.5, 8, 20];
   const TODAY_SWEEP = [3, 12, 30];
   const VIM_SWEEP = ["NORMAL", "INSERT"];
+  const EFFORT_SWEEP = [undefined, "low", "medium", "high", "xhigh", "max", "ultra"];
 
   interface SweepPoint {
     used: number;
     session: number;
     today: number;
     vim: string;
+    effort: string | undefined;
   }
 
   function sweepPoints(): SweepPoint[] {
@@ -77,7 +107,9 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       for (const session of SESSION_SWEEP) {
         for (const today of TODAY_SWEEP) {
           for (const vim of VIM_SWEEP) {
-            points.push({ used, session, today, vim });
+            for (const effort of EFFORT_SWEEP) {
+              points.push({ used, session, today, vim, effort });
+            }
           }
         }
       }
@@ -104,6 +136,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
           total_lines_removed: 4,
         },
         vim: { mode: point.vim },
+        ...(point.effort ? { effort: { level: point.effort } } : {}),
       },
       metrics: {
         byModel: new Map(),
@@ -188,7 +221,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         piece.text.trim(),
         `[${mode}] piece has no visible characters at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}. Segments: ${order}`,
       ).not.toBe("");
 
       if (piece.bg === undefined) continue;
@@ -198,7 +231,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         `[${mode}] "${piece.text}" is unreadable: fg ${piece.fg} is only ` +
           `ΔE ${distance.toFixed(2)} from bg ${piece.bg} (floor ${MIN_SEPARATOR_DELTA}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}. Segments: ${order}`,
       ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
     }
   }
@@ -206,10 +239,18 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   it("never renders an invisible piece (fg === bg), per line", () => {
     for (const point of sweepPoints()) {
       const context = makeSweepContext(point);
-      for (const line of DEFAULT_SETTINGS.lines) {
+      for (const [index, line] of DEFAULT_SETTINGS.lines.entries()) {
         const rendered = line.widgets
           .map((config) => renderConfig(context, config))
           .filter((r): r is Rendered => r !== null);
+        // Anti-vacuity: the effort axis only covers effort's adjacencies if
+        // the segment actually renders on line 1 whenever a level is sent.
+        if (index === 0 && point.effort) {
+          expect(
+            rendered.some((r) => r.type === "effort"),
+            `effort=${point.effort} did not render on line 1`,
+          ).toBe(true);
+        }
         assertEveryPieceVisible(rendered, point, "line");
       }
     }

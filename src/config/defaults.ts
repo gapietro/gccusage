@@ -5,10 +5,11 @@ export const DEFAULT_SETTINGS: Settings = {
     {
       widgets: [
         { type: "model", fg: "#ffffff", bg: "#1a5fb4", priority: 1 },
+        // No fg/bg: a configured bg would override the per-level colours.
+        { type: "effort", priority: 11 },
         { type: "session-cost", fg: "#ffffff", bg: "#26a269", priority: 2 },
         { type: "context-percent", fg: "#ffffff", bg: "#0d7377", priority: 3 },
         { type: "compact-countdown", fg: "#ffffff", bg: "#1a5fb4", priority: 4 },
-        { type: "burn-rate", fg: "#ffffff", bg: "#555555", priority: 8 },
       ],
       flex: "left",
     },
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
         { type: "git-changes", fg: "#ffffff", bg: "#7d4fa8", priority: 9 },
         { type: "lines-changed", fg: "#ffffff", bg: "#0d7377", priority: 10 },
         { type: "today-spend", fg: "#ffffff", bg: "#26a269", priority: 7 },
+        { type: "burn-rate", fg: "#ffffff", bg: "#555555", priority: 8 },
         { type: "vim-mode" },
       ],
       flex: "left",

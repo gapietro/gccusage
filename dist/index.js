@@ -1581,6 +1581,10 @@ const DEFAULT_SETTINGS = {
 				priority: 1
 			},
 			{
+				type: "effort",
+				priority: 11
+			},
+			{
 				type: "session-cost",
 				fg: "#ffffff",
 				bg: "#26a269",
@@ -1597,12 +1601,6 @@ const DEFAULT_SETTINGS = {
 				fg: "#ffffff",
 				bg: "#1a5fb4",
 				priority: 4
-			},
-			{
-				type: "burn-rate",
-				fg: "#ffffff",
-				bg: "#555555",
-				priority: 8
 			}
 		],
 		flex: "left"
@@ -1637,6 +1635,12 @@ const DEFAULT_SETTINGS = {
 				fg: "#ffffff",
 				bg: "#26a269",
 				priority: 7
+			},
+			{
+				type: "burn-rate",
+				fg: "#ffffff",
+				bg: "#555555",
+				priority: 8
 			},
 			{ type: "vim-mode" }
 		],
