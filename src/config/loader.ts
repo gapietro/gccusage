@@ -14,7 +14,12 @@ export function getConfigPath(): string {
   return path.join(getConfigDir(), "settings.json");
 }
 
-/** Shallow-merge only keys that exist in the source object. */
+/**
+ * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
+ * not `key in validated`: the keys come from the user's config, and `in`
+ * walks the prototype chain, so `"constructor"` was copied onto the merged
+ * section as an own property (#143).
+ */
 function mergeIfPresent<T extends Record<string, unknown>>(
   defaults: T,
   raw: Record<string, unknown> | undefined,
@@ -23,7 +28,7 @@ function mergeIfPresent<T extends Record<string, unknown>>(
   if (!raw || !validated) return defaults;
   const result = { ...defaults };
   for (const key of Object.keys(raw)) {
-    if (key in validated) {
+    if (Object.hasOwn(validated, key)) {
       (result as Record<string, unknown>)[key] = (validated as Record<string, unknown>)[key];
     }
   }

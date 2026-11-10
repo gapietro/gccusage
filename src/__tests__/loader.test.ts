@@ -245,3 +245,28 @@ describe("loadSettings", () => {
     expect(error).toBe('lines: Invalid type: Expected Array but received "nope"');
   });
 });
+
+describe("loadSettings with prototype-member keys in a section (#143)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // `mergeIfPresent` copied a key when `key in validated`, and `in` walks the
+  // prototype chain, so a config key naming an Object.prototype member was
+  // copied onto the merged section as an own property. Harmless today (it
+  // copies the same inherited value), but it is the #143 lookup class, and
+  // anything that later iterates a section's entries would see it.
+  it.each(["constructor", "toString", "hasOwnProperty"])(
+    "does not copy %j onto the merged powerline section",
+    (key) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({ powerline: { theme: "ocean", [key]: 1 } }),
+      );
+
+      const { settings } = loadSettings();
+      expect(settings.powerline?.theme).toBe("ocean");
+      expect(Object.hasOwn(settings.powerline!, key)).toBe(false);
+    },
+  );
+});

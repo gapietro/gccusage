@@ -1679,11 +1679,16 @@ function getConfigDir() {
 function getConfigPath() {
 	return path$10.join(getConfigDir(), "settings.json");
 }
-/** Shallow-merge only keys that exist in the source object. */
+/**
+* Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
+* not `key in validated`: the keys come from the user's config, and `in`
+* walks the prototype chain, so `"constructor"` was copied onto the merged
+* section as an own property (#143).
+*/
 function mergeIfPresent(defaults, raw, validated) {
 	if (!raw || !validated) return defaults;
 	const result = { ...defaults };
-	for (const key of Object.keys(raw)) if (key in validated) result[key] = validated[key];
+	for (const key of Object.keys(raw)) if (Object.hasOwn(validated, key)) result[key] = validated[key];
 	return result;
 }
 /** Deep-merge user overrides onto defaults, only overriding keys the user actually set. */
@@ -2547,7 +2552,7 @@ function sanitisePricingTable(table) {
 function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
 	const out = {};
 	for (const [key, value] of Object.entries(table)) {
-		const known = snapshot[key];
+		const known = Object.hasOwn(snapshot, key) ? snapshot[key] : void 0;
 		if (!known) {
 			out[key] = value;
 			continue;
@@ -3107,9 +3112,9 @@ function calculateTotalCost(costByModel) {
 	return total;
 }
 function findPricing(model, table) {
-	if (table[model]) return table[model];
+	if (Object.hasOwn(table, model)) return table[model];
 	const stripped = model.replace(/^claude\//, "");
-	if (table[stripped]) return table[stripped];
+	if (Object.hasOwn(table, stripped)) return table[stripped];
 	let best = null;
 	let bestIsForward = false;
 	for (const key of Object.keys(table)) {
@@ -5243,8 +5248,14 @@ const WIDGET_MAP = {
 	"compact-countdown": compactCountdownWidget,
 	"turn-counter": turnCounterWidget
 };
+/**
+* `Object.hasOwn`, not `WIDGET_MAP[type] ?? null`: `type` comes from the
+* user's config, and a plain-object read walks the prototype chain, so
+* `"constructor"` returned `Object` and the renderer threw on `.render`,
+* erasing the whole bar (#143). An unknown type is skipped, inherited or not.
+*/
 function getWidget(type) {
-	return WIDGET_MAP[type] ?? null;
+	return Object.hasOwn(WIDGET_MAP, type) ? WIDGET_MAP[type] : null;
 }
 
 //#endregion
@@ -5356,8 +5367,13 @@ const THEMES = {
 		]
 	}
 };
+/**
+* Own keys only: `powerline.theme` comes from the user's config, and
+* `THEMES["constructor"]` is the inherited `Object`, which has no `segments`
+* and threw inside `layoutPowerline`, erasing the bar (#143).
+*/
 function getTheme(name) {
-	return THEMES[name] ?? THEMES["default"];
+	return Object.hasOwn(THEMES, name) ? THEMES[name] : THEMES["default"];
 }
 
 //#endregion

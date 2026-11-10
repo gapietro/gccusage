@@ -107,7 +107,10 @@ export function anchorToSnapshot(
   const out: PricingTable = {};
 
   for (const [key, value] of Object.entries(table)) {
-    const known = snapshot[key];
+    // Own keys only (#143): a feed key such as "claude-x/constructor" yields
+    // the model id "constructor", and `snapshot["constructor"]` is the
+    // inherited `Object`, which would anchor the entry to undefined rates.
+    const known = Object.hasOwn(snapshot, key) ? snapshot[key] : undefined;
     if (!known) {
       out[key] = value;
       continue;

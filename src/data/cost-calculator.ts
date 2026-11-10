@@ -114,12 +114,18 @@ export function calculateTotalCost(costByModel: Map<string, number>): number {
 }
 
 export function findPricing(model: string, table: PricingTable): ModelPricing | null {
+  // Own keys only. Model ids arrive from transcripts and stdin, and a truthy
+  // `table[model]` check accepted an inherited member as pricing: "toString"
+  // returned a function, every rate read `undefined`, and the cost came out
+  // NaN without being reported unpriced (#143). The fuzzy pass below already
+  // iterates own keys via `Object.keys`.
+  //
   // Exact match
-  if (table[model]) return table[model];
+  if (Object.hasOwn(table, model)) return table[model]!;
 
   // Try with claude/ prefix stripped
   const stripped = model.replace(/^claude\//, "");
-  if (table[stripped]) return table[stripped];
+  if (Object.hasOwn(table, stripped)) return table[stripped]!;
 
   // Fuzzy match. A key can match in two directions: forward, where the model
   // id is a longer, provider-qualified string containing a shorter table key
