@@ -908,6 +908,7 @@ const TokenUsageSchema = object({
 	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
 const VimSchema = object({ mode: lenient(string()) });
+const EffortSchema = object({ level: lenient(string()) });
 const WorkspaceSchema = object({ project_dir: lenient(string()) });
 const StatusJsonSchema = object({
 	model: lenient(ModelSchema),
@@ -915,6 +916,7 @@ const StatusJsonSchema = object({
 	context_window: lenient(ContextWindowSchema),
 	token_usage: lenient(TokenUsageSchema),
 	vim: lenient(VimSchema),
+	effort: lenient(EffortSchema),
 	cwd: lenient(string()),
 	workspace: lenient(WorkspaceSchema),
 	session_id: lenient(string())
