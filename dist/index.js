@@ -5873,7 +5873,8 @@ function isSeparatorOutput(output) {
 	return text === "|" || text === "│" || text === "" || output.text === " | ";
 }
 /**
-* Widget text, with every terminal control sequence but SGR removed.
+* Widget text, with every terminal control sequence but SGR removed — and
+* `fg`/`bg` with any non-string colour dropped (see `stringOrUndefined`, #141).
 *
 * Applied to EVERY widget rather than to `custom-command` alone. No widget
 * emits ANSI of its own — colour arrives later, in `powerline.ts`, from the
