@@ -1,5 +1,6 @@
 import type { Widget } from "./base.js";
 import { modelWidget } from "./model.js";
+import { effortWidget } from "./effort.js";
 import { sessionCostWidget } from "./session-cost.js";
 import { todaySpendWidget } from "./today-spend.js";
 import { blockTimerWidget } from "./block-timer.js";
@@ -28,6 +29,7 @@ import { turnCounterWidget } from "./turn-counter.js";
 
 const WIDGET_MAP: Record<string, Widget> = {
   model: modelWidget,
+  effort: effortWidget,
   "session-cost": sessionCostWidget,
   "today-spend": todaySpendWidget,
   "block-timer": blockTimerWidget,

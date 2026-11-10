@@ -4509,6 +4509,25 @@ const COMPACT_COUNTDOWN_AMBER = "#b8860b";
 const COMPACT_COUNTDOWN_RED = "#a01822";
 const VIM_NORMAL = "#2ec27e";
 const VIM_INSERT = "#e5a50a";
+const EFFORT_LOW = "#77767b";
+const EFFORT_MEDIUM = "#2a8ca6";
+const EFFORT_HIGH = "#5841c8";
+const EFFORT_XHIGH = "#b0228c";
+const EFFORT_MAX = "#e66100";
+/**
+* Level → background. A Map, not an object literal: an object would answer
+* `"constructor"` or `"toString"` with an inherited function, and the level
+* string comes from the payload.
+*/
+const EFFORT_COLORS = new Map([
+	["low", EFFORT_LOW],
+	["medium", EFFORT_MEDIUM],
+	["high", EFFORT_HIGH],
+	["xhigh", EFFORT_XHIGH],
+	["max", EFFORT_MAX]
+]);
+/** A level this build has never seen renders neutral rather than vanishing. */
+const EFFORT_FALLBACK = EFFORT_LOW;
 /**
 * The shared warn/danger escalation for the dollar-valued widgets
 * (session-cost, today-spend): red at or above `danger`, amber at or above
@@ -4525,6 +4544,23 @@ function alertBg(cost, warn, danger, configBg) {
 	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
+
+//#endregion
+//#region src/widgets/effort.ts
+const effortWidget = { render(context, config) {
+	const level = context.stdin.effort?.level?.trim();
+	if (!level) return null;
+	const label = config.label ?? "";
+	const icon = config.icon ?? "";
+	const prefix = [icon, label].filter(Boolean).join(" ");
+	const text = prefix ? `${prefix} ${level}` : level;
+	const bg = config.bg ?? EFFORT_COLORS.get(level) ?? EFFORT_FALLBACK;
+	return {
+		text,
+		fg: config.fg ?? "#ffffff",
+		bg
+	};
+} };
 
 //#endregion
 //#region src/widgets/session-cost.ts
@@ -5178,6 +5214,7 @@ const turnCounterWidget = { render(context, config) {
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
+	effort: effortWidget,
 	"session-cost": sessionCostWidget,
 	"today-spend": todaySpendWidget,
 	"block-timer": blockTimerWidget,

@@ -19,6 +19,7 @@
                   "type": "string",
                   "enum": [
                     "model",
+                    "effort",
                     "session-cost",
                     "today-spend",
                     "block-timer",
