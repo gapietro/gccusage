@@ -49,12 +49,13 @@ describe("DEFAULT_SETTINGS", () => {
     expect(line1.indexOf("effort")).toBe(line1.indexOf("model") + 1);
   });
 
-  it("drops effort first when the bar compacts (#139)", () => {
-    // Proves effort ranks after every widget with an EXPLICIT priority, so
-    // renderCompact's greedy fill tries it last among them. It does not beat
-    // vim-mode, which the default layout leaves unprioritised: the renderer
-    // reads a missing priority as 99 (`config.priority ?? 99`), so in
-    // compact mode vim-mode still sorts after effort and is dropped first.
+  it("sorts effort last among prioritised widgets, so it is the first of them dropped when the bar compacts (#139)", () => {
+    // Proves only that effort ranks after every widget with an EXPLICIT
+    // priority, so renderCompact's greedy fill tries it last among them. It
+    // is not last overall: the default layout leaves vim-mode unprioritised,
+    // the renderer reads a missing priority as 99 (`config.priority ?? 99`),
+    // so in compact mode vim-mode still sorts after effort and is dropped
+    // first.
     const all = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
     const effort = all.find((w) => w.type === "effort");
     expect(effort).toBeDefined();
@@ -72,8 +73,9 @@ describe("DEFAULT_SETTINGS", () => {
 
 describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // Several widgets (context-percent, compact-countdown, session-cost,
-  // today-spend, vim-mode, effort) override bg from thresholds at render time, so a
-  // static comparison of configured colors proves nothing. These tests render
+  // today-spend, vim-mode, effort) choose their bg at render time (from
+  // thresholds, modes or levels), so a static comparison of configured
+  // colors proves nothing. These tests render
   // the real widget outputs across a cross product of every threshold
   // dimension, push them through the renderer's own styling pass, and assert
   // nothing comes out invisible.
@@ -92,6 +94,10 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   const TODAY_SWEEP = [3, 12, 30];
   const VIM_SWEEP = ["NORMAL", "INSERT"];
   const EFFORT_SWEEP = [undefined, "low", "medium", "high", "xhigh", "max", "ultra"];
+  // burn-rate sits between today-spend and vim-mode on line 2 but declines
+  // until there is a rate to show (burnRate null), leaving those two
+  // adjacent. Without this axis that adjacency is never rendered.
+  const BURN_SWEEP = [true, false];
 
   interface SweepPoint {
     used: number;
@@ -99,6 +105,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
     today: number;
     vim: string;
     effort: string | undefined;
+    burn: boolean;
   }
 
   function sweepPoints(): SweepPoint[] {
@@ -108,7 +115,9 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         for (const today of TODAY_SWEEP) {
           for (const vim of VIM_SWEEP) {
             for (const effort of EFFORT_SWEEP) {
-              points.push({ used, session, today, vim, effort });
+              for (const burn of BURN_SWEEP) {
+                points.push({ used, session, today, vim, effort, burn });
+              }
             }
           }
         }
@@ -149,7 +158,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         },
       },
       block: null,
-      burnRate: { costPerHour: 1, costPerMinute: 0.02 },
+      burnRate: point.burn ? { costPerHour: 1, costPerMinute: 0.02 } : null,
       pricing: {},
       sessionCostUsd: point.session,
       todayCostUsd: point.today,
@@ -221,7 +230,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         piece.text.trim(),
         `[${mode}] piece has no visible characters at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}, burn=${point.burn}. Segments: ${order}`,
       ).not.toBe("");
 
       if (piece.bg === undefined) continue;
@@ -231,7 +240,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         `[${mode}] "${piece.text}" is unreadable: fg ${piece.fg} is only ` +
           `ΔE ${distance.toFixed(2)} from bg ${piece.bg} (floor ${MIN_SEPARATOR_DELTA}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}, burn=${point.burn}. Segments: ${order}`,
       ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
     }
   }
@@ -250,6 +259,15 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
             rendered.some((r) => r.type === "effort"),
             `effort=${point.effort} did not render on line 1`,
           ).toBe(true);
+        }
+        // Anti-vacuity: the burn axis only covers the today-spend > vim-mode
+        // adjacency if burn-rate really declines and leaves them touching.
+        if (index === 1 && !point.burn) {
+          const order = rendered.map((r) => r.type);
+          expect(
+            order[order.indexOf("today-spend") + 1],
+            `burn=false did not leave today-spend directly before vim-mode on line 2: ${order.join(" > ")}`,
+          ).toBe("vim-mode");
         }
         assertEveryPieceVisible(rendered, point, "line");
       }
@@ -336,11 +354,17 @@ describe("effort segment palette (#139)", () => {
     .filter((w) => w.bg !== undefined)
     .map((w) => [w.type, w.bg!] as const);
   const effortColors = [...EFFORT_COLORS.entries(), ["fallback", EFFORT_FALLBACK] as const];
-  const effortSet = new Set(effortColors.map(([, bg]) => bg));
-  const others = [
-    ...configured,
-    ...RUNTIME_ALERT_BACKGROUNDS.filter((bg) => !effortSet.has(bg)).map((bg) => [`runtime ${bg}`, bg] as const),
-  ];
+  // Remove exactly the five effort entries, by position rather than by
+  // value: filtering by value would also drop any non-effort runtime colour
+  // an effort colour happened to equal, and that collision would then never
+  // be checked.
+  const rest = [...RUNTIME_ALERT_BACKGROUNDS] as string[];
+  for (const bg of EFFORT_COLORS.values()) rest.splice(rest.indexOf(bg), 1);
+  const others = [...configured, ...rest.map((bg) => [`runtime ${bg}`, bg] as const)];
+
+  it("has no duplicate runtime backgrounds", () => {
+    expect(new Set(RUNTIME_ALERT_BACKGROUNDS).size).toBe(RUNTIME_ALERT_BACKGROUNDS.length);
+  });
 
   it("has a colour for every level Claude Code sends today", () => {
     expect([...EFFORT_COLORS.keys()].sort()).toEqual(["high", "low", "max", "medium", "xhigh"]);

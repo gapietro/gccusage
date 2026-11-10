@@ -4,7 +4,15 @@ import type { RenderContext } from "../types/render-context.js";
 import { StatusJsonSchema } from "../types/status-json.js";
 import { effortWidget } from "../widgets/effort.js";
 import { getWidget } from "../widgets/registry.js";
-import { EFFORT_COLORS, EFFORT_FALLBACK, EFFORT_HIGH, EFFORT_MAX } from "../widgets/alert-colors.js";
+import {
+  EFFORT_COLORS,
+  EFFORT_FALLBACK,
+  EFFORT_HIGH,
+  EFFORT_LOW,
+  EFFORT_MAX,
+  EFFORT_MEDIUM,
+  EFFORT_XHIGH,
+} from "../widgets/alert-colors.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -91,14 +99,23 @@ describe("effort widget (#139)", () => {
     expect(effortWidget.render(withEffort("high"), { type: "effort", label: "Effort" })?.text).toBe("Effort high");
   });
 
-  it("uses the default high colour when no override is given", () => {
-    expect(effortWidget.render(withEffort("high"), { type: "effort" })?.bg).toBe(EFFORT_HIGH);
-    expect(effortWidget.render(withEffort("max"), { type: "effort" })?.bg).toBe(EFFORT_MAX);
+  // The per-level test above reads its expected colour from the same Map the
+  // widget uses, so it cannot catch two levels swapped inside the Map. Pin
+  // the whole mapping to the named constants.
+  it("maps each level to its own named colour", () => {
+    expect(Object.fromEntries(EFFORT_COLORS)).toEqual({
+      low: EFFORT_LOW,
+      medium: EFFORT_MEDIUM,
+      high: EFFORT_HIGH,
+      xhigh: EFFORT_XHIGH,
+      max: EFFORT_MAX,
+    });
   });
 
   // Proven against what the parser actually produces, not only hand-built
-  // stdin: each of these malformed blocks parses to `effort: {}`, so a widget
-  // keyed on `effort` truthiness would draw an empty segment.
+  // stdin: each of these malformed blocks parses to an effort with no usable
+  // level, so a widget keyed on `effort` truthiness would draw an empty
+  // segment.
   it.each([[{ effort: ["high"] }], [{ effort: {} }], [{ effort: { level: 7 } }]])(
     "renders nothing for the parsed payload %j",
     (payload) => {

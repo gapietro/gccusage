@@ -1,7 +1,8 @@
 /**
- * The set of backgrounds widgets can paint at render time from thresholds,
- * rather than from configured colors — so they never appear in
- * DEFAULT_SETTINGS and a static scan of the config misses them entirely.
+ * The set of backgrounds widgets choose at render time (from thresholds,
+ * modes or levels) rather than from configured colors — so they never
+ * appear in DEFAULT_SETTINGS and a static scan of the config misses them
+ * entirely.
  *
  * These colours are not independent choices: each is required to stay
  * CIEDE2000-distinct from every other one a segment could end up adjacent
@@ -64,7 +65,8 @@ export const EFFORT_COLORS: ReadonlyMap<string, string> = new Map([
 export const EFFORT_FALLBACK = EFFORT_LOW;
 
 /**
- * Every runtime-threshold background above, as a set. Import this — don't
+ * Every background above, chosen at render time (from thresholds, modes or
+ * levels) rather than from configured colours, as a set. Import this — don't
  * restate the values — so a new runtime colour lands under any guard
  * that checks against it automatically, rather than requiring someone to
  * remember to mirror it by hand.
