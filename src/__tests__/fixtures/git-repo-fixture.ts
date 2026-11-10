@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -83,6 +83,13 @@ function gitEnvFor(dir: string): NodeJS.ProcessEnv {
   return { ...GIT_ENV, XDG_CONFIG_HOME: dir };
 }
 
+/** Counts `git-changes` renders; see `makeDeterministicGitRepo`. */
+export interface GitChangeCounts {
+  added?: number;
+  modified?: number;
+  deleted?: number;
+}
+
 /**
  * Build a real, throwaway git repository so `git-branch`/`git-changes`
  * genuinely execute their real code path (they shell out to `git` against
@@ -96,15 +103,23 @@ function gitEnvFor(dir: string): NodeJS.ProcessEnv {
  * varies per machine and per moment, and a test that depended on it would be
  * flaky (or worse, silently vacuous again on a machine whose state happens
  * to produce short output). The branch name defaults to
- * `worktree-terminal-width-67` (26 characters) for the same reason, and
- * exactly two untracked files are always created — those are the fixed
- * values `default-layout-width.test.ts`'s `SUPPORTED_WIDTH` comment's "88
- * columns, 26 character branch name" figure was measured against; existing
- * callers that don't pass `branch` reuse that exact fixed repo rather than
- * inventing their own branch name. A caller that needs a DIFFERENT branch
- * name (for instance, one long enough to force the shrink pass rather than
- * merely reach the accepted-truncation case above) passes it explicitly
- * instead of duplicating this whole builder.
+ * `worktree-terminal-width-67` (26 characters) for the same reason, and by
+ * default exactly two untracked files are created, so `git-changes` renders
+ * `+2`. Those are the fixed values `default-layout-width.test.ts`'s
+ * `SUPPORTED_WIDTH` comment measures line 2 against (100 columns natural with
+ * vim-mode on, 91 with it off); existing callers that pass no arguments reuse
+ * that exact fixed repo rather than inventing their own. A caller that needs a
+ * DIFFERENT branch name (the 42-character branch that forces deeper shrinking)
+ * or a busier `git-changes` (the accepted tail-truncation test, which needs
+ * `+12 ~15 -3`) passes `branch` and/or `changes` explicitly instead of
+ * duplicating this whole builder.
+ *
+ * `changes` gives the counts `git-changes` will render, as `getGitChanges`
+ * (`src/utils/git.ts`) classifies `git status --porcelain`: `added` untracked
+ * files (default 2 — always including `a.txt`/`b.txt`), and `modified`/
+ * `deleted` committed files that are then edited/removed in the working tree
+ * (default 0, in which case no extra files or commits are made, so the
+ * default repo is exactly what it was before this parameter existed).
  *
  * The whole body runs inside a try/finally around the temp dir itself: if
  * any git call here throws (as it did during fix-round-1 review, under a
@@ -115,7 +130,12 @@ function gitEnvFor(dir: string): NodeJS.ProcessEnv {
  * `gccusage-width-fixture-*` directories were left behind in $TMPDIR during
  * that review.
  */
-export function makeDeterministicGitRepo(branch = "worktree-terminal-width-67"): string {
+export function makeDeterministicGitRepo(
+  branch = "worktree-terminal-width-67",
+  changes: GitChangeCounts = {},
+): string {
+  const { added = 2, modified = 0, deleted = 0 } = changes;
+  if (added < 2) throw new Error(`makeDeterministicGitRepo: added must be >= 2 (got ${added})`);
   const dir = mkdtempSync(path.join(tmpdir(), "gccusage-width-fixture-"));
   try {
     const env = gitEnvFor(dir);
@@ -139,6 +159,17 @@ export function makeDeterministicGitRepo(branch = "worktree-terminal-width-67"):
     // Two untracked files: deterministic "+2" from git-changes.
     writeFileSync(path.join(dir, "a.txt"), "a\n");
     writeFileSync(path.join(dir, "b.txt"), "b\n");
+    // Optional busier status (see `changes` above). Skipped entirely for the
+    // default counts, so default callers get the original repo unchanged.
+    for (let i = 2; i < added; i++) writeFileSync(path.join(dir, `u${i}.txt`), "u\n");
+    const tracked = Array.from({ length: modified + deleted }, (_, i) => `t${i}.md`);
+    if (tracked.length > 0) {
+      for (const f of tracked) writeFileSync(path.join(dir, f), "x\n");
+      git(["add", ...tracked]);
+      git(["-c", "commit.gpgsign=false", "commit", "-q", "-m", "tracked", "--no-verify"]);
+      tracked.slice(0, modified).forEach((f) => writeFileSync(path.join(dir, f), "y\n"));
+      tracked.slice(modified).forEach((f) => unlinkSync(path.join(dir, f)));
+    }
     return dir;
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });

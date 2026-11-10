@@ -16,6 +16,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Default layout: `burn-rate` moved from line 1 to line 2, after
   `today-spend`, to make room for `effort` (#139).
+- At 80 columns the busiest line 2 now shortens `project` and `git-branch`
+  sooner, and with vim mode on and a busy git status the end of line 2 can be
+  cut. Move to a wider terminal or use a custom layout to avoid it (#139).
 
 ## [1.0.0] — 2026-08-05
 

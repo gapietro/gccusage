@@ -359,7 +359,12 @@ describe("effort segment palette (#139)", () => {
   // an effort colour happened to equal, and that collision would then never
   // be checked.
   const rest = [...RUNTIME_ALERT_BACKGROUNDS] as string[];
-  for (const bg of EFFORT_COLORS.values()) rest.splice(rest.indexOf(bg), 1);
+  for (const bg of EFFORT_COLORS.values()) {
+    const i = rest.indexOf(bg);
+    // splice(-1, 1) would silently remove the LAST runtime colour instead.
+    if (i === -1) throw new Error(`effort colour ${bg} is not in RUNTIME_ALERT_BACKGROUNDS`);
+    rest.splice(i, 1);
+  }
   const others = [...configured, ...rest.map((bg) => [`runtime ${bg}`, bg] as const)];
 
   it("has no duplicate runtime backgrounds", () => {
