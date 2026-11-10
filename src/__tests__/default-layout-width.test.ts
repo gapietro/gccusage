@@ -17,15 +17,19 @@ import earlyFixture from "./fixtures/real-payloads/opus5-1m-early.json" with { t
  * This is a MEASURED figure, not the "one column above the compact
  * threshold" guess the first draft of this test used — see
  * .superpowers/sdd/2026-08-01-terminal-width/task-5-report.md for the full
- * measurement. Rendering against real payload fixtures (which don't include
- * a real git repo) showed line 1 at 70-72 columns and line 2 at 29-49
- * columns across the three fixtures. But `git-branch`/`git-changes` don't
- * read the stdin payload at all — they shell out to real `git` against
- * `stdin.cwd` (`src/utils/git.ts`) — so a fixture whose recorded `cwd`
- * doesn't exist on disk makes both widgets silently emit nothing. Rendering
- * against a REAL (synthetic, deterministic) git repo instead, so those two
- * widgets genuinely execute, measures line 2 at 79 columns with vim-mode
- * OFF — that is the realistic worst case this constant means to pin.
+ * measurement. Re-measured for #139, which added `effort` to line 1 after
+ * `model` and moved `burn-rate` from line 1 to line 2 after `today-spend`:
+ * rendering against real payload fixtures (which don't include a real git
+ * repo, and which all record `effort: high`) shows line 1 at 66-67 columns
+ * and line 2 at 40-52 columns across the three fixtures. But
+ * `git-branch`/`git-changes` don't read the stdin payload at all — they
+ * shell out to real `git` against `stdin.cwd` (`src/utils/git.ts`) — so a
+ * fixture whose recorded `cwd` doesn't exist on disk makes both widgets
+ * silently emit nothing. Rendering against a REAL (synthetic,
+ * deterministic) git repo instead, so those two widgets genuinely execute,
+ * measures line 2's natural width at 91 columns with vim-mode OFF and 100
+ * with it ON (17-character project, 26-character branch, `+2` git-changes) —
+ * the busiest bar the "every segment present" tests below pin against.
  *
  * The value is 80, not 79, for a reason that cost a failed test run to find:
  * `DEFAULT_SETTINGS.compact` is `{ mode: "auto", threshold: 80 }`, and
@@ -36,22 +40,37 @@ import earlyFixture from "./fixtures/real-payloads/opus5-1m-early.json" with { t
  * and reports an empty second line. 80 is the tightest width that (a) stays
  * at or above the compact threshold, so this test keeps exercising the full
  * two-line layout `renderFull` produces, and (b) is still large enough that
- * the realistic non-vim worst case (79 columns) fits without truncating.
+ * that busiest bar's line 2 can be brought within it by shrinking.
  *
- * What this DOES promise: none of the three real-payload fixtures, and the
- * deterministic busiest-bar case with vim-mode OFF, truncate at this width.
+ * What this DOES promise — scoped to what the tests below measure: with the
+ * 17-character project name, a `+2` `git-changes`, and either a 26-character
+ * branch name (vim-mode on or off) or a 42-character one (vim-mode on), the
+ * default bar keeps EVERY segment at this width. The three real-payload fixtures fit outright, with no `…`
+ * anywhere. The deterministic busiest bar does not fit naturally, so the
+ * renderer's shrink pass elides the two `shrinkable` segments — `project`
+ * and `git-branch` — mid-text rather than letting the tail truncation cut
+ * segments off the end of the line.
  *
- * What this does NOT promise: `project` (basename of `workspace.project_dir`)
- * and `git-branch` are UNBOUNDED strings — sized by whatever the real
- * directory/branch names are on the machine running gccusage, and neither
- * widget truncates or elides its own text (the schema's `maxWidth` field is
- * declared but not implemented anywhere in `src/widgets/`). With vim-mode ON
- * and a 26-character branch name — reproduced deterministically below —
- * line 2 grows to 88 columns and DOES truncate at this width. That is a
- * known, accepted limitation (unbounded `project`/`git-branch` growth is
- * filed as its own follow-up issue), not a regression this test exists to
- * catch: this test pins a realistic worst case, not a guarantee for every
- * terminal + vim-mode + branch-name combination.
+ * The headroom is small, and that is a known, accepted limitation (#139).
+ * Shrinking stops at a floor of 8 columns per segment (`MIN_SHRUNK_TEXT`,
+ * `src/render/shrink.ts`), so once `project` and `git-branch` are both at
+ * that floor, line 2's remaining slack is
+ *
+ *   slack = 80 − (natural − len(project) − len(branch) + 2 × 8)
+ *
+ * For the busiest bar with vim-mode on that is 80 − (100 − 17 − 26 + 16) =
+ * 7 columns. Before #139 moved `burn-rate` (here ` $13.27/hr ▶`, 12 columns)
+ * onto line 2 it was 19. Anything that widens the rest of line 2 by more than
+ * those 7 columns — in practice a busier `git-changes`, e.g. `+12 ~15 -3`
+ * (natural 108) — cannot be absorbed by shrinking, and the tail truncation
+ * cuts the end of the line: vim-mode first, then burn-rate. The "accepted
+ * limitation" test below pins exactly that case. Moving to a wider terminal
+ * or a custom layout avoids it.
+ *
+ * What this does NOT promise: every `project`/`git-branch` name stays
+ * readable (both are unbounded strings, so the more columns the other
+ * segments need, the more of those two names is elided), or that every
+ * segment survives an arbitrarily busy `git-changes` at 80 columns.
  */
 const SUPPORTED_WIDTH = 80;
 
@@ -85,7 +104,24 @@ describe("default layout width against real payloads", () => {
     },
   );
 
-  describe("busiest realistic bar (deterministic git repo, all six line-2 segments)", () => {
+  it.each(fixtures.map((fx) => [fx.name, fx] as const))(
+    "renders the recorded effort level as its own line-1 segment for %s (#139)",
+    (_name, fx) => {
+      const context = contextFromFixture(fx, "/home/testuser");
+      const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
+      const line1 = stripAnsi(output).split("\n")[0] ?? "";
+
+      // Every recorded fixture carries `effort: { level: "high" }`. Match the
+      // whole powerline segment — separator, padded text, separator — so the
+      // assertion can't be satisfied by "high" appearing inside other text.
+      expect(context.stdin.effort?.level).toBe("high");
+      expect(line1).toContain("\u25B6 high \u25B6");
+      // Measured with effort on line 1 and burn-rate moved to line 2.
+      expect(visibleLength(line1)).toBeLessThanOrEqual(67);
+    },
+  );
+
+  describe("busiest realistic bar (deterministic git repo, all seven line-2 segments)", () => {
     // vim-mode only appears when vim mode is enabled, and it is the segment
     // that pushed line 2 over the edge in #66. Force it on, and point
     // `stdin.cwd` at a real repo (see makeDeterministicGitRepo) so
@@ -104,7 +140,7 @@ describe("default layout width against real payloads", () => {
     // `workspace.project_dir` entirely and the project segment vanished from
     // line 2: `toContain("terminal-width-67")` was silently being satisfied
     // by the git-branch text instead. It is the same length (17 characters)
-    // as the original so the documented 88/79-column pins are unaffected.
+    // as the original so the documented 100/91-column pins are unaffected.
     function buildBusiestContext(vimEnabled: boolean, repoDir: string) {
       const fx = midFixture as unknown as RealPayloadFixture;
       const base = contextFromFixture(fx, "/home/testuser");
@@ -123,7 +159,7 @@ describe("default layout width against real payloads", () => {
       } as typeof base;
     }
 
-    it("renders all six segments — guards against the vacuous pass this test replaces", () => {
+    it("renders all seven segments — guards against the vacuous pass this test replaces", () => {
       const repoDir = makeDeterministicGitRepo();
       try {
         const context = buildBusiestContext(true, repoDir);
@@ -142,44 +178,64 @@ describe("default layout width against real payloads", () => {
         expect(line2).toContain("+2"); // git-changes
         expect(line2).toContain("+649 -66"); // lines-changed
         expect(line2).toContain("Today: $609"); // today-spend
+        expect(line2).toContain("$13.27/hr"); // burn-rate (#139)
         expect(line2).toContain("NORMAL"); // vim-mode
 
         // Pin the deterministic natural width itself as a regression guard:
         // if this ever drifts, SUPPORTED_WIDTH's documentation is stale.
-        expect(visibleLength(line2)).toBe(88);
+        expect(visibleLength(line2)).toBe(100);
       } finally {
         rmSync(repoDir, { recursive: true, force: true });
       }
     });
 
-    it("truncates with vim-mode on and a 26-character branch name — accepted, not a regression", () => {
+    it("shrinks with vim-mode on and a 26-character branch name — accepted, every segment present", () => {
       const repoDir = makeDeterministicGitRepo();
       try {
         const context = buildBusiestContext(true, repoDir);
         const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
         const line2 = stripAnsi(output).split("\n")[1] ?? "";
 
-        // This is the known, accepted limitation documented on
-        // SUPPORTED_WIDTH above: unbounded project/git-branch length plus
-        // vim-mode pushes line 2 past the pinned width. Asserting the
-        // truncation here (rather than asserting it away) keeps the
-        // trade-off visible and tested instead of silently encoded.
+        // The accepted cost documented on SUPPORTED_WIDTH: the natural 100
+        // columns are brought to exactly the pinned width by eliding
+        // project and git-branch mid-text, not by cutting the tail.
         expect(line2).toContain("…");
         expect(visibleLength(line2)).toBe(SUPPORTED_WIDTH);
+        expect(line2).toContain("demo-proje"); // project, shrunk not dropped
+        expect(line2).toContain("worktree-te"); // git-branch, shrunk not dropped
+        expect(line2).toContain("+2"); // git-changes
+        expect(line2).toContain("+649 -66"); // lines-changed
+        expect(line2).toContain("Today: $609"); // today-spend
+        expect(line2).toContain("$13.27/hr"); // burn-rate
+        expect(line2).toContain("NORMAL"); // vim-mode — the line's last
+        // segment, so the first casualty of a tail truncation.
+        expect(line2.trimEnd().endsWith("…")).toBe(false);
       } finally {
         rmSync(repoDir, { recursive: true, force: true });
       }
     });
 
-    it("does not truncate with vim-mode off — the realistic worst case SUPPORTED_WIDTH pins", () => {
+    it("fits at SUPPORTED_WIDTH with vim-mode off by shrinking, every segment present", () => {
       const repoDir = makeDeterministicGitRepo();
       try {
         const context = buildBusiestContext(false, repoDir);
+        const natural = renderStatusline({ ...context, terminalWidth: undefined }, DEFAULT_SETTINGS);
         const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
         const line2 = stripAnsi(output).split("\n")[1] ?? "";
 
-        expect(line2).not.toContain("…");
-        expect(visibleLength(line2)).toBe(79);
+        // Natural width is 91 with burn-rate on line 2 (#139), so even
+        // without vim-mode the shrink pass has to elide project/git-branch.
+        // Pinned as a regression guard on SUPPORTED_WIDTH's documentation.
+        expect(visibleLength(stripAnsi(natural).split("\n")[1] ?? "")).toBe(91);
+        expect(visibleLength(line2)).toBe(SUPPORTED_WIDTH);
+        expect(line2).toContain("demo-proje"); // project, shrunk not dropped
+        expect(line2).toContain("worktree-te"); // git-branch, shrunk not dropped
+        expect(line2).toContain("+2"); // git-changes
+        expect(line2).toContain("+649 -66"); // lines-changed
+        expect(line2).toContain("Today: $609"); // today-spend
+        expect(line2).toContain("$13.27/hr"); // burn-rate — the line's last
+        // segment here, so the first casualty of a tail truncation.
+        expect(line2.trimEnd().endsWith("…")).toBe(false);
       } finally {
         rmSync(repoDir, { recursive: true, force: true });
       }
@@ -187,16 +243,20 @@ describe("default layout width against real payloads", () => {
 
     it("fits a much longer branch name by shrinking rather than truncating", () => {
       // 42 characters — deliberately longer than the 26-character branch
-      // used above, which (with vim-mode on) only needed a partial shrink to
-      // land exactly at SUPPORTED_WIDTH. This one pushes the natural width to
-      // 104 columns, well past what a single segment's shrink floor alone
+      // used above. This one pushes the natural width to 116 columns
+      // (vim-mode on, burn-rate on line 2), well past what a single
+      // segment's shrink floor alone
       // could satisfy if the shrink pass were merely cosmetic, so it forces
       // real trimming rather than passing by coincidence.
       const repoDir = makeDeterministicGitRepo("feature/an-extremely-long-branch-name-here");
       try {
         const context = buildBusiestContext(true, repoDir);
+        const natural = renderStatusline({ ...context, terminalWidth: undefined }, DEFAULT_SETTINGS);
         const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
         const line2 = stripAnsi(output).split("\n")[1] ?? "";
+
+        // The 116-column natural width quoted above, pinned.
+        expect(visibleLength(stripAnsi(natural).split("\n")[1] ?? "")).toBe(116);
 
         // Fits...
         expect(visibleLength(line2)).toBeLessThanOrEqual(SUPPORTED_WIDTH);
@@ -206,17 +266,61 @@ describe("default layout width against real payloads", () => {
         // tail; the presence checks below are what would fail if shrinking
         // were removed and the raw truncateAnsi backstop took over instead
         // (verified directly in Step 3 of this task's report).
-        expect(line2).toContain("demo-project-repo"); // project, untouched
-        expect(line2).toContain("feature/an-extrem"); // git-branch, shrunk not dropped
+        expect(line2).toContain("demo-proje"); // project, shrunk too since #139
+        expect(line2).toContain("feature/an-"); // git-branch, shrunk not dropped
         expect(line2).toContain("+2"); // git-changes
         expect(line2).toContain("+649 -66"); // lines-changed
-        expect(line2).toContain("Today: $609"); // today-spend — would be the
-        // first casualty of a tail truncation, since it sits well after the
-        // long branch segment in line order.
-        expect(line2).toContain("NORMAL"); // vim-mode
+        expect(line2).toContain("Today: $609"); // today-spend
+        expect(line2).toContain("$13.27/hr"); // burn-rate
+        expect(line2).toContain("NORMAL"); // vim-mode — the line's last
+        // segment, so the first casualty of a tail truncation.
         // ...and the loss was taken inside a segment, not off the line's end.
         expect(line2).toContain("…");
         expect(line2.trimEnd().endsWith("…")).toBe(false);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    it("cuts the tail with vim-mode on and a busy git status — accepted limitation of the 7-column headroom (#139)", () => {
+      // The cliff documented on SUPPORTED_WIDTH, pinned so it can't move
+      // silently in either direction. `+12 ~15 -3` is 8 columns wider than
+      // the default `+2`, one more than the 7 columns of slack left once
+      // project and git-branch hit their shrink floor, so shrinking alone
+      // can't make line 2 fit and the tail truncation cuts vim-mode. This is
+      // the accepted trade-off of moving burn-rate onto line 2, not a bug;
+      // if a layout change makes this test fail because the line now FITS,
+      // update SUPPORTED_WIDTH's headroom paragraph rather than forcing it.
+      const repoDir = makeDeterministicGitRepo(undefined, { added: 12, modified: 15, deleted: 3 });
+      try {
+        const context = buildBusiestContext(true, repoDir);
+        const natural = renderStatusline({ ...context, terminalWidth: undefined }, DEFAULT_SETTINGS);
+        const naturalLine2 = stripAnsi(natural).split("\n")[1] ?? "";
+        const output = renderStatusline({ ...context, terminalWidth: SUPPORTED_WIDTH }, DEFAULT_SETTINGS);
+        const line2 = stripAnsi(output).split("\n")[1] ?? "";
+
+        // The fixture really produced the busy status, and line 2 really is
+        // 8 columns wider than the default busiest bar's 100.
+        expect(naturalLine2).toContain("+12 ~15 -3");
+        expect(naturalLine2).toContain("NORMAL");
+        expect(visibleLength(naturalLine2)).toBe(108);
+
+        // Brought to exactly the pinned width...
+        expect(visibleLength(line2)).toBe(SUPPORTED_WIDTH);
+        // ...with project and git-branch both AT the 8-column floor, not
+        // merely shrunk: the next-longer prefix must be gone too.
+        expect(line2).toContain(" demo-pr\u2026 ");
+        expect(line2).not.toContain("demo-pro");
+        expect(line2).toContain(" worktre\u2026 ");
+        expect(line2).not.toContain("worktree");
+        // ...so the rest had to come off the end: the tail is cut.
+        expect(line2.trimEnd().endsWith("\u2026")).toBe(true);
+        expect(line2.trimEnd().endsWith("NORMAL\u2026")).toBe(true);
+        // Everything before vim-mode survives, burn-rate included.
+        expect(line2).toContain("+12 ~15 -3"); // git-changes
+        expect(line2).toContain("+649 -66"); // lines-changed
+        expect(line2).toContain("Today: $609"); // today-spend
+        expect(line2).toContain("$13.27/hr"); // burn-rate
       } finally {
         rmSync(repoDir, { recursive: true, force: true });
       }

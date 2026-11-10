@@ -48,6 +48,10 @@ export interface WidgetExpectation {
 
 export const WIDGET_EXPECTATIONS: Record<string, WidgetExpectation> = {
   model: { text: "Opus 5", why: "formatModelName strips the [1m] suffix" },
+  effort: {
+    text: "high",
+    why: "effort.level from the recorded payload — all three real fixtures carry it, so the widget is pinned against real Claude Code output, not a hand-built payload (#139)",
+  },
   "session-cost": { text: "$23.53", why: "sessionCostUsd from the recorded pipeline run" },
   "today-spend": { text: "Today: $609", why: "todayCostUsd from the daily cost tracker" },
   "block-timer": { text: "Block: 2hr 13m", why: "block.elapsedMs, clock pinned to derivedAt" },

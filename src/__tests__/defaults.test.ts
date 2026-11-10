@@ -6,7 +6,7 @@ import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
 import { colorDistance } from "../render/color-compare.js";
 import { SettingsSchema } from "../config/schema.js";
 import { isValidColor } from "../render/colors.js";
-import { RUNTIME_ALERT_BACKGROUNDS } from "../widgets/alert-colors.js";
+import { EFFORT_COLORS, EFFORT_FALLBACK, RUNTIME_ALERT_BACKGROUNDS } from "../widgets/alert-colors.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -42,12 +42,40 @@ describe("DEFAULT_SETTINGS", () => {
       .filter((priority): priority is number => priority !== undefined);
     expect(new Set(priorities).size).toBe(priorities.length);
   });
+
+  it("places effort directly after model on line 1 (#139)", () => {
+    const line1 = DEFAULT_SETTINGS.lines[0]!.widgets.map((w) => w.type);
+    expect(line1).toContain("effort");
+    expect(line1.indexOf("effort")).toBe(line1.indexOf("model") + 1);
+  });
+
+  it("sorts effort last among prioritised widgets, so it is the first of them dropped when the bar compacts (#139)", () => {
+    // Proves only that effort ranks after every widget with an EXPLICIT
+    // priority, so renderCompact's greedy fill tries it last among them. It
+    // is not last overall: the default layout leaves vim-mode unprioritised,
+    // the renderer reads a missing priority as 99 (`config.priority ?? 99`),
+    // so in compact mode vim-mode still sorts after effort and is dropped
+    // first.
+    const all = DEFAULT_SETTINGS.lines.flatMap((line) => line.widgets);
+    const effort = all.find((w) => w.type === "effort");
+    expect(effort).toBeDefined();
+    const maxOther = Math.max(...all.filter((w) => w.type !== "effort").map((w) => w.priority ?? -Infinity));
+    expect(effort?.priority).toBeGreaterThan(maxOther);
+  });
+
+  it("puts burn-rate on line 2 directly after today-spend (#139)", () => {
+    expect(DEFAULT_SETTINGS.lines[0]!.widgets.map((w) => w.type)).not.toContain("burn-rate");
+    const line2 = DEFAULT_SETTINGS.lines[1]!.widgets.map((w) => w.type);
+    expect(line2).toContain("burn-rate");
+    expect(line2.indexOf("burn-rate")).toBe(line2.indexOf("today-spend") + 1);
+  });
 });
 
 describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // Several widgets (context-percent, compact-countdown, session-cost,
-  // today-spend, vim-mode) override bg from thresholds at render time, so a
-  // static comparison of configured colors proves nothing. These tests render
+  // today-spend, vim-mode, effort) choose their bg at render time (from
+  // thresholds, modes or levels), so a static comparison of configured
+  // colors proves nothing. These tests render
   // the real widget outputs across a cross product of every threshold
   // dimension, push them through the renderer's own styling pass, and assert
   // nothing comes out invisible.
@@ -59,16 +87,25 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   // gets its own axis. Pinning any one of them hides collisions that only
   // appear in specific combinations — that blind spot is what issue #36 was
   // filed about. sessionWarn 5 / sessionDanger 15, dailyWarn 10 /
-  // dailyDanger 25, and vim-mode picks a color per mode.
+  // dailyDanger 25, vim-mode picks a color per mode, and effort picks one
+  // per level (undefined = model without effort support, segment declines;
+  // "ultra" = a level the palette doesn't know, painted with the fallback).
   const SESSION_SWEEP = [2.5, 8, 20];
   const TODAY_SWEEP = [3, 12, 30];
   const VIM_SWEEP = ["NORMAL", "INSERT"];
+  const EFFORT_SWEEP = [undefined, "low", "medium", "high", "xhigh", "max", "ultra"];
+  // burn-rate sits between today-spend and vim-mode on line 2 but declines
+  // until there is a rate to show (burnRate null), leaving those two
+  // adjacent. Without this axis that adjacency is never rendered.
+  const BURN_SWEEP = [true, false];
 
   interface SweepPoint {
     used: number;
     session: number;
     today: number;
     vim: string;
+    effort: string | undefined;
+    burn: boolean;
   }
 
   function sweepPoints(): SweepPoint[] {
@@ -77,7 +114,11 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       for (const session of SESSION_SWEEP) {
         for (const today of TODAY_SWEEP) {
           for (const vim of VIM_SWEEP) {
-            points.push({ used, session, today, vim });
+            for (const effort of EFFORT_SWEEP) {
+              for (const burn of BURN_SWEEP) {
+                points.push({ used, session, today, vim, effort, burn });
+              }
+            }
           }
         }
       }
@@ -104,6 +145,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
           total_lines_removed: 4,
         },
         vim: { mode: point.vim },
+        ...(point.effort ? { effort: { level: point.effort } } : {}),
       },
       metrics: {
         byModel: new Map(),
@@ -116,7 +158,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         },
       },
       block: null,
-      burnRate: { costPerHour: 1, costPerMinute: 0.02 },
+      burnRate: point.burn ? { costPerHour: 1, costPerMinute: 0.02 } : null,
       pricing: {},
       sessionCostUsd: point.session,
       todayCostUsd: point.today,
@@ -188,7 +230,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         piece.text.trim(),
         `[${mode}] piece has no visible characters at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}, burn=${point.burn}. Segments: ${order}`,
       ).not.toBe("");
 
       if (piece.bg === undefined) continue;
@@ -198,7 +240,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
         `[${mode}] "${piece.text}" is unreadable: fg ${piece.fg} is only ` +
           `ΔE ${distance.toFixed(2)} from bg ${piece.bg} (floor ${MIN_SEPARATOR_DELTA}) at ` +
           `used_percentage=${point.used}, sessionCostUsd=${point.session}, ` +
-          `todayCostUsd=${point.today}, vim=${point.vim}. Segments: ${order}`,
+          `todayCostUsd=${point.today}, vim=${point.vim}, effort=${point.effort}, burn=${point.burn}. Segments: ${order}`,
       ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
     }
   }
@@ -206,10 +248,27 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
   it("never renders an invisible piece (fg === bg), per line", () => {
     for (const point of sweepPoints()) {
       const context = makeSweepContext(point);
-      for (const line of DEFAULT_SETTINGS.lines) {
+      for (const [index, line] of DEFAULT_SETTINGS.lines.entries()) {
         const rendered = line.widgets
           .map((config) => renderConfig(context, config))
           .filter((r): r is Rendered => r !== null);
+        // Anti-vacuity: the effort axis only covers effort's adjacencies if
+        // the segment actually renders on line 1 whenever a level is sent.
+        if (index === 0 && point.effort) {
+          expect(
+            rendered.some((r) => r.type === "effort"),
+            `effort=${point.effort} did not render on line 1`,
+          ).toBe(true);
+        }
+        // Anti-vacuity: the burn axis only covers the today-spend > vim-mode
+        // adjacency if burn-rate really declines and leaves them touching.
+        if (index === 1 && !point.burn) {
+          const order = rendered.map((r) => r.type);
+          expect(
+            order[order.indexOf("today-spend") + 1],
+            `burn=false did not leave today-spend directly before vim-mode on line 2: ${order.join(" > ")}`,
+          ).toBe("vim-mode");
+        }
         assertEveryPieceVisible(rendered, point, "line");
       }
     }
@@ -280,6 +339,66 @@ describe("project segment palette", () => {
         `project bg ${project!.bg} is only ΔE ${distance.toFixed(2)} from ${type} bg ${bg} ` +
           `(floor ${MIN_SEPARATOR_DELTA})`,
       ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+    }
+  });
+});
+
+describe("effort segment palette (#139)", () => {
+  // Same reasoning as the project palette above: the adjacency sweep cannot
+  // guard bg-vs-bg distance (a too-close pair silently degrades to the thin
+  // separator), and renderCompact orders by priority, so with neighbours
+  // hidden (no git repo, no lines changed) effort can sit beside ANY segment.
+  // Check every effort colour against every background the bar can paint.
+  const configured = DEFAULT_SETTINGS.lines
+    .flatMap((line) => line.widgets)
+    .filter((w) => w.bg !== undefined)
+    .map((w) => [w.type, w.bg!] as const);
+  const effortColors = [...EFFORT_COLORS.entries(), ["fallback", EFFORT_FALLBACK] as const];
+  // Remove exactly the five effort entries, by position rather than by
+  // value: filtering by value would also drop any non-effort runtime colour
+  // an effort colour happened to equal, and that collision would then never
+  // be checked.
+  const rest = [...RUNTIME_ALERT_BACKGROUNDS] as string[];
+  for (const bg of EFFORT_COLORS.values()) {
+    const i = rest.indexOf(bg);
+    // splice(-1, 1) would silently remove the LAST runtime colour instead.
+    if (i === -1) throw new Error(`effort colour ${bg} is not in RUNTIME_ALERT_BACKGROUNDS`);
+    rest.splice(i, 1);
+  }
+  const others = [...configured, ...rest.map((bg) => [`runtime ${bg}`, bg] as const)];
+
+  it("has no duplicate runtime backgrounds", () => {
+    expect(new Set(RUNTIME_ALERT_BACKGROUNDS).size).toBe(RUNTIME_ALERT_BACKGROUNDS.length);
+  });
+
+  it("has a colour for every level Claude Code sends today", () => {
+    expect([...EFFORT_COLORS.keys()].sort()).toEqual(["high", "low", "max", "medium", "xhigh"]);
+  });
+
+  it("registers every effort colour as a runtime background", () => {
+    for (const [, bg] of effortColors) {
+      expect(RUNTIME_ALERT_BACKGROUNDS as readonly string[]).toContain(bg);
+    }
+  });
+
+  it.each(effortColors)("%s (%s) clears the separator floor against every other background", (level, bg) => {
+    for (const [type, other] of others) {
+      const distance = colorDistance(bg, other);
+      expect(
+        distance,
+        `effort ${level} bg ${bg} is only ΔE ${distance.toFixed(2)} from ${type} bg ${other} ` +
+          `(floor ${MIN_SEPARATOR_DELTA})`,
+      ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+    }
+  });
+
+  it("keeps the five levels distinct from each other", () => {
+    const levels = [...EFFORT_COLORS.entries()];
+    for (const [a, aBg] of levels) {
+      for (const [b, bBg] of levels) {
+        if (a >= b) continue;
+        expect(colorDistance(aBg, bBg), `${a} ${aBg} vs ${b} ${bBg}`).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+      }
     }
   });
 });

@@ -105,7 +105,7 @@ describe("colorDistance", () => {
     // hBarP = h1p + h2p and dCp/dHp are all 0 there — those rows exercise the
     // lightness term only). These pin the undefined-hue branch somewhere its
     // value actually feeds dCp/dHp/hBarP. Live path: burn-rate is #555555, a
-    // pure grey, adjacent to compact-countdown in the shipped default bar.
+    // pure grey, adjacent to today-spend in the shipped default bar (#139).
     // Verified against culori by a reviewer; this implementation already
     // reproduces them.
     ["#808080", "#0d7377", 22.3895],

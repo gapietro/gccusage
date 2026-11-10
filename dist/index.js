@@ -908,6 +908,7 @@ const TokenUsageSchema = object({
 	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
 const VimSchema = object({ mode: lenient(string()) });
+const EffortSchema = object({ level: lenient(string()) });
 const WorkspaceSchema = object({ project_dir: lenient(string()) });
 const StatusJsonSchema = object({
 	model: lenient(ModelSchema),
@@ -915,6 +916,7 @@ const StatusJsonSchema = object({
 	context_window: lenient(ContextWindowSchema),
 	token_usage: lenient(TokenUsageSchema),
 	vim: lenient(VimSchema),
+	effort: lenient(EffortSchema),
 	cwd: lenient(string()),
 	workspace: lenient(WorkspaceSchema),
 	session_id: lenient(string())
@@ -1579,6 +1581,10 @@ const DEFAULT_SETTINGS = {
 				priority: 1
 			},
 			{
+				type: "effort",
+				priority: 11
+			},
+			{
 				type: "session-cost",
 				fg: "#ffffff",
 				bg: "#26a269",
@@ -1595,12 +1601,6 @@ const DEFAULT_SETTINGS = {
 				fg: "#ffffff",
 				bg: "#1a5fb4",
 				priority: 4
-			},
-			{
-				type: "burn-rate",
-				fg: "#ffffff",
-				bg: "#555555",
-				priority: 8
 			}
 		],
 		flex: "left"
@@ -1635,6 +1635,12 @@ const DEFAULT_SETTINGS = {
 				fg: "#ffffff",
 				bg: "#26a269",
 				priority: 7
+			},
+			{
+				type: "burn-rate",
+				fg: "#ffffff",
+				bg: "#555555",
+				priority: 8
 			},
 			{ type: "vim-mode" }
 		],
@@ -4490,13 +4496,14 @@ const modelWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/alert-colors.ts
 /**
-* The set of backgrounds widgets can paint at render time from thresholds,
-* rather than from configured colors — so they never appear in
-* DEFAULT_SETTINGS and a static scan of the config misses them entirely.
+* The set of backgrounds widgets choose at render time (from thresholds,
+* modes or levels) rather than from configured colors — so they never
+* appear in DEFAULT_SETTINGS and a static scan of the config misses them
+* entirely.
 *
-* These six colours are not six independent choices: each is required to
-* stay CIEDE2000-distinct from every other one a segment could end up
-* adjacent to (issues #36, #40, #45). Keeping them in one module, rather
+* These colours are not independent choices: each is required to stay
+* CIEDE2000-distinct from every other one a segment could end up adjacent
+* to (issues #36, #40, #45, #139). Keeping them in one module, rather
 * than scattered across the widgets that use them, is what lets that
 * mutual-distinctness constraint be checked in one place instead of via
 * cross-referencing comments that can drift out of sync.
@@ -4507,6 +4514,25 @@ const COMPACT_COUNTDOWN_AMBER = "#b8860b";
 const COMPACT_COUNTDOWN_RED = "#a01822";
 const VIM_NORMAL = "#2ec27e";
 const VIM_INSERT = "#e5a50a";
+const EFFORT_LOW = "#77767b";
+const EFFORT_MEDIUM = "#2a8ca6";
+const EFFORT_HIGH = "#5841c8";
+const EFFORT_XHIGH = "#b0228c";
+const EFFORT_MAX = "#e66100";
+/**
+* Level → background. A Map, not an object literal: an object would answer
+* `"constructor"` or `"toString"` with an inherited function, and the level
+* string comes from the payload.
+*/
+const EFFORT_COLORS = new Map([
+	["low", EFFORT_LOW],
+	["medium", EFFORT_MEDIUM],
+	["high", EFFORT_HIGH],
+	["xhigh", EFFORT_XHIGH],
+	["max", EFFORT_MAX]
+]);
+/** A level this build has never seen renders neutral rather than vanishing. */
+const EFFORT_FALLBACK = EFFORT_LOW;
 /**
 * The shared warn/danger escalation for the dollar-valued widgets
 * (session-cost, today-spend): red at or above `danger`, amber at or above
@@ -4523,6 +4549,23 @@ function alertBg(cost, warn, danger, configBg) {
 	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
+
+//#endregion
+//#region src/widgets/effort.ts
+const effortWidget = { render(context, config) {
+	const level = context.stdin.effort?.level?.trim();
+	if (!level) return null;
+	const label = config.label ?? "";
+	const icon = config.icon ?? "";
+	const prefix = [icon, label].filter(Boolean).join(" ");
+	const text = prefix ? `${prefix} ${level}` : level;
+	const bg = config.bg ?? EFFORT_COLORS.get(level.toLowerCase()) ?? EFFORT_FALLBACK;
+	return {
+		text,
+		fg: config.fg ?? "#ffffff",
+		bg
+	};
+} };
 
 //#endregion
 //#region src/widgets/session-cost.ts
@@ -5176,6 +5219,7 @@ const turnCounterWidget = { render(context, config) {
 //#region src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
+	effort: effortWidget,
 	"session-cost": sessionCostWidget,
 	"today-spend": todaySpendWidget,
 	"block-timer": blockTimerWidget,

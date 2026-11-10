@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `effort` widget: the session's reasoning-effort level, read from Claude
+  Code's statusline payload, on a per-level colour. In the default layout
+  directly after `model`; hidden for models without effort support (#139).
+
+### Changed
+
+- Default layout: `burn-rate` moved from line 1 to line 2, after
+  `today-spend`, to make room for `effort` (#139).
+- At 80 columns the busiest line 2 now shortens `project` and `git-branch`
+  sooner, and with vim mode on and a busy git status the end of line 2 can be
+  cut. Move to a wider terminal or use a custom layout to avoid it (#139).
+
 ## [1.0.0] — 2026-08-05
 
 First tagged release. The tool has been in daily use since 2026-02-23; 1.0.0

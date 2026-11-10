@@ -97,6 +97,16 @@ const VimSchema = v.object({
   mode: lenient(v.string()),
 });
 
+// Claude Code sends this only when the current model supports effort
+// (2.1.322: `...Hw(model) && { effort: { level } }`), so absence is the normal
+// state for e.g. claude-sonnet-4-5, not an error. `level` is deliberately a
+// string, not an enum: the level set already differs per model (some add
+// `xhigh`, some `max`), and a level this code has never seen must still
+// render rather than be validated away (#139).
+const EffortSchema = v.object({
+  level: lenient(v.string()),
+});
+
 // Claude Code's `workspace` block also carries `current_dir` (a duplicate of
 // top-level `cwd`), `added_dirs[]` and `repo{host,owner,name}`. None has a
 // consumer, and valibot strips unrecognised keys, so they stay unparsed until
@@ -112,6 +122,7 @@ export const StatusJsonSchema = v.object({
   context_window: lenient(ContextWindowSchema),
   token_usage: lenient(TokenUsageSchema),
   vim: lenient(VimSchema),
+  effort: lenient(EffortSchema),
   cwd: lenient(v.string()),
   workspace: lenient(WorkspaceSchema),
   session_id: lenient(v.string()),
