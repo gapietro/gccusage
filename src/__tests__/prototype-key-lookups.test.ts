@@ -16,8 +16,10 @@ import type { TokenMetrics } from "../types/token-metrics.js";
  * program: a plain-object read `obj[key]` walks the prototype chain, so a key
  * naming an `Object.prototype` member resolves to an inherited function or
  * object instead of "not found". Config supplies widget types and theme names;
- * transcripts and stdin supply model ids. Each test below fails against the
- * old `obj[key] ?? fallback` / `if (table[key])` lookups.
+ * transcripts and stdin supply model ids. Each non-control test below fails
+ * against the old `obj[key] ?? fallback` / `if (table[key])` lookups, except
+ * "does not pollute Object.prototype", a property that must hold before and
+ * after and backs the item-3 dismissal.
  */
 const PROTOTYPE_KEYS = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"];
 

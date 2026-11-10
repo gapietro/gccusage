@@ -159,6 +159,9 @@ describe.skipIf(!distExists)("prototype-key model ids through the real bundle (#
       // The same rendering an ordinary unknown model gets: a lower bound with
       // the uncertainty marker, not "$?" for the whole session.
       expect(out).toContain("$0.03?");
+      // Deliberately silent on a `?` after Today: in store mode Today is not
+      // marked uncertain for ANY unpriced model, which predates #143. Pre-fix
+      // this read "Today: $?", so the assertion still discriminates.
       expect(out).toContain("Today: $0.03");
       expect(shardCostUsd()).toBeCloseTo(0.03, 10);
     },

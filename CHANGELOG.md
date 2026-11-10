@@ -16,8 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Previously it was costed as `NaN`, so the session and Today totals rendered
   `$?` (dropping the part that was priced), the burn rate rendered `$?/hr`,
   and the session's daily-store entry was written unreadable. It now renders
-  like any unknown model: the priced part with the `?` uncertainty marker
-  (#143).
+  like any unknown model: the priced part, with the `?` uncertainty marker on
+  the session total (#143).
 
 ## [1.1.0] — 2026-11-10
 
