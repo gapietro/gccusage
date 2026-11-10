@@ -1679,11 +1679,16 @@ function getConfigDir() {
 function getConfigPath() {
 	return path$10.join(getConfigDir(), "settings.json");
 }
-/** Shallow-merge only keys that exist in the source object. */
+/**
+* Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
+* not `key in validated`: the keys come from the user's config, and `in`
+* walks the prototype chain, so `"constructor"` was copied onto the merged
+* section as an own property (#143).
+*/
 function mergeIfPresent(defaults, raw, validated) {
 	if (!raw || !validated) return defaults;
 	const result = { ...defaults };
-	for (const key of Object.keys(raw)) if (key in validated) result[key] = validated[key];
+	for (const key of Object.keys(raw)) if (Object.hasOwn(validated, key)) result[key] = validated[key];
 	return result;
 }
 /** Deep-merge user overrides onto defaults, only overriding keys the user actually set. */
