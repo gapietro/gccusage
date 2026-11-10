@@ -245,5 +245,22 @@ function isSeparatorOutput(output: WidgetOutput): boolean {
  * each side.
  */
 function sanitizeOutput(output: WidgetOutput): WidgetOutput {
-  return { ...output, text: sanitizeAnsi(output.text) };
+  return {
+    ...output,
+    text: sanitizeAnsi(output.text),
+    fg: stringOrUndefined(output.fg),
+    bg: stringOrUndefined(output.bg),
+  };
+}
+
+/**
+ * Drop a colour that is not actually a string. `WidgetOutput` types `fg`/`bg`
+ * as strings, but a widget keying a plain object by payload text gets an
+ * inherited member back for "constructor", "__proto__", ... and the type
+ * system cannot see it. That value throws inside `resolveColor`/chalk, the
+ * blanket catch in `main()` swallows it, and the WHOLE bar is erased (#141).
+ * Losing one segment's colour is the right price; losing the bar is not.
+ */
+function stringOrUndefined(color: unknown): string | undefined {
+  return typeof color === "string" ? color : undefined;
 }
