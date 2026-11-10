@@ -8,8 +8,8 @@
 A powerline-style statusline for [Claude Code](https://claude.com/claude-code). Displays model info, costs, context usage, git status, and more in a compact, color-coded terminal bar.
 
 ```
- Opus 5 ▶ $23.53 ▶ [===-------] 27% (1.00M) ▶ ~697.0k left ▶ $13.27/hr ▶
- gccusage ▶ main ▶ +2 ~5 -1 ▶ +649 -66 ▶ Today: $23.53 ▶
+ Opus 5 ▶ high ▶ $23.53 ▶ [===-------] 27% (1.00M) ▶ ~697.0k left ▶
+ gccusage ▶ main ▶ +2 ~5 -1 ▶ +649 -66 ▶ Today: $23.53 ▶ $13.27/hr ▶
 ```
 
 ## Prerequisites
@@ -139,8 +139,9 @@ Some themes have subtle gradient ramps between segment backgrounds. For `minimal
 and (to a lesser extent) `ocean`, most consecutive segments are close enough in color that
 the wide `▶` separator would not read against them, so the thin `│` is drawn instead — this
 is deliberate (see `separatorThin` below), not a bug. It only applies to a custom layout
-whose widgets don't set their own `bg`; the default layout's widgets all set one, so the
-theme's colors never come into play there.
+whose widgets don't set their own `bg`; the default layout's widgets all set one, or pick
+their own at render time (`effort`, `vim-mode`), so the theme's colors never come into play
+there.
 
 ### Separators
 
@@ -283,19 +284,21 @@ before.
 
 ## Widgets
 
-The default layout uses eleven of these: `model`, `session-cost`,
-`context-percent`, `compact-countdown` and `burn-rate` on the first line,
-`project`, `git-branch`, `git-changes`, `lines-changed`, `today-spend` and
+The default layout uses twelve of these: `model`, `effort`, `session-cost`,
+`context-percent` and `compact-countdown` on the first line, `project`,
+`git-branch`, `git-changes`, `lines-changed`, `today-spend`, `burn-rate` and
 `vim-mode` on the second. The rest ship ready to use but render only if you
 put them in a [custom layout](#custom-layout).
 
 A widget renders nothing at all when its data is missing — no branch outside a
-git repo, no `vim-mode` unless vim mode is on — and the bar closes up around it
-rather than showing a blank segment.
+git repo, no `vim-mode` unless vim mode is on, no `effort` for models without
+effort support — and the bar closes up around it rather than showing a blank
+segment.
 
 | Widget | Description |
 |--------|-------------|
 | `model` | Current Claude model name and version |
+| `effort` | Reasoning effort level (`low`/`medium`/`high`/`xhigh`/`max`), coloured per level; hidden for models without effort support |
 | `session-cost` | Session cost in USD (color alerts at thresholds) |
 | `today-spend` | Total daily cost across all sessions |
 | `context-percent` | Context window usage with progress bar |
@@ -375,7 +378,7 @@ Some options apply only to particular widgets:
 | `text` | `custom-text` | The literal text to display; the widget renders nothing without it |
 | `command` | `custom-command` | Shell command to run; the widget renders nothing without it |
 | `separator` | `separator` | Separator string (default `" \| "`) |
-| `icon` | `model`, `git-branch` | Prefix glyph; empty by default, since the usual choices need a Nerd Font |
+| `icon` | `model`, `effort`, `git-branch` | Prefix glyph; empty by default, since the usual choices need a Nerd Font |
 | `cacheTtlMs` | `custom-command` | How long to reuse the command's output, in milliseconds (default `30000`) |
 
 One rough edge worth knowing before you meet it: `format` is accepted by the
