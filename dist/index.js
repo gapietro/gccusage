@@ -5105,16 +5105,13 @@ const linesChangedWidget = { render(context, config) {
 
 //#endregion
 //#region src/widgets/vim-mode.ts
-const MODE_COLORS = {
-	NORMAL: VIM_NORMAL,
-	INSERT: VIM_INSERT
-};
+const MODE_COLORS = new Map([["NORMAL", VIM_NORMAL], ["INSERT", VIM_INSERT]]);
 const vimModeWidget = { render(context, config) {
 	const mode = context.stdin.vim?.mode;
 	if (!mode) return null;
 	const label = config.label ?? "";
 	const text = label ? `${label} ${mode}` : mode;
-	const bg = config.bg ?? MODE_COLORS[mode] ?? MODE_COLORS["NORMAL"];
+	const bg = config.bg ?? MODE_COLORS.get(mode) ?? VIM_NORMAL;
 	return {
 		text,
 		fg: config.fg ?? "#ffffff",
@@ -5893,8 +5890,21 @@ function isSeparatorOutput(output) {
 function sanitizeOutput(output) {
 	return {
 		...output,
-		text: sanitizeAnsi(output.text)
+		text: sanitizeAnsi(output.text),
+		fg: stringOrUndefined(output.fg),
+		bg: stringOrUndefined(output.bg)
 	};
+}
+/**
+* Drop a colour that is not actually a string. `WidgetOutput` types `fg`/`bg`
+* as strings, but a widget keying a plain object by payload text gets an
+* inherited member back for "constructor", "__proto__", ... and the type
+* system cannot see it. That value throws inside `resolveColor`/chalk, the
+* blanket catch in `main()` swallows it, and the WHOLE bar is erased (#141).
+* Losing one segment's colour is the right price; losing the bar is not.
+*/
+function stringOrUndefined(color) {
+	return typeof color === "string" ? color : void 0;
 }
 
 //#endregion

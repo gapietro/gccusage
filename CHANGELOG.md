@@ -20,6 +20,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sooner, and with vim mode on and a busy git status the end of line 2 can be
   cut. Move to a wider terminal or use a custom layout to avoid it (#139).
 
+### Fixed
+
+- A `vim` mode named after a JavaScript built-in (`constructor`, `toString`,
+  `__proto__`, ...) no longer erases the whole bar; the segment renders on the
+  NORMAL colour. The renderer now also drops any non-string segment colour
+  rather than failing the render, so one bad widget costs its colour, not the
+  bar (#141).
+
 ## [1.0.0] — 2026-08-05
 
 First tagged release. The tool has been in daily use since 2026-02-23; 1.0.0
