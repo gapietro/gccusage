@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A widget `type` or `powerline.theme` named after a JavaScript built-in
+  (`constructor`, `toString`, `__proto__`, ...) no longer erases the whole bar:
+  the widget is skipped and the theme falls back to `default`, exactly as for
+  any other unknown name (#143).
+- A model id named after a JavaScript built-in is now treated as unpriced.
+  Previously it was costed as `NaN`, so the session and Today totals rendered
+  `$?` (dropping the part that was priced), the burn rate rendered `$?/hr`,
+  and the session's daily-store entry was written unreadable. It now renders
+  like any unknown model: the priced part with the `?` uncertainty marker
+  (#143).
+
 ## [1.1.0] — 2026-11-10
 
 ### Added
