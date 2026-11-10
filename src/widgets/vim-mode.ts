@@ -5,10 +5,14 @@ import { VIM_NORMAL, VIM_INSERT } from "./alert-colors.js";
 
 // Rationale for these specific colors (adjacency to today-spend on line 2)
 // lives in alert-colors.ts, next to the values themselves.
-const MODE_COLORS: Record<string, string> = {
-  NORMAL: VIM_NORMAL, // green, vs today-spend's #26a269
-  INSERT: VIM_INSERT, // amber, vs today-spend's warn ALERT_AMBER
-};
+//
+// A Map, not an object literal: `mode` comes from the stdin payload, and a
+// plain-object lookup resolves "constructor", "toString", "__proto__", ... to
+// inherited members instead of falling through to the default (#141).
+const MODE_COLORS: ReadonlyMap<string, string> = new Map([
+  ["NORMAL", VIM_NORMAL], // green, vs today-spend's #26a269
+  ["INSERT", VIM_INSERT], // amber, vs today-spend's warn ALERT_AMBER
+]);
 
 export const vimModeWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
@@ -17,7 +21,7 @@ export const vimModeWidget: Widget = {
 
     const label = config.label ?? "";
     const text = label ? `${label} ${mode}` : mode;
-    const bg = config.bg ?? MODE_COLORS[mode] ?? MODE_COLORS["NORMAL"];
+    const bg = config.bg ?? MODE_COLORS.get(mode) ?? VIM_NORMAL;
     return { text, fg: config.fg ?? "#ffffff", bg };
   },
 };
