@@ -6,7 +6,7 @@ import { layoutPowerline, MIN_SEPARATOR_DELTA } from "../render/powerline.js";
 import { colorDistance } from "../render/color-compare.js";
 import { SettingsSchema } from "../config/schema.js";
 import { isValidColor } from "../render/colors.js";
-import { RUNTIME_ALERT_BACKGROUNDS } from "../widgets/alert-colors.js";
+import { EFFORT_COLORS, EFFORT_FALLBACK, RUNTIME_ALERT_BACKGROUNDS } from "../widgets/alert-colors.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { WidgetOutput } from "../widgets/base.js";
 import type { WidgetConfig } from "../config/schema.js";
@@ -280,6 +280,55 @@ describe("project segment palette", () => {
         `project bg ${project!.bg} is only ΔE ${distance.toFixed(2)} from ${type} bg ${bg} ` +
           `(floor ${MIN_SEPARATOR_DELTA})`,
       ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+    }
+  });
+});
+
+describe("effort segment palette (#139)", () => {
+  // Same reasoning as the project palette above: the adjacency sweep cannot
+  // guard bg-vs-bg distance (a too-close pair silently degrades to the thin
+  // separator), and renderCompact orders by priority, so with neighbours
+  // hidden (no git repo, no lines changed) effort can sit beside ANY segment.
+  // Check every effort colour against every background the bar can paint.
+  const configured = DEFAULT_SETTINGS.lines
+    .flatMap((line) => line.widgets)
+    .filter((w) => w.bg !== undefined)
+    .map((w) => [w.type, w.bg!] as const);
+  const effortColors = [...EFFORT_COLORS.entries(), ["fallback", EFFORT_FALLBACK] as const];
+  const effortSet = new Set(effortColors.map(([, bg]) => bg));
+  const others = [
+    ...configured,
+    ...RUNTIME_ALERT_BACKGROUNDS.filter((bg) => !effortSet.has(bg)).map((bg) => [`runtime ${bg}`, bg] as const),
+  ];
+
+  it("has a colour for every level Claude Code sends today", () => {
+    expect([...EFFORT_COLORS.keys()].sort()).toEqual(["high", "low", "max", "medium", "xhigh"]);
+  });
+
+  it("registers every effort colour as a runtime background", () => {
+    for (const [, bg] of effortColors) {
+      expect(RUNTIME_ALERT_BACKGROUNDS as readonly string[]).toContain(bg);
+    }
+  });
+
+  it.each(effortColors)("%s (%s) clears the separator floor against every other background", (level, bg) => {
+    for (const [type, other] of others) {
+      const distance = colorDistance(bg, other);
+      expect(
+        distance,
+        `effort ${level} bg ${bg} is only ΔE ${distance.toFixed(2)} from ${type} bg ${other} ` +
+          `(floor ${MIN_SEPARATOR_DELTA})`,
+      ).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+    }
+  });
+
+  it("keeps the five levels distinct from each other", () => {
+    const levels = [...EFFORT_COLORS.entries()];
+    for (const [a, aBg] of levels) {
+      for (const [b, bBg] of levels) {
+        if (a >= b) continue;
+        expect(colorDistance(aBg, bBg), `${a} ${aBg} vs ${b} ${bBg}`).toBeGreaterThanOrEqual(MIN_SEPARATOR_DELTA);
+      }
     }
   });
 });

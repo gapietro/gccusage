@@ -4496,9 +4496,9 @@ const modelWidget = { render(context, config) {
 * rather than from configured colors — so they never appear in
 * DEFAULT_SETTINGS and a static scan of the config misses them entirely.
 *
-* These six colours are not six independent choices: each is required to
-* stay CIEDE2000-distinct from every other one a segment could end up
-* adjacent to (issues #36, #40, #45). Keeping them in one module, rather
+* These colours are not independent choices: each is required to stay
+* CIEDE2000-distinct from every other one a segment could end up adjacent
+* to (issues #36, #40, #45, #139). Keeping them in one module, rather
 * than scattered across the widgets that use them, is what lets that
 * mutual-distinctness constraint be checked in one place instead of via
 * cross-referencing comments that can drift out of sync.

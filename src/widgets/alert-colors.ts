@@ -3,9 +3,9 @@
  * rather than from configured colors — so they never appear in
  * DEFAULT_SETTINGS and a static scan of the config misses them entirely.
  *
- * These six colours are not six independent choices: each is required to
- * stay CIEDE2000-distinct from every other one a segment could end up
- * adjacent to (issues #36, #40, #45). Keeping them in one module, rather
+ * These colours are not independent choices: each is required to stay
+ * CIEDE2000-distinct from every other one a segment could end up adjacent
+ * to (issues #36, #40, #45, #139). Keeping them in one module, rather
  * than scattered across the widgets that use them, is what lets that
  * mutual-distinctness constraint be checked in one place instead of via
  * cross-referencing comments that can drift out of sync.
@@ -33,9 +33,37 @@ export const COMPACT_COUNTDOWN_RED = "#a01822"; // red (distinct from context-pe
 export const VIM_NORMAL = "#2ec27e"; // green, vs today-spend's #26a269
 export const VIM_INSERT = "#e5a50a"; // amber, vs today-spend's warn ALERT_AMBER
 
+// effort's per-level palette (#139), a cool-to-warm ramp so a costly level
+// left on by accident stands out. effort sits between model (#1a5fb4) and
+// session-cost (#26a269 / ALERT_AMBER / ALERT_RED) on line 1, and in compact
+// mode — ordered by priority, with any neighbour possibly hidden — beside
+// anything. Each value is therefore checked against EVERY background the bar
+// can paint, not just its configured neighbours (defaults.test.ts).
+export const EFFORT_LOW = "#77767b"; // grey
+export const EFFORT_MEDIUM = "#2a8ca6"; // teal-blue, vs context-percent/lines-changed #0d7377
+export const EFFORT_HIGH = "#5841c8"; // violet — the default level, so deliberately calm
+export const EFFORT_XHIGH = "#b0228c"; // magenta
+export const EFFORT_MAX = "#e66100"; // burnt orange, vs the amber/red alert pairs
+
+/**
+ * Level → background. A Map, not an object literal: an object would answer
+ * `"constructor"` or `"toString"` with an inherited function, and the level
+ * string comes from the payload.
+ */
+export const EFFORT_COLORS: ReadonlyMap<string, string> = new Map([
+  ["low", EFFORT_LOW],
+  ["medium", EFFORT_MEDIUM],
+  ["high", EFFORT_HIGH],
+  ["xhigh", EFFORT_XHIGH],
+  ["max", EFFORT_MAX],
+]);
+
+/** A level this build has never seen renders neutral rather than vanishing. */
+export const EFFORT_FALLBACK = EFFORT_LOW;
+
 /**
  * Every runtime-threshold background above, as a set. Import this — don't
- * restate the values — so a seventh runtime colour lands under any guard
+ * restate the values — so a new runtime colour lands under any guard
  * that checks against it automatically, rather than requiring someone to
  * remember to mirror it by hand.
  */
@@ -46,6 +74,11 @@ export const RUNTIME_ALERT_BACKGROUNDS = [
   COMPACT_COUNTDOWN_RED,
   VIM_NORMAL,
   VIM_INSERT,
+  EFFORT_LOW,
+  EFFORT_MEDIUM,
+  EFFORT_HIGH,
+  EFFORT_XHIGH,
+  EFFORT_MAX,
 ] as const;
 
 /**
