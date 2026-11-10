@@ -57,8 +57,14 @@ const WIDGET_MAP: Record<string, Widget> = {
   "turn-counter": turnCounterWidget,
 };
 
+/**
+ * `Object.hasOwn`, not `WIDGET_MAP[type] ?? null`: `type` comes from the
+ * user's config, and a plain-object read walks the prototype chain, so
+ * `"constructor"` returned `Object` and the renderer threw on `.render`,
+ * erasing the whole bar (#143). An unknown type is skipped, inherited or not.
+ */
 export function getWidget(type: string): Widget | null {
-  return WIDGET_MAP[type] ?? null;
+  return Object.hasOwn(WIDGET_MAP, type) ? WIDGET_MAP[type]! : null;
 }
 
 export function getWidgetTypes(): string[] {

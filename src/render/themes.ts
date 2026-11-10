@@ -56,6 +56,11 @@ export const THEMES: Record<string, PowerlineTheme> = {
   },
 };
 
+/**
+ * Own keys only: `powerline.theme` comes from the user's config, and
+ * `THEMES["constructor"]` is the inherited `Object`, which has no `segments`
+ * and threw inside `layoutPowerline`, erasing the bar (#143).
+ */
 export function getTheme(name: string): PowerlineTheme {
-  return THEMES[name] ?? THEMES["default"]!;
+  return Object.hasOwn(THEMES, name) ? THEMES[name]! : THEMES["default"]!;
 }
