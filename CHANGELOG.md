@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-11-10
+
 ### Added
 
 - `effort` widget: the session's reasoning-effort level, read from Claude
@@ -89,5 +91,6 @@ they spun off. The ones that changed user-visible behaviour:
 - Windows is not supported. `setup` writes a POSIX shell string and the Node
   path resolver does not handle `.exe`.
 
-[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/gapietro/gccusage/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/gapietro/gccusage/releases/tag/v1.0.0
