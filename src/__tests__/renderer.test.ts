@@ -1,5 +1,5 @@
 import { rmSync } from "node:fs";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderStatusline } from "../render/renderer.js";
 import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
@@ -1162,5 +1162,43 @@ describe("widget text sanitising (#115)", () => {
     // whitespace segment must appear intact between the other two, neither
     // collapsed nor removed.
     expect(stripAnsi(bar)).toBe("before   after");
+  });
+});
+
+// #141 defence in depth. A widget that returns a non-string colour (a
+// plain-object lookup keyed by payload text resolving to an inherited member)
+// used to throw inside resolveColor/chalk; main().catch() swallowed it and the
+// WHOLE bar was erased. The renderer must drop that colour and keep rendering.
+describe("a widget returning a non-string colour (#141)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const hostile = {
+    text: "vimseg",
+    fg: Object.prototype.toString as unknown as string,
+    bg: {} as unknown as string,
+  };
+
+  it.each([
+    ["full layout, powerline", 200, true],
+    ["compact layout, powerline", 60, true],
+    ["full layout, plain", 200, false],
+    ["compact layout, plain", 60, false],
+  ])("still renders the bar (%s)", async (_name, terminalWidth, powerlineEnabled) => {
+    const { vimModeWidget } = await import("../widgets/vim-mode.js");
+    vi.spyOn(vimModeWidget, "render").mockReturnValue(hostile);
+
+    const bar = renderStatusline(
+      makeContext({ terminalWidth }),
+      makeSettings({
+        powerline: { enabled: powerlineEnabled, theme: "default", separator: "▶", separatorThin: "│" },
+        lines: [{ widgets: [{ type: "model" }, { type: "vim-mode" }], flex: "left" }],
+      }),
+    );
+
+    const visible = stripAnsi(bar);
+    expect(visible).toContain("vimseg");
+    expect(visible).toContain("Sonnet");
   });
 });
