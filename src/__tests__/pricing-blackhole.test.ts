@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PRICING_REFRESH_STAMP_FILE } from "../data/pricing-refresh.js";
+import { writeGitFreeSettings } from "./helpers/git-free-settings.js";
 
 /**
  * The acceptance test for #84, driven through the real shipped bundle.
@@ -54,6 +55,11 @@ let refusedPort: number;
 beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-blackhole-"));
   sockets = [];
+  // No git in the renders: the default layout's git widgets would run real
+  // git in the runner's checkout, which takes up to ~1.1 s per call under
+  // suite load. That alone can exceed STALL_MARGIN_MS between two renders,
+  // and it has nothing to do with the pricing stall this file guards (#148).
+  writeGitFreeSettings(path.join(dir, "config"));
 
   server = net.createServer((socket) => {
     // Accept and hold. Never write, never close: the connection succeeds and
@@ -90,6 +96,7 @@ function render(pricingUrl: string, slot = "cache"): { elapsedMs: number; output
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: dir,
+    XDG_CONFIG_HOME: path.join(dir, "config"),
     XDG_CACHE_HOME: path.join(dir, slot),
     // No pricing cache is seeded, so the render sees a stale table and must
     // decide to refresh — the exact path that used to reach the network.

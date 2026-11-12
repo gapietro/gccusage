@@ -11,6 +11,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { writeGitFreeSettings } from "./helpers/git-free-settings.js";
 
 /**
  * Claude Code owns this payload format and evolves it. Before #83 the schema
@@ -155,6 +156,11 @@ beforeEach(() => {
   // render — which is how these temp dirs came back after `rmSync` deleted
   // them (TEST-002). The stamp below is what actually suppresses it.
   refresher = suppressPricingRefresh(cacheHome, refusedPricingUrl);
+  // These assert on model, cost and context, never git. Without a settings
+  // file the default layout would run real git in the runner's checkout on
+  // every render, which under load can push a two-render test past Vitest's
+  // 5 s timeout (#148).
+  writeGitFreeSettings(path.join(dir, "config"));
 });
 
 afterEach(() => {
