@@ -323,8 +323,9 @@ describe("non-finite and negative token counts (#145)", () => {
     },
   );
 
-  it("keeps the finite counts on the same line", () => {
+  it("drops only the overflowing count, keeping the finite ones on the same line", () => {
     const usage = usageOf(`{"input_tokens":1e400,"output_tokens":7}`);
+    expect(usage.input_tokens).toBeUndefined();
     expect(usage.output_tokens).toBe(7);
   });
 

@@ -4354,6 +4354,32 @@ function readEntries(now) {
 	return entries;
 }
 /**
+* The entry `trackDailyCost` would store for this render. Pure: `prev` is not
+* mutated, so the caller can discard the result if it isn't safe to write.
+*/
+function nextEntry(prev, sessionId, costUsd, source, today, now) {
+	if (!prev) return {
+		sessionId,
+		date: today,
+		costUsd,
+		baselineUsd: 0,
+		source,
+		updatedAt: now.getTime()
+	};
+	const entry = { ...prev };
+	if (entry.date !== today) {
+		entry.baselineUsd = entry.costUsd;
+		entry.date = today;
+	}
+	const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
+	if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
+	else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
+	entry.costUsd = costUsd;
+	entry.source = source;
+	entry.updatedAt = now.getTime();
+	return entry;
+}
+/**
 * Record the current session's cumulative cost and return today's total
 * across all sessions (spend since local midnight only).
 *
@@ -4370,30 +4396,14 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 	const today = dateStr(now);
 	const entries = readEntries(now);
 	if (sessionId && Number.isFinite(costUsd)) {
-		let entry = entries.find((e) => e.sessionId === sessionId);
-		if (entry) {
-			if (entry.date !== today) {
-				entry.baselineUsd = entry.costUsd;
-				entry.date = today;
-			}
-			const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
-			if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
-			else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
-			entry.costUsd = costUsd;
-			entry.source = source;
-			entry.updatedAt = now.getTime();
-		} else {
-			entry = {
-				sessionId,
-				date: today,
-				costUsd,
-				baselineUsd: 0,
-				source,
-				updatedAt: now.getTime()
-			};
-			entries.push(entry);
+		const index = entries.findIndex((e) => e.sessionId === sessionId);
+		const prev = index === -1 ? void 0 : entries[index];
+		const next = nextEntry(prev, sessionId, costUsd, source, today, now);
+		if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
+			if (index === -1) entries.push(next);
+			else entries[index] = next;
+			writeJsonAtomic(shardPath(sessionId), next);
 		}
-		writeJsonAtomic(shardPath(sessionId), entry);
 	}
 	let total = 0;
 	for (const e of entries) {

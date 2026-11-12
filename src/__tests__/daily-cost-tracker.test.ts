@@ -366,3 +366,25 @@ describe("trackDailyCost with a non-finite session cost (#145)", () => {
     expect(total).toBeCloseTo(3.0);
   });
 });
+
+// Review follow-up to #145: guarding the incoming cost is not enough, because
+// the re-baseline arithmetic can overflow on finite inputs. Here the stored
+// cost and baseline are each finite but differ by more than Number.MAX_VALUE,
+// so `accruedToday` is Infinity and a source switch would derive a baseline of
+// -Infinity, written as "baselineUsd": null and read back as 0.
+describe("trackDailyCost never writes a derived non-finite baseline", () => {
+  it("leaves the shard untouched when a source switch's re-baseline overflows", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("s", 1e308, "stdin", now);
+    trackDailyCost("s", -1e308, "stdin", now); // restart branch: baseline -1e308
+    trackDailyCost("s", 1e308, "stdin", now); // stored {1e308, -1e308}
+    const file = path.join(shardDir(), "s.json");
+    const before = fs.readFileSync(file, "utf-8");
+
+    trackDailyCost("s", 1, "calculated", now); // source switch
+
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).not.toContain("null");
+    expect(after).toBe(before);
+  });
+});

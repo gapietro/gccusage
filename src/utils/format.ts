@@ -15,7 +15,7 @@
 // identical "$?" for a model with no pricing entry — a related but distinct
 // meaning ("no price available" vs "the number was not a number"). A
 // calculated cost can be both non-finite and flagged uncertain (token sums
-// that overflow once priced, #145), so the cost widgets append their "?"
+// that overflow once priced come out Infinity or NaN, #145), so the cost widgets append their "?"
 // only to a finite amount; otherwise the two would stack into "$??".
 export function formatDollars(amount: number): string {
   if (!Number.isFinite(amount)) return "$?";

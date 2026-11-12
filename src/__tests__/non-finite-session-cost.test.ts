@@ -22,6 +22,10 @@ import {
  *   ingestion, so the cost stays finite;
  * - finite counts whose SUM overflows (two turns of 1.7e308 tokens): nothing
  *   at ingestion can see this, so the store-write guard has to hold the line.
+ *   With real pricing these prompts also cross the 200k tier, where
+ *   `Infinity - Infinity` makes the cost NaN rather than Infinity. Both are
+ *   non-finite and every guard treats them alike; the unit tests in
+ *   daily-cost-tracker.test.ts cover Infinity, -Infinity and NaN directly.
  *
  * Transcript lines are written as raw text: `JSON.stringify(Infinity)` is
  * `null`, so stringify would never feed the reader the bytes under test.
