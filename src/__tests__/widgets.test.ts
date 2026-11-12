@@ -951,3 +951,18 @@ describe("perModelBreakdownWidget approximation marker (#103)", () => {
     expect(result!.text).toBe("Opus 5:$12.40");
   });
 });
+
+// #145 review: "$?" means the amount is unknown, so it is not known to be past
+// either threshold. Infinity used to paint red and NaN the configured colour;
+// both now get the configured colour.
+describe("cost alert colours for an unknown amount", () => {
+  it.each([
+    ["session-cost", sessionCostWidget, "sessionCostUsd"],
+    ["today-spend", todaySpendWidget, "todayCostUsd"],
+  ] as const)("%s keeps the configured background for a non-finite cost", (type, widget, field) => {
+    for (const cost of [Infinity, -Infinity, NaN]) {
+      const result = widget.render(makeContext({ [field]: cost }), { type, bg: "#123456" });
+      expect(result!.bg, String(cost)).toBe("#123456");
+    }
+  });
+});

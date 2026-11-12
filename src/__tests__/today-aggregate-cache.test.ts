@@ -375,3 +375,24 @@ describe("getTodayAggregate", () => {
     expect(result.totals.inputTokens).toBe(999_999);
   });
 });
+
+// #145 review: finite per-line counts can sum past Number.MAX_VALUE. Such a
+// file's aggregate used to be written with `null` counts (JSON.stringify of
+// Infinity), which fails the cache schema and discards EVERY file's cached
+// aggregate, so the whole day was re-parsed on every render. Now only the
+// overflowing file is left out of the cache.
+describe("a file whose counts overflow", () => {
+  it("does not stop the other files from being cached", () => {
+    const good = write("good", [line("opus", 100, EARLIER_TODAY)]);
+    const bad = write("bad", [line("opus", 1.7e308, EARLIER_TODAY), line("opus", 1.7e308, EARLIER_TODAY)]);
+
+    const first = getTodayAggregate(NOW);
+    expect(Number.isFinite(first.totals.inputTokens)).toBe(false);
+    expect(fs.readFileSync(path.join(tmpDir, "cache", "gccusage", "today-aggregates.json"), "utf8")).not.toContain("null");
+
+    vi.mocked(parseJsonlFile).mockClear();
+    getTodayAggregate(NOW);
+    expect(parsedPaths()).not.toContain(good);
+    expect(parsedPaths()).toContain(bad);
+  });
+});

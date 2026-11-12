@@ -3014,6 +3014,20 @@ function addInto(target, source) {
 * always populates it, so this is just bridging the wider in-memory type to the
 * stricter persisted one — not a silent default for genuinely-missing data.
 */
+function countsFinite(c) {
+	return Number.isFinite(c.inputTokens) && Number.isFinite(c.outputTokens) && Number.isFinite(c.cacheCreationTokens) && Number.isFinite(c.cacheCreation1hTokens) && Number.isFinite(c.cacheReadTokens);
+}
+/**
+* Whether a per-file aggregate survives a round-trip through the cache file.
+* Ingestion rejects non-finite counts, but finite ones can still sum past
+* Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails
+* `TodayAggregateCacheSchema` and discards every file's cached aggregate, so
+* one such file would force the whole day to be re-parsed on every render.
+*/
+function aggregateFinite(a) {
+	const metricsFinite = (m) => countsFinite(m) && (m.premium === void 0 || countsFinite(m.premium));
+	return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
+}
 function withRequiredPremium(metrics) {
 	return {
 		...metrics,
@@ -3060,9 +3074,10 @@ function getTodayAggregate(now = new Date()) {
 		changed = true;
 	}
 	if (changed) try {
+		const persistable = Object.fromEntries(Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)));
 		writeJsonAtomic(cachePath(), {
 			date,
-			files: next
+			files: persistable
 		});
 	} catch {}
 	const byModel = new Map();
@@ -4599,8 +4614,14 @@ const EFFORT_FALLBACK = EFFORT_LOW;
 * one function so that stays true by construction (#68) — as two copies, an
 * added tier or a flipped comparison in one would desynchronise the other
 * with each widget's own tests still green.
+*
+* A non-finite cost renders as "$?": the amount is unknown, so it is not
+* known to be past either threshold. Without the guard Infinity painted red
+* and NaN (every comparison false) the configured colour, so the same "$?"
+* looked different depending on how it went wrong.
 */
 function alertBg(cost, warn, danger, configBg) {
+	if (!Number.isFinite(cost)) return configBg;
 	if (cost >= danger) return ALERT_RED;
 	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
