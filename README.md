@@ -457,8 +457,13 @@ a bad config, a stdin read failure — already show up as a `⚠ gccusage` line 
 the bar itself and do not need the flag.
 
 Other environment variables, all optional: `GCCUSAGE_STDIN_TIMEOUT_MS`
-(default 5000) bounds how long gccusage waits for Claude Code's payload, and
-`GCCUSAGE_PRICING_URL` overrides the pricing feed.
+(default 5000) bounds how long gccusage waits for Claude Code's payload;
+`GCCUSAGE_GIT_TIMEOUT_MS` (default 2000) bounds each `git` call behind the
+`git-branch` and `git-changes` widgets, which drop out of the bar when it is
+exceeded, so raise it if those segments vanish in a very large repo; and
+`GCCUSAGE_PRICING_URL` overrides the pricing feed. A timeout that is not a
+whole number of milliseconds between 1 and 2147483647 is ignored in favour of
+the default.
 
 ## Development
 
