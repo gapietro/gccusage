@@ -1983,6 +1983,16 @@ function parseJsonlContent(content) {
 	}
 	return entries;
 }
+/**
+* A usage count, or `undefined` when the transcript's value is not one.
+* `typeof === "number"` alone admits `Infinity` (`JSON.parse` overflows
+* `1e400` to it), and one infinite count made the whole session cost
+* non-finite (#145). A negative count is just as impossible and would
+* silently under-count. Either is treated like a missing field.
+*/
+function tokenCount(value) {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
 function normalizeEntry(raw) {
 	const entry = {};
 	if (typeof raw["type"] === "string") entry.type = raw["type"];
@@ -1998,15 +2008,15 @@ function normalizeEntry(raw) {
 	if (typeof model === "string") entry.model = model;
 	if (usage && typeof usage === "object") {
 		const cacheCreation = typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null ? usage["cache_creation"] : void 0;
-		const flatCacheCreation = typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : 0;
-		const raw1h = cacheCreation?.["ephemeral_1h_input_tokens"];
-		const cacheCreation1h = typeof raw1h === "number" && raw1h > 0 ? Math.min(raw1h, flatCacheCreation) : 0;
+		const flatCacheCreation = tokenCount(usage["cache_creation_input_tokens"]);
+		const raw1h = tokenCount(cacheCreation?.["ephemeral_1h_input_tokens"]);
+		const cacheCreation1h = raw1h !== void 0 ? Math.min(raw1h, flatCacheCreation ?? 0) : 0;
 		entry.usage = {
-			input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : void 0,
-			output_tokens: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : void 0,
-			cache_creation_input_tokens: typeof usage["cache_creation_input_tokens"] === "number" ? usage["cache_creation_input_tokens"] : void 0,
+			input_tokens: tokenCount(usage["input_tokens"]),
+			output_tokens: tokenCount(usage["output_tokens"]),
+			cache_creation_input_tokens: flatCacheCreation,
 			cache_creation_1h_input_tokens: cacheCreation1h,
-			cache_read_input_tokens: typeof usage["cache_read_input_tokens"] === "number" ? usage["cache_read_input_tokens"] : void 0
+			cache_read_input_tokens: tokenCount(usage["cache_read_input_tokens"])
 		};
 	}
 	return entry;
@@ -4346,11 +4356,20 @@ function readEntries(now) {
 /**
 * Record the current session's cumulative cost and return today's total
 * across all sessions (spend since local midnight only).
+*
+* A non-finite `costUsd` is not recorded: the session's shard is left exactly
+* as it was and today's total uses its last good figure. Persisting it would
+* write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
+* rejects on the next read, silently dropping the session from every bar's
+* total and losing its baseline (#145). Ingestion rejects non-finite token
+* counts, but finite ones can still overflow once priced and summed, so this
+* guard is the one that holds at the storage boundary. The caller marks
+* today's figure uncertain in that case.
 */
 function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 	const today = dateStr(now);
 	const entries = readEntries(now);
-	if (sessionId) {
+	if (sessionId && Number.isFinite(costUsd)) {
 		let entry = entries.find((e) => e.sessionId === sessionId);
 		if (entry) {
 			if (entry.date !== today) {
@@ -4420,7 +4439,7 @@ async function buildRenderContext(stdin, settings) {
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
 	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
-	const todayCostUncertain = today !== null && (today.unpriced.length > 0 || today.approximated.length > 0);
+	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -4599,7 +4618,8 @@ const effortWidget = { render(context, config) {
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
-	const amount = formatDollars(cost) + (context.sessionCostUncertain ? "?" : "");
+	const marked = context.sessionCostUncertain && Number.isFinite(cost);
+	const amount = formatDollars(cost) + (marked ? "?" : "");
 	const text = label ? `${label} ${amount}` : amount;
 	const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
@@ -4614,7 +4634,8 @@ const sessionCostWidget = { render(context, config) {
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
-	const text = `${label} ${formatDollars(cost)}${context.todayCostUncertain ? "?" : ""}`;
+	const marked = context.todayCostUncertain && Number.isFinite(cost);
+	const text = `${label} ${formatDollars(cost)}${marked ? "?" : ""}`;
 	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,

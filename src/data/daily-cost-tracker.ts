@@ -206,6 +206,15 @@ function readEntries(now: Date): SessionCostEntry[] {
 /**
  * Record the current session's cumulative cost and return today's total
  * across all sessions (spend since local midnight only).
+ *
+ * A non-finite `costUsd` is not recorded: the session's shard is left exactly
+ * as it was and today's total uses its last good figure. Persisting it would
+ * write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
+ * rejects on the next read, silently dropping the session from every bar's
+ * total and losing its baseline (#145). Ingestion rejects non-finite token
+ * counts, but finite ones can still overflow once priced and summed, so this
+ * guard is the one that holds at the storage boundary. The caller marks
+ * today's figure uncertain in that case.
  */
 export function trackDailyCost(
   sessionId: string | undefined,
@@ -216,7 +225,7 @@ export function trackDailyCost(
   const today = dateStr(now);
   const entries = readEntries(now);
 
-  if (sessionId) {
+  if (sessionId && Number.isFinite(costUsd)) {
     let entry = entries.find((e) => e.sessionId === sessionId);
     if (entry) {
       if (entry.date !== today) {

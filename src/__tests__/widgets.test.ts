@@ -113,6 +113,16 @@ describe("sessionCostWidget", () => {
     );
     expect(result!.text).toBe("Cost: $2.45?");
   });
+
+  // #145: "$?" already says the amount is unknown; the uncertainty "?" stacked
+  // on it read as "$??", which looks like a rendering bug.
+  it.each([Infinity, NaN])("renders a single marker for a %s total flagged uncertain", (cost) => {
+    const result = sessionCostWidget.render(
+      makeContext({ sessionCostUsd: cost, sessionCostUncertain: true }),
+      { type: "session-cost" },
+    );
+    expect(result!.text).toBe("$?");
+  });
 });
 
 describe("contextPercentWidget", () => {
@@ -290,6 +300,14 @@ describe("todaySpendWidget", () => {
       { type: "today-spend" },
     );
     expect(result!.text).toBe("Today: $18.72");
+  });
+
+  it("renders a single marker for a non-finite total flagged uncertain (#145)", () => {
+    const result = todaySpendWidget.render(
+      makeContext({ todayCostUsd: Infinity, todayCostUncertain: true }),
+      { type: "today-spend" },
+    );
+    expect(result!.text).toBe("Today: $?");
   });
 });
 

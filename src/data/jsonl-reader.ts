@@ -108,6 +108,17 @@ export function parseJsonlContent(content: string): JsonlEntry[] {
   return entries;
 }
 
+/**
+ * A usage count, or `undefined` when the transcript's value is not one.
+ * `typeof === "number"` alone admits `Infinity` (`JSON.parse` overflows
+ * `1e400` to it), and one infinite count made the whole session cost
+ * non-finite (#145). A negative count is just as impossible and would
+ * silently under-count. Either is treated like a missing field.
+ */
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
   const entry: JsonlEntry = {};
 
@@ -141,30 +152,20 @@ function normalizeEntry(raw: Record<string, unknown>): JsonlEntry {
       typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null
         ? (usage["cache_creation"] as Record<string, unknown>)
         : undefined;
-    const flatCacheCreation =
-      typeof usage["cache_creation_input_tokens"] === "number"
-        ? usage["cache_creation_input_tokens"]
-        : 0;
-    const raw1h = cacheCreation?.["ephemeral_1h_input_tokens"];
+    const flatCacheCreation = tokenCount(usage["cache_creation_input_tokens"]);
+    const raw1h = tokenCount(cacheCreation?.["ephemeral_1h_input_tokens"]);
     // Clamped so the subset invariant holds no matter what the file says:
     // calculateCost subtracts to get the 5-minute bucket, and a negative
     // bucket would silently UNDER-count. Never observed in real transcripts.
     const cacheCreation1h =
-      typeof raw1h === "number" && raw1h > 0 ? Math.min(raw1h, flatCacheCreation) : 0;
+      raw1h !== undefined ? Math.min(raw1h, flatCacheCreation ?? 0) : 0;
 
     entry.usage = {
-      input_tokens: typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : undefined,
-      output_tokens:
-        typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : undefined,
-      cache_creation_input_tokens:
-        typeof usage["cache_creation_input_tokens"] === "number"
-          ? usage["cache_creation_input_tokens"]
-          : undefined,
+      input_tokens: tokenCount(usage["input_tokens"]),
+      output_tokens: tokenCount(usage["output_tokens"]),
+      cache_creation_input_tokens: flatCacheCreation,
       cache_creation_1h_input_tokens: cacheCreation1h,
-      cache_read_input_tokens:
-        typeof usage["cache_read_input_tokens"] === "number"
-          ? usage["cache_read_input_tokens"]
-          : undefined,
+      cache_read_input_tokens: tokenCount(usage["cache_read_input_tokens"]),
     };
   }
 

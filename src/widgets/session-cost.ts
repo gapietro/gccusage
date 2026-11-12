@@ -10,7 +10,10 @@ export const sessionCostWidget: Widget = {
     const label = config.label ?? "";
     // The partial sum is kept and flagged rather than replaced: a session with
     // one unpriced minor model still has a mostly-correct total worth showing.
-    const amount = formatDollars(cost) + (context.sessionCostUncertain ? "?" : "");
+    // A non-finite cost already renders as "$?"; another "?" would read
+    // "$??" (#145).
+    const marked = context.sessionCostUncertain && Number.isFinite(cost);
+    const amount = formatDollars(cost) + (marked ? "?" : "");
     const text = label ? `${label} ${amount}` : amount;
     const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
     return { text, fg: config.fg, bg };

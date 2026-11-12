@@ -293,3 +293,54 @@ describe("origin.kind extraction", () => {
     expect(entry?.originKind).toBeUndefined();
   });
 });
+
+// #145: `JSON.parse` turns `1e400` into `Infinity`, and `typeof === "number"`
+// admits it, so one corrupt count used to make the whole session cost
+// non-finite. A count that is not a finite, non-negative number is treated
+// the same as a missing one. The lines are written as raw text on purpose:
+// `JSON.stringify(Infinity)` is `null`, so building them with stringify would
+// never feed the parser the bytes under test.
+describe("non-finite and negative token counts (#145)", () => {
+  function usageOf(usageJson: string) {
+    const line = `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-6","usage":${usageJson}}}`;
+    const [entry] = parseJsonlContent(line);
+    return entry!.usage!;
+  }
+
+  it.each(["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"])(
+    "treats an overflowing %s as missing",
+    (field) => {
+      const usage = usageOf(`{"input_tokens":5,"output_tokens":7,"${field}":1e400}`);
+      expect(usage[field as keyof typeof usage]).toBeUndefined();
+    },
+  );
+
+  it.each(["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"])(
+    "treats a negative %s as missing",
+    (field) => {
+      const usage = usageOf(`{"input_tokens":5,"output_tokens":7,"${field}":-3}`);
+      expect(usage[field as keyof typeof usage]).toBeUndefined();
+    },
+  );
+
+  it("keeps the finite counts on the same line", () => {
+    const usage = usageOf(`{"input_tokens":1e400,"output_tokens":7}`);
+    expect(usage.output_tokens).toBe(7);
+  });
+
+  it("treats an overflowing ephemeral_1h count as zero, not the flat total", () => {
+    const usage = usageOf(
+      `{"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_1h_input_tokens":1e400}}`,
+    );
+    expect(usage.cache_creation_input_tokens).toBe(100);
+    expect(usage.cache_creation_1h_input_tokens).toBe(0);
+  });
+
+  it("leaves no 1-hour count when the flat total itself overflows", () => {
+    const usage = usageOf(
+      `{"cache_creation_input_tokens":1e400,"cache_creation":{"ephemeral_1h_input_tokens":50}}`,
+    );
+    expect(usage.cache_creation_input_tokens).toBeUndefined();
+    expect(usage.cache_creation_1h_input_tokens).toBe(0);
+  });
+});

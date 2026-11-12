@@ -98,8 +98,13 @@ export async function buildRenderContext(
   const sessionCostUncertain =
     sessionCostSource === "calculated" &&
     (session.unpriced.length > 0 || session.approximated.length > 0);
+  // In store mode, a non-finite session cost was not recorded (#145), so
+  // Today: carries this session's last good figure rather than its current
+  // spend. Flag that instead of presenting a stale number as current.
   const todayCostUncertain =
-    today !== null && (today.unpriced.length > 0 || today.approximated.length > 0);
+    today !== null
+      ? today.unpriced.length > 0 || today.approximated.length > 0
+      : !Number.isFinite(sessionCostUsd);
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);
