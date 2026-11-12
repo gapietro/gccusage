@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-12
+
 ### Added
 
 - `GCCUSAGE_GIT_TIMEOUT_MS` (default 2000) overrides how long each `git` call
@@ -24,6 +26,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the session's daily-store entry was written unreadable. It now renders
   like any unknown model: the priced part, with the `?` uncertainty marker on
   the session total (#143).
+- A transcript token count too large to represent (such as `1e400`) or
+  negative is now treated as missing. Previously it made the calculated
+  session cost non-finite: the bar rendered `$??`, and the session's
+  daily-store entry was written unreadable, so its spend dropped out of every
+  session's `Today:` and its start-of-day baseline was lost (#145).
+- If a session cost still comes out non-finite (valid counts that overflow
+  once priced and summed), the daily store keeps the session's last good
+  entry. The session renders a single `$?`. Unless `costSource` is
+  `"calculated"`, `Today:` shows the last good figure with the `?` marker
+  (#145).
+- A cost shown as `$?` keeps its configured background colour. It used to
+  turn red when the value had overflowed, but not when it was `NaN` (#145).
+- With `costSource: "calculated"`, a transcript whose token counts overflow
+  no longer invalidates the cache of today's totals. Before, every render
+  re-read every transcript for the rest of the day (#145).
 
 ## [1.1.0] — 2026-11-10
 
@@ -110,6 +127,7 @@ they spun off. The ones that changed user-visible behaviour:
 - Windows is not supported. `setup` writes a POSIX shell string and the Node
   path resolver does not handle `.exe`.
 
-[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/gapietro/gccusage/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/gapietro/gccusage/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/gapietro/gccusage/releases/tag/v1.0.0

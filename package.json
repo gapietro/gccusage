@@ -1,6 +1,6 @@
 {
   "name": "gccusage",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Powerline-style statusline for Claude Code — model info, costs, context usage, git status, and more",
   "type": "module",
   "bin": {
