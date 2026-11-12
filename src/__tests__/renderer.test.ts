@@ -5,9 +5,13 @@ import { layoutPowerline } from "../render/powerline.js";
 import type { RenderContext } from "../types/render-context.js";
 import type { Settings } from "../config/schema.js";
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
-import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
+import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+
+// Rendered in-process, so git widgets would run git in the checkout this suite
+// runs from (#148). None of these tests asserts on git.
+const RENDER_SETTINGS = gitFreeDefaultSettings();
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -478,7 +482,7 @@ describe("default bar adjacency across the alert bands", () => {
       terminalWidth: 400,
     });
     const settings = makeSettings({
-      lines: DEFAULT_SETTINGS.lines,
+      lines: RENDER_SETTINGS.lines,
       powerline: { enabled: true, theme: "default", separator: "▶", separatorThin: "│" },
     });
     return stripAnsi(renderStatusline(context, settings)).split("\n")[0]!;

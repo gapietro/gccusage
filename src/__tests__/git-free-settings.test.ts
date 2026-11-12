@@ -36,8 +36,28 @@ describe("writeGitFreeSettings", () => {
     const defaultTypes = DEFAULT_SETTINGS.lines.flatMap((l) => l.widgets.map((w) => w.type));
 
     expect(error).toBeUndefined();
-    expect(types).not.toContain("git-branch");
-    expect(types).not.toContain("git-changes");
     expect(types).toEqual(defaultTypes.filter((t) => t !== "git-branch" && t !== "git-changes"));
+  });
+
+  // The helper strips a fixed list of git widgets. If a new git-backed widget
+  // joins the defaults, it would pass through silently and #148 would return.
+  // Pinning the whole default list makes any change to it fail here, so
+  // whoever changes the defaults has to decide whether the helper needs it.
+  it("is checked against the exact default widget list", () => {
+    const defaultTypes = DEFAULT_SETTINGS.lines.flatMap((l) => l.widgets.map((w) => w.type));
+    expect(defaultTypes).toEqual([
+      "model",
+      "effort",
+      "session-cost",
+      "context-percent",
+      "compact-countdown",
+      "project",
+      "git-branch",
+      "git-changes",
+      "lines-changed",
+      "today-spend",
+      "burn-rate",
+      "vim-mode",
+    ]);
   });
 });

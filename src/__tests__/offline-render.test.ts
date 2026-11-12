@@ -5,8 +5,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runStatusline } from "../statusline.js";
-import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { stripAnsi } from "../utils/terminal.js";
+import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+
+// Rendered in-process, so git widgets would run git in the checkout this suite
+// runs from (#148). None of these tests asserts on git.
+const RENDER_SETTINGS = gitFreeDefaultSettings();
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -55,7 +59,7 @@ function renderOffline(model: string, inputTokens: number, outputTokens: number)
   );
   return runStatusline(
     { session_id: SESSION_ID, model: { id: model, display_name: model } },
-    { ...DEFAULT_SETTINGS, costSource: "calculated" },
+    { ...RENDER_SETTINGS, costSource: "calculated" },
   );
 }
 
@@ -210,6 +214,8 @@ describe.skipIf(!distExists)("1-hour cache write pricing (#118)", () => {
     };
 
     return execFileSync(process.execPath, [DIST], {
+      // Outside any repo: a render must never run git in the checkout (#148).
+      cwd: tmpDir,
       input: JSON.stringify({
         session_id: SESSION_ID,
         model: { id: "claude-opus-5", display_name: "claude-opus-5" },

@@ -107,6 +107,8 @@ function seedShard(costUsd: number, baselineUsd: number): string {
 function render(): string {
   // No stdin cost, so the session total is calculated from the transcript.
   const out = execFileSync(process.execPath, [DIST], {
+    // Outside any repo: a render must never run git in the checkout (#148).
+    cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, model: OPUS }),
     env: {
       ...process.env,

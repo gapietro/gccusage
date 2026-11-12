@@ -170,6 +170,8 @@ afterEach(() => {
 
 function render(payload: string, sessionId: string): string {
   const out = execFileSync(process.execPath, [DIST], {
+    // Outside any repo: a render must never run git in the checkout (#148).
+    cwd: dir,
     input: payload.replace("__SID__", sessionId),
     env: {
       ...process.env,

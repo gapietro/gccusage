@@ -105,6 +105,8 @@ function render(pricingUrl: string, slot = "cache"): { elapsedMs: number; output
 
   const started = Date.now();
   const output = execFileSync(process.execPath, [DIST], {
+    // Outside any repo: a render must never run git in the checkout (#148).
+    cwd: dir,
     input: JSON.stringify({
       session_id: "blackhole-test",
       cost: { total_cost_usd: 1.23 },

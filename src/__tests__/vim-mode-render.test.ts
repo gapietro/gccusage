@@ -55,6 +55,8 @@ function render(mode: string): string {
     vim: { mode },
   });
   const out = execFileSync(process.execPath, [DIST], {
+    // Outside any repo: a render must never run git in the checkout (#148).
+    cwd: dir,
     input: payload,
     env: {
       ...process.env,
