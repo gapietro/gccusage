@@ -1,11 +1,25 @@
 import { execSync } from "node:child_process";
+import { resolveTimeoutMsFromEnv } from "./env-timeout.js";
+
+/** How long each render-time git call may take before its widget drops out. */
+export const DEFAULT_GIT_TIMEOUT_MS = 2000;
+
+/**
+ * `GCCUSAGE_GIT_TIMEOUT_MS` overrides the deadline: for a repo whose `git
+ * status` is legitimately slow, and for tests that assert on real git output
+ * and must not race this budget under suite load (#146). Read on every call,
+ * not cached, so a test can change it between renders.
+ */
+export function resolveGitTimeoutMs(): number {
+  return resolveTimeoutMsFromEnv("GCCUSAGE_GIT_TIMEOUT_MS", DEFAULT_GIT_TIMEOUT_MS);
+}
 
 function exec(cmd: string, cwd?: string): string | null {
   try {
     return execSync(cmd, {
       cwd,
       encoding: "utf-8",
-      timeout: 2000,
+      timeout: resolveGitTimeoutMs(),
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch {

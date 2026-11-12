@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import type { Readable } from "node:stream";
 import { StatusJsonSchema, type StatusJson } from "../types/status-json.js";
+import { resolveTimeoutMsFromEnv } from "../utils/env-timeout.js";
 
 /**
  * Claude Code waits 600s for the statusline command (its hook spawn helper
@@ -23,16 +24,10 @@ export const DEFAULT_STDIN_TIMEOUT_MS = 5000;
  * emits `TimeoutOverflowWarning` on stderr (invisible in statusline mode) and
  * silently clamps the delay to 1ms, so an oversized value degrades exactly
  * like a NaN one: every render times out immediately. Both ends are rejected
- * by the same clause.
+ * by the same clause, now shared with `GCCUSAGE_GIT_TIMEOUT_MS` (#146).
  */
 export function resolveTimeoutMs(): number {
-  const raw = process.env["GCCUSAGE_STDIN_TIMEOUT_MS"];
-  if (raw === undefined || raw.trim() === "") return DEFAULT_STDIN_TIMEOUT_MS;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2_147_483_647) {
-    return DEFAULT_STDIN_TIMEOUT_MS;
-  }
-  return parsed;
+  return resolveTimeoutMsFromEnv("GCCUSAGE_STDIN_TIMEOUT_MS", DEFAULT_STDIN_TIMEOUT_MS);
 }
 
 export interface StdinReadResult {

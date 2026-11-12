@@ -7,6 +7,7 @@ import type { Settings } from "../config/schema.js";
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
+import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
   return {
@@ -859,28 +860,34 @@ describe("long segments shrink to fit instead of truncating the line", () => {
     });
   }
 
-  it("shrinks the git-branch segment rather than cutting the line", () => {
-    const repoDir = makeDeterministicGitRepo();
-    try {
-      const natural = visibleLength(
-        renderStatusline(gitBranchContext(undefined, repoDir), gitBranchSettings),
-      );
-      const budget = natural - 6;
+  // Its own block so the raised git deadline (#146) reaches only the test that
+  // builds a real repo, not the rest of this describe.
+  describe("against a real git repo", { timeout: GIT_FIXTURE_TEST_TIMEOUT_MS }, () => {
+    useGitFixtureTimeout();
 
-      const line = stripAnsi(
-        renderStatusline(gitBranchContext(budget, repoDir), gitBranchSettings),
-      );
+    it("shrinks the git-branch segment rather than cutting the line", () => {
+      const repoDir = makeDeterministicGitRepo();
+      try {
+        const natural = visibleLength(
+          renderStatusline(gitBranchContext(undefined, repoDir), gitBranchSettings),
+        );
+        const budget = natural - 6;
 
-      // The line fits...
-      expect(visibleLength(line)).toBeLessThanOrEqual(budget);
-      // ...the unshrinkable segment survived intact...
-      expect(line).toContain("Today: $2.10");
-      // ...and the shrunk segment carries the ellipsis, not the line's tail.
-      expect(line).toContain("…");
-      expect(line.trimEnd().endsWith("…")).toBe(false);
-    } finally {
-      rmSync(repoDir, { recursive: true, force: true });
-    }
+        const line = stripAnsi(
+          renderStatusline(gitBranchContext(budget, repoDir), gitBranchSettings),
+        );
+
+        // The line fits...
+        expect(visibleLength(line)).toBeLessThanOrEqual(budget);
+        // ...the unshrinkable segment survived intact...
+        expect(line).toContain("Today: $2.10");
+        // ...and the shrunk segment carries the ellipsis, not the line's tail.
+        expect(line).toContain("…");
+        expect(line.trimEnd().endsWith("…")).toBe(false);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
   });
 });
 

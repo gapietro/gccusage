@@ -7,6 +7,7 @@ import type { RealPayloadFixture } from "./fixtures/real-payloads/fixture-types.
 import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { displayWidth } from "../utils/display-width.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
+import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type: "json" };
 import lowFixture from "./fixtures/real-payloads/fable5-1m-low.json" with { type: "json" };
 import earlyFixture from "./fixtures/real-payloads/opus5-1m-early.json" with { type: "json" };
@@ -121,7 +122,11 @@ describe("default layout width against real payloads", () => {
     },
   );
 
-  describe("busiest realistic bar (deterministic git repo, all seven line-2 segments)", () => {
+  // Real git runs here, so the budget is the fixture's, not Vitest's 5s
+  // default: under coverage load one of these took 4.2s (#146).
+  describe("busiest realistic bar (deterministic git repo, all seven line-2 segments)", { timeout: GIT_FIXTURE_TEST_TIMEOUT_MS }, () => {
+    useGitFixtureTimeout();
+
     // vim-mode only appears when vim mode is enabled, and it is the segment
     // that pushed line 2 over the edge in #66. Force it on, and point
     // `stdin.cwd` at a real repo (see makeDeterministicGitRepo) so
