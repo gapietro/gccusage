@@ -313,3 +313,78 @@ describe("trackDailyCost", () => {
     expect(total).toBeCloseTo(2.0);
   });
 });
+
+// #145: `JSON.stringify(Infinity|NaN)` is `null`, and `ShardSchema` rejects a
+// null `costUsd` on read, so persisting a non-finite cost silently dropped the
+// session from the store and lost its baseline. A non-finite cost must leave
+// the shard byte-for-byte as it was. These read the shard's raw bytes, not a
+// re-parsed value, because the bug was in what reached disk.
+describe("trackDailyCost with a non-finite session cost (#145)", () => {
+  function shardBytes(sessionId: string): string | null {
+    const file = path.join(shardDir(), `${sessionId}.json`);
+    return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null;
+  }
+
+  it.each([Infinity, -Infinity, NaN])("leaves an existing shard untouched for %s", (bad) => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-a", 2.5, "calculated", now);
+    const before = shardBytes("session-a");
+
+    const later = new Date(2026, 6, 29, 10, 5, 0);
+    const total = trackDailyCost("session-a", bad, "calculated", later);
+
+    expect(shardBytes("session-a")).toBe(before);
+    // Today still counts this session's last good figure.
+    expect(total).toBeCloseTo(2.5);
+  });
+
+  it("keeps a carried-over session's baseline, so yesterday's spend is never counted as today's", () => {
+    const yesterday = new Date(2026, 6, 28, 23, 0, 0);
+    trackDailyCost("session-a", 5.0, "calculated", yesterday);
+
+    const today = new Date(2026, 6, 29, 1, 0, 0);
+    trackDailyCost("session-a", Infinity, "calculated", today);
+    // Next good render: $2 spent since midnight, not $7.
+    const total = trackDailyCost("session-a", 7.0, "calculated", new Date(2026, 6, 29, 1, 5, 0));
+    expect(total).toBeCloseTo(2.0);
+  });
+
+  it("writes no shard for a new session whose first cost is non-finite", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-b", 1.5, "calculated", now);
+    const total = trackDailyCost("session-a", Infinity, "calculated", now);
+
+    expect(shardBytes("session-a")).toBeNull();
+    expect(total).toBeCloseTo(1.5);
+  });
+
+  it("keeps other sessions in today's total", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("session-a", 2.0, "stdin", now);
+    trackDailyCost("session-b", 1.0, "calculated", now);
+    const total = trackDailyCost("session-b", NaN, "calculated", now);
+    expect(total).toBeCloseTo(3.0);
+  });
+});
+
+// Review follow-up to #145: guarding the incoming cost is not enough, because
+// the re-baseline arithmetic can overflow on finite inputs. Here the stored
+// cost and baseline are each finite but differ by more than Number.MAX_VALUE,
+// so `accruedToday` is Infinity and a source switch would derive a baseline of
+// -Infinity, written as "baselineUsd": null and read back as 0.
+describe("trackDailyCost never writes a derived non-finite baseline", () => {
+  it("leaves the shard untouched when a source switch's re-baseline overflows", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    trackDailyCost("s", 1e308, "stdin", now);
+    trackDailyCost("s", -1e308, "stdin", now); // restart branch: baseline -1e308
+    trackDailyCost("s", 1e308, "stdin", now); // stored {1e308, -1e308}
+    const file = path.join(shardDir(), "s.json");
+    const before = fs.readFileSync(file, "utf-8");
+
+    trackDailyCost("s", 1, "calculated", now); // source switch
+
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).not.toContain("null");
+    expect(after).toBe(before);
+  });
+});

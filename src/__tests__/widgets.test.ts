@@ -113,6 +113,16 @@ describe("sessionCostWidget", () => {
     );
     expect(result!.text).toBe("Cost: $2.45?");
   });
+
+  // #145: "$?" already says the amount is unknown; the uncertainty "?" stacked
+  // on it read as "$??", which looks like a rendering bug.
+  it.each([Infinity, NaN])("renders a single marker for a %s total flagged uncertain", (cost) => {
+    const result = sessionCostWidget.render(
+      makeContext({ sessionCostUsd: cost, sessionCostUncertain: true }),
+      { type: "session-cost" },
+    );
+    expect(result!.text).toBe("$?");
+  });
 });
 
 describe("contextPercentWidget", () => {
@@ -290,6 +300,14 @@ describe("todaySpendWidget", () => {
       { type: "today-spend" },
     );
     expect(result!.text).toBe("Today: $18.72");
+  });
+
+  it("renders a single marker for a non-finite total flagged uncertain (#145)", () => {
+    const result = todaySpendWidget.render(
+      makeContext({ todayCostUsd: Infinity, todayCostUncertain: true }),
+      { type: "today-spend" },
+    );
+    expect(result!.text).toBe("Today: $?");
   });
 });
 
@@ -931,5 +949,20 @@ describe("perModelBreakdownWidget approximation marker (#103)", () => {
 
     const result = perModelBreakdownWidget.render(context, { type: "per-model" });
     expect(result!.text).toBe("Opus 5:$12.40");
+  });
+});
+
+// #145 review: "$?" means the amount is unknown, so it is not known to be past
+// either threshold. Infinity used to paint red and NaN the configured colour;
+// both now get the configured colour.
+describe("cost alert colours for an unknown amount", () => {
+  it.each([
+    ["session-cost", sessionCostWidget, "sessionCostUsd"],
+    ["today-spend", todaySpendWidget, "todayCostUsd"],
+  ] as const)("%s keeps the configured background for a non-finite cost", (type, widget, field) => {
+    for (const cost of [Infinity, -Infinity, NaN]) {
+      const result = widget.render(makeContext({ [field]: cost }), { type, bg: "#123456" });
+      expect(result!.bg, String(cost)).toBe("#123456");
+    }
   });
 });

@@ -97,6 +97,11 @@ export const RUNTIME_ALERT_BACKGROUNDS = [
  * one function so that stays true by construction (#68) — as two copies, an
  * added tier or a flipped comparison in one would desynchronise the other
  * with each widget's own tests still green.
+ *
+ * A non-finite cost renders as "$?": the amount is unknown, so it is not
+ * known to be past either threshold. Without the guard Infinity painted red
+ * and NaN (every comparison false) the configured colour, so the same "$?"
+ * looked different depending on how it went wrong.
  */
 export function alertBg(
   cost: number,
@@ -104,6 +109,7 @@ export function alertBg(
   danger: number,
   configBg?: string,
 ): string | undefined {
+  if (!Number.isFinite(cost)) return configBg;
   if (cost >= danger) return ALERT_RED;
   if (cost >= warn) return ALERT_AMBER;
   return configBg;

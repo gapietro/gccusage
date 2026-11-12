@@ -8,7 +8,9 @@ export const todaySpendWidget: Widget = {
   render(context: RenderContext, config: WidgetConfig): WidgetOutput | null {
     const cost = context.todayCostUsd;
     const label = config.label ?? "Today:";
-    const text = `${label} ${formatDollars(cost)}${context.todayCostUncertain ? "?" : ""}`;
+    // As session-cost: "$?" already carries the marker (#145).
+    const marked = context.todayCostUncertain && Number.isFinite(cost);
+    const text = `${label} ${formatDollars(cost)}${marked ? "?" : ""}`;
     const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
     return { text, fg: config.fg, bg };
   },

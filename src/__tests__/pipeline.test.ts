@@ -473,6 +473,46 @@ describe("unpriced models", () => {
   });
 });
 
+// #145: two turns whose prompt sizes are each finite but sum past
+// Number.MAX_VALUE, so the calculated session cost is non-finite. Raw text,
+// not JSON.stringify, to keep the exact numbers the reader sees.
+function writeOverflowingTranscript(sessionId: string): void {
+  const projectDir = path.join(tmpDir, ".claude", "projects", "proj");
+  fs.mkdirSync(projectDir, { recursive: true });
+  const line = (id: string) =>
+    `{"type":"assistant","timestamp":"${new Date().toISOString()}","sessionId":"${sessionId}",` +
+    `"message":{"id":"${id}","model":"test-model","usage":{"input_tokens":1.7e308,"output_tokens":0}}}`;
+  fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), `${line("m1")}\n${line("m2")}\n`);
+}
+
+describe("non-finite calculated session cost (#145)", () => {
+  it("marks Today: uncertain in store mode when the session cost could not be recorded", async () => {
+    writeOverflowingTranscript("session-overflow");
+
+    const context = await buildRenderContext({ session_id: "session-overflow" }, settingsWith("auto"));
+
+    expect(Number.isFinite(context.sessionCostUsd)).toBe(false);
+    expect(context.todayCostUncertain).toBe(true);
+    expect(fs.existsSync(shardPath("session-overflow"))).toBe(false);
+  });
+
+  it("leaves Today: certain when stdin supplied the session cost", async () => {
+    // The flag keys on the cost that was actually tracked, not on the
+    // transcript's calculated figure: here the overflowing transcript is
+    // never what reaches the store.
+    writeOverflowingTranscript("session-overflow-stdin");
+
+    const context = await buildRenderContext(
+      { session_id: "session-overflow-stdin", cost: { total_cost_usd: 4.2 } },
+      settingsWith("auto"),
+    );
+
+    expect(context.sessionCostUsd).toBe(4.2);
+    expect(context.todayCostUncertain).toBe(false);
+    expect(context.todayCostUsd).toBeCloseTo(4.2);
+  });
+});
+
 describe("today's transcripts are read only when they are used (#94)", () => {
   const stdinWithCost: StatusJson = {
     session_id: "sess-current",

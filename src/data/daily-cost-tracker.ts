@@ -204,8 +204,58 @@ function readEntries(now: Date): SessionCostEntry[] {
 }
 
 /**
+ * The entry `trackDailyCost` would store for this render. Pure: `prev` is not
+ * mutated, so the caller can discard the result if it isn't safe to write.
+ */
+function nextEntry(
+  prev: SessionCostEntry | undefined,
+  sessionId: string,
+  costUsd: number,
+  source: CostSource,
+  today: string,
+  now: Date,
+): SessionCostEntry {
+  if (!prev) {
+    return { sessionId, date: today, costUsd, baselineUsd: 0, source, updatedAt: now.getTime() };
+  }
+  const entry = { ...prev };
+  if (entry.date !== today) {
+    // New day: carry the session forward, resetting its baseline to the
+    // last cumulative cost so only post-midnight spend counts as today's.
+    entry.baselineUsd = entry.costUsd;
+    entry.date = today;
+  }
+  const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
+  if (entry.source !== undefined && entry.source !== source) {
+    // Stdin and JSONL-calculated costs use different scales, so a drop
+    // across a source switch is not a restart. Re-baseline so today's
+    // accrued spend carries over unchanged into the new scale.
+    entry.baselineUsd = costUsd - accruedToday;
+  } else if (costUsd < entry.costUsd) {
+    // A restarted session reuses the ID with a reset cumulative cost
+    // (cumulative cost never decreases within one process). Fold the
+    // already-accrued today delta into the baseline (as a negative
+    // offset) so prior spend since midnight is preserved.
+    entry.baselineUsd = -accruedToday;
+  }
+  entry.costUsd = costUsd;
+  entry.source = source;
+  entry.updatedAt = now.getTime();
+  return entry;
+}
+
+/**
  * Record the current session's cumulative cost and return today's total
  * across all sessions (spend since local midnight only).
+ *
+ * A non-finite `costUsd` is not recorded: the session's shard is left exactly
+ * as it was and today's total uses its last good figure. Persisting it would
+ * write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
+ * rejects on the next read, silently dropping the session from every bar's
+ * total and losing its baseline (#145). Ingestion rejects non-finite token
+ * counts, but finite ones can still overflow once priced and summed, so this
+ * guard is the one that holds at the storage boundary. The caller marks
+ * today's figure uncertain in that case.
  */
 export function trackDailyCost(
   sessionId: string | undefined,
@@ -216,43 +266,21 @@ export function trackDailyCost(
   const today = dateStr(now);
   const entries = readEntries(now);
 
-  if (sessionId) {
-    let entry = entries.find((e) => e.sessionId === sessionId);
-    if (entry) {
-      if (entry.date !== today) {
-        // New day: carry the session forward, resetting its baseline to the
-        // last cumulative cost so only post-midnight spend counts as today's.
-        entry.baselineUsd = entry.costUsd;
-        entry.date = today;
-      }
-      const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
-      if (entry.source !== undefined && entry.source !== source) {
-        // Stdin and JSONL-calculated costs use different scales, so a drop
-        // across a source switch is not a restart. Re-baseline so today's
-        // accrued spend carries over unchanged into the new scale.
-        entry.baselineUsd = costUsd - accruedToday;
-      } else if (costUsd < entry.costUsd) {
-        // A restarted session reuses the ID with a reset cumulative cost
-        // (cumulative cost never decreases within one process). Fold the
-        // already-accrued today delta into the baseline (as a negative
-        // offset) so prior spend since midnight is preserved.
-        entry.baselineUsd = -accruedToday;
-      }
-      entry.costUsd = costUsd;
-      entry.source = source;
-      entry.updatedAt = now.getTime();
-    } else {
-      entry = {
-        sessionId,
-        date: today,
-        costUsd,
-        baselineUsd: 0,
-        source,
-        updatedAt: now.getTime(),
-      };
-      entries.push(entry);
+  if (sessionId && Number.isFinite(costUsd)) {
+    const index = entries.findIndex((e) => e.sessionId === sessionId);
+    const prev = index === -1 ? undefined : entries[index];
+    const next = nextEntry(prev, sessionId, costUsd, source, today, now);
+    // The argument check above is not sufficient on its own: two finite stored
+    // values can differ by more than Number.MAX_VALUE, so the re-baseline
+    // arithmetic in `nextEntry` can still produce an infinite baseline, which
+    // would be written as null and read back as 0. Check what would actually
+    // be written, and on failure keep both the shard and the in-memory entry
+    // unchanged.
+    if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
+      if (index === -1) entries.push(next);
+      else entries[index] = next;
+      writeJsonAtomic(shardPath(sessionId), next);
     }
-    writeJsonAtomic(shardPath(sessionId), entry);
   }
 
   let total = 0;

@@ -110,6 +110,29 @@ function addInto(target: TokenMetrics, source: TokenMetrics): void {
  * always populates it, so this is just bridging the wider in-memory type to the
  * stricter persisted one — not a silent default for genuinely-missing data.
  */
+function countsFinite(c: TokenCounts): boolean {
+  return (
+    Number.isFinite(c.inputTokens) &&
+    Number.isFinite(c.outputTokens) &&
+    Number.isFinite(c.cacheCreationTokens) &&
+    Number.isFinite(c.cacheCreation1hTokens) &&
+    Number.isFinite(c.cacheReadTokens)
+  );
+}
+
+/**
+ * Whether a per-file aggregate survives a round-trip through the cache file.
+ * Ingestion rejects non-finite counts, but finite ones can still sum past
+ * Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails
+ * `TodayAggregateCacheSchema` and discards every file's cached aggregate, so
+ * one such file would force the whole day to be re-parsed on every render.
+ */
+function aggregateFinite(a: FileAggregate): boolean {
+  const metricsFinite = (m: TokenMetrics) =>
+    countsFinite(m) && (m.premium === undefined || countsFinite(m.premium));
+  return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
+}
+
 function withRequiredPremium(metrics: TokenMetrics): TokenMetrics & { premium: TokenCounts } {
   return { ...metrics, premium: metrics.premium ?? emptyCounts() };
 }
@@ -165,7 +188,12 @@ export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
 
   if (changed) {
     try {
-      writeJsonAtomic(cachePath(), { date, files: next });
+      // An overflowing file is used for this render but not cached; it is
+      // re-parsed next time while every other file is still a cache hit.
+      const persistable = Object.fromEntries(
+        Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)),
+      );
+      writeJsonAtomic(cachePath(), { date, files: persistable });
     } catch {
       // The next render recomputes; a cache that cannot be written costs
       // speed, never correctness.
