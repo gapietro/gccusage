@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { getWidgetTypes, getWidget } from "../widgets/registry.js";
 import { WIDGET_EXPECTATIONS } from "./fixtures/widget-expectations.js";
+import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 import { contextFromFixture } from "./fixtures/context-from-fixture.js";
 import type { RealPayloadFixture } from "./fixtures/real-payloads/fixture-types.js";
 import midFixture from "./fixtures/real-payloads/opus5-1m-mid.json" with { type: "json" };
@@ -79,7 +80,11 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-describe("widget matrix against a real payload", () => {
+// git-branch and git-changes are asserted exactly against the scratch repo
+// below, so they get the test git deadline, not the 2s production one (#146).
+describe("widget matrix against a real payload", { timeout: GIT_FIXTURE_TEST_TIMEOUT_MS }, () => {
+  useGitFixtureTimeout();
+
   const fx = midFixture as unknown as RealPayloadFixture;
 
   for (const [type, expected] of Object.entries(WIDGET_EXPECTATIONS)) {

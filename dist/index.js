@@ -923,6 +923,32 @@ const StatusJsonSchema = object({
 });
 
 //#endregion
+//#region src/utils/env-timeout.ts
+/**
+* Read a millisecond deadline from an environment variable, falling back to
+* `fallback` for anything that is not an integer in [1, 2^31-1].
+*
+* One rule for every `GCCUSAGE_*_TIMEOUT_MS` override, because both consumers
+* fail the same silent way on a bad value — the bar loses something on every
+* render with no message — just through different Node APIs:
+*
+* - `setTimeout` (stdin, #87) fires immediately for NaN, and past 2^31-1 emits
+*   an invisible `TimeoutOverflowWarning` and clamps the delay to 1ms.
+* - `execSync` (git, #146) treats 0 as NO deadline, and throws
+*   `ERR_OUT_OF_RANGE` for NaN, negative, fractional and huge values — which
+*   the git helper's catch turns into "not a repo".
+*
+* Malformed values degrade to the default rather than being coerced.
+*/
+function resolveTimeoutMsFromEnv(name, fallback$1) {
+	const raw = process.env[name];
+	if (raw === void 0 || raw.trim() === "") return fallback$1;
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) return fallback$1;
+	return parsed;
+}
+
+//#endregion
 //#region src/data/stdin-reader.ts
 /**
 * Claude Code waits 600s for the statusline command (its hook spawn helper
@@ -944,14 +970,10 @@ const DEFAULT_STDIN_TIMEOUT_MS = 5e3;
 * emits `TimeoutOverflowWarning` on stderr (invisible in statusline mode) and
 * silently clamps the delay to 1ms, so an oversized value degrades exactly
 * like a NaN one: every render times out immediately. Both ends are rejected
-* by the same clause.
+* by the same clause, now shared with `GCCUSAGE_GIT_TIMEOUT_MS` (#146).
 */
 function resolveTimeoutMs() {
-	const raw = process.env["GCCUSAGE_STDIN_TIMEOUT_MS"];
-	if (raw === void 0 || raw.trim() === "") return DEFAULT_STDIN_TIMEOUT_MS;
-	const parsed = Number(raw);
-	if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) return DEFAULT_STDIN_TIMEOUT_MS;
-	return parsed;
+	return resolveTimeoutMsFromEnv("GCCUSAGE_STDIN_TIMEOUT_MS", DEFAULT_STDIN_TIMEOUT_MS);
 }
 /**
 * The old signature resolved `""` on timeout, which the caller could not tell
@@ -4797,12 +4819,23 @@ const contextPercentWidget = { render(context, config) {
 
 //#endregion
 //#region src/utils/git.ts
+/** How long each render-time git call may take before its widget drops out. */
+const DEFAULT_GIT_TIMEOUT_MS = 2e3;
+/**
+* `GCCUSAGE_GIT_TIMEOUT_MS` overrides the deadline: for a repo whose `git
+* status` is legitimately slow, and for tests that assert on real git output
+* and must not race this budget under suite load (#146). Read on every call,
+* not cached, so a test can change it between renders.
+*/
+function resolveGitTimeoutMs() {
+	return resolveTimeoutMsFromEnv("GCCUSAGE_GIT_TIMEOUT_MS", DEFAULT_GIT_TIMEOUT_MS);
+}
 function exec(cmd, cwd) {
 	try {
 		return execSync(cmd, {
 			cwd,
 			encoding: "utf-8",
-			timeout: 2e3,
+			timeout: resolveGitTimeoutMs(),
 			stdio: [
 				"pipe",
 				"pipe",

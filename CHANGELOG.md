@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GCCUSAGE_GIT_TIMEOUT_MS` (default 2000) overrides how long each `git` call
+  behind the `git-branch` and `git-changes` widgets may take before the
+  segment drops out, for repos where `git status` is legitimately slow (#146).
+
 ### Fixed
 
 - A widget `type` or `powerline.theme` named after a JavaScript built-in
