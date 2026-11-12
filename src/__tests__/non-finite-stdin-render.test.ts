@@ -4,10 +4,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { runStatusline } from "../statusline.js";
 import { parseStatusJson } from "../data/stdin-reader.js";
-import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { formatTokens, formatDuration } from "../utils/format.js";
 import { stripAnsi } from "../utils/terminal.js";
 import type { StatusJson } from "../types/status-json.js";
+import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+
+// Rendered in-process, so git widgets would run git in the checkout this suite
+// runs from (#148). None of these tests asserts on git.
+const RENDER_SETTINGS = gitFreeDefaultSettings();
 
 // Pricing normally comes from the network; keep it out of this test entirely
 // (the point here is stdin-sourced cost, which never touches the pricing
@@ -59,7 +63,7 @@ describe("non-finite stdin cost does not put \"Infinity\" on the bar (#131)", ()
       cost: { total_cost_usd: 1e400, total_duration_ms: 3_600_000 },
     };
 
-    const output = await runStatusline(stdin, DEFAULT_SETTINGS);
+    const output = await runStatusline(stdin, RENDER_SETTINGS);
 
     expect(output).not.toContain("Infinity");
     // Positive check, not just an absence check: the uncertainty marker
@@ -95,7 +99,7 @@ describe("non-finite stdin numbers survive the schema (#137)", () => {
       }
     }`);
 
-    const output = await runStatusline(stdin!, DEFAULT_SETTINGS);
+    const output = await runStatusline(stdin!, RENDER_SETTINGS);
 
     // Rendered `[====------] 42% (InfinityM)` before the fix: an infinite
     // window size passes `windowSize && windowSize > 0` and reaches
@@ -128,7 +132,7 @@ describe("non-finite stdin numbers survive the schema (#137)", () => {
       }
     }`);
 
-    const output = await runStatusline(stdin!, DEFAULT_SETTINGS);
+    const output = await runStatusline(stdin!, RENDER_SETTINGS);
 
     expect(output).not.toContain("Infinity"); // was `+Infinity -2`
     // The sibling count survives, so this cannot pass by the widget going

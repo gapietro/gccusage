@@ -78,6 +78,8 @@ function writeTranscript(models: string[]): void {
 
 function render(stdin: Record<string, unknown>): string {
   const out = execFileSync(process.execPath, [DIST], {
+    // Outside any repo: a render must never run git in the checkout (#148).
+    cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, ...stdin }),
     env: {
       ...process.env,

@@ -56,6 +56,8 @@ afterEach(() => {
 function render(sessionId: string, costUsd: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [DIST], {
+      // Outside any repo: a render must never run git in the checkout (#148).
+      cwd: dir,
       // HOME isolates it from the user's transcripts and settings;
       // XDG_CACHE_HOME isolates the daily store this test is measuring.
       env: {

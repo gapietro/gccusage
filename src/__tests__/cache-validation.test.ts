@@ -8,8 +8,12 @@ import { trackDailyCost } from "../data/daily-cost-tracker.js";
 import { loadPricingCacheEntry, savePricingCache, PRICING_CACHE_VERSION } from "../cache/pricing-cache.js";
 import { loadBlockCache } from "../cache/block-cache.js";
 import { runStatusline } from "../statusline.js";
-import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import { getTerminalWidth } from "../utils/terminal.js";
+import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+
+// Rendered in-process, so git widgets would run git in the checkout this suite
+// runs from (#148). None of these tests asserts on git.
+const RENDER_SETTINGS = gitFreeDefaultSettings();
 
 // Pricing normally comes from the network. Pin it so the render is
 // deterministic; every other boundary (transcripts, the daily store, the
@@ -504,7 +508,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
       JSON.stringify({ sessionId: "ghost", date: today, costUsd: "not-a-number", updatedAt: now.getTime() }),
     );
 
-    const output = await runStatusline(stdin, DEFAULT_SETTINGS);
+    const output = await runStatusline(stdin, RENDER_SETTINGS);
 
     expect(output).not.toContain("NaN");
     expect(output).not.toContain("undefined");
@@ -534,7 +538,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
         model: { id: "claude-opus-4-5", display_name: "Opus" },
         cost: { total_cost_usd: 1.5 },
       },
-      DEFAULT_SETTINGS,
+      RENDER_SETTINGS,
     );
 
     expect(fs.existsSync(immortal)).toBe(false);
@@ -559,7 +563,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
         model: { id: "claude-opus-4-5", display_name: "Opus" },
         cost: { total_cost_usd: 1.5 },
       },
-      DEFAULT_SETTINGS,
+      RENDER_SETTINGS,
     );
 
     expect(fs.existsSync(absurd)).toBe(false);
@@ -584,7 +588,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
         model: { id: "claude-opus-4-5", display_name: "Opus" },
         cost: { total_cost_usd: 1.5 },
       },
-      DEFAULT_SETTINGS,
+      RENDER_SETTINGS,
     );
 
     expect(output).not.toContain("Infinity");

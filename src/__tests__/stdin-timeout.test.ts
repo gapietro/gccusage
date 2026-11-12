@@ -180,6 +180,8 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
   }): Promise<{ stdout: string; status: number | null }> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [DIST], {
+        // Outside any repo: a render must never run git in the checkout (#148).
+        cwd: dir,
         env: {
           ...process.env,
           HOME: dir,
