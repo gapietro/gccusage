@@ -41,6 +41,135 @@
 | 2026-11-12 | — | #145 | Fixed on branch `fix/145-non-finite-cost`, PR #150. A non-finite calculated session cost reached `trackDailyCost`, which wrote it as `"costUsd": null` (`JSON.stringify(Infinity)`). `ShardSchema` rejects that on read, so the session **silently dropped out of every bar's `Today:` and lost its baseline**, and the bar rendered `$??`. Reproduced through the shipped bundle before the fix: ` Opus 4.6 ▶ $?? ▶ Today: $? ▶`. **Two guards, by the developer's decision on the issue**: ingestion (`jsonl-reader.ts` `tokenCount`: finite and `>= 0`, otherwise treated as missing), and the store write. The ingestion guard alone is insufficient: finite counts (two turns of 1.7e308) still overflow once summed and priced. With real pricing they cross the 200k tier, where `Infinity - Infinity` makes the cost **NaN**, not Infinity. **Found in code review, not the plan**: the first store guard checked only the incoming `costUsd`. Stored cost and baseline can each be finite yet differ by more than `Number.MAX_VALUE`, so the source-switch or restart re-baseline derived `baselineUsd: -Infinity`, written as null and **read back as 0 by `v.fallback`**: not dropped, but confidently wrong with no `?`. Reachable only with corrupt ~±1e308 stdin costs, since the stdin schema has no minimum. Fixed by building the update in a pure `nextEntry()` and committing it to memory and disk only if every number in it is finite. `Today:` is marked `?` in store mode when the session cost wasn't recorded. The flag keys on the **tracked** cost (`sessionCostUsd`), not `calculatedSessionCost`; a pipeline test pins that, and keying it on the calculated cost turned it red. The cost widgets append `?` only to a finite amount, so `$?` never becomes `$??`. That corrected `format.ts`'s comment claiming the two could not collide. **Also fixed from review**, both pre-existing: `alertBg` painted an Infinity `$?` red but a NaN one in the configured colour (now both configured). `today-aggregates.json` received `null` counts from an overflowing file, failing the schema and discarding *every* file's cached aggregate, so calculated mode re-parsed the whole day on every render. Now only that file is left uncached; side effect: while such a file exists the cache is rewritten on each render. Each guard removed in turn reddened named tests (store write 8, ingestion 12, `Today:` flag 1). Shard assertions read raw bytes; transcript fixtures are raw text, because `JSON.stringify` would turn `Infinity` into `null` and never feed the parser the bytes under test (the #133 trap). 1062 → 1091 tests. **Accepted limitation**: an overflowing count is 0 for its turn, an unflagged under-count, matching how a non-numeric count was already handled |
 | 2026-11-12 | — | #148 | Fixed on branch `fix/148-blackhole-git-noise`. `pricing-blackhole`'s timing comparison spawned two default-layout renders with no settings file, so `git-branch`/`git-changes` ran **real git in the runner's checkout**: noise of up to ~1.1 s per call under load (#146 measurements), against a 1000 ms margin guarding a pricing stall that git has nothing to do with. `stdin-resilience`'s bundle renders had the same incidental git; its two-render test is bounded only by Vitest's 5 s timeout. **Reproduced with a slow-git shim before fixing** (2.5 s per call, first on `PATH`, logging each call): both named tests failed, matching the issue (2/17), with each render ~4.1 s. Fix: a test helper (`helpers/git-free-settings.ts`) gives the **default layout minus the two git widgets**, so every other default widget is still exercised. Both tests load it via `XDG_CONFIG_HOME`; pricing-blackhole previously didn't set that at all, so an exported `XDG_CONFIG_HOME` would have loaded the developer's real config into it. Under the shim: 17/17 green and **0 git calls**, which also proves the file is loaded. Count shim logs with `awk 'END{print NR}'`: the rtk hook mangles `wc -l` output here (it printed 0 for a 337-line log). Two helper tests: one checks the file loads with no config error, because a validation failure would silently fall back to the default layout and bring git back; the other pins the **exact default widget list**, so a new git-backed default widget can't slip past the helper's fixed strip list. **Criterion 2 sweep, every bundle-spawning test**: `non-finite-session-cost`, `prototype-key-render` and `statusline-width` already used git-free layouts; `version` and `cli-exit-code` never render. `stdin-timeout`, `vim-mode-render`, `offline-render` and `concurrency` still render the true default layout on purpose: it's the only end-to-end coverage of the no-settings path. None times a render or chains renders against the 5 s default, so they're out of scope. Under the shim they pass with ~0.9 s headroom. **Found in review and fixed here (pre-existing)**: default-layout renders ran `git status` **in the developer's checkout**, 95 calls per suite run, 8 at once in `concurrency`. `git status` takes `index.lock` opportunistically, so a `git commit` during the suite could fail with "index.lock exists". Every render spawn now gets `cwd` set to its temp dir, and the four in-process tests that rendered `DEFAULT_SETTINGS` (`cache-validation`, `non-finite-stdin-render`, `offline-render`, `renderer`; none asserts on git) use the helper's layout. Measured with a call-logging shim that records each call's `$PWD`: **95 → 0 git calls in the repo**; the remaining calls all run in temp fixture dirs. `git-timeout` and `widget-reality` also fail under the 2.5 s shim, in `beforeAll` while building fixture repos. They're out of scope because they don't spawn the bundle: they run git in-process to build fixtures. 1091 → 1093 tests |
 
+## Audit — 2026-11-16 @ 3d3740e
+Mode: grade
+Score: 83/100 (B)  Caps applied: **no-mandatory-CI (max B, binding in principle, at the edge of B at this score)**
+
+Previous: 86/100 (B) at 7e6becd, 2026-08-05. The drop to 83 is mostly **discovery, not regression**. REL-005 and COR-005, the two most serious findings, both predate the previous audit. They were found this time because correctness and reliability got a dedicated reviewer. Since 7e6becd: 16 commits, ~500 lines of non-test source, releases 1.0.0 → 1.2.0, 922 → 1093 tests.
+
+Rubric note: the foundry `servicenow-grade` rubric is ServiceNow-specific (modality fit, Glide discipline, agent prompts), so it doesn't apply to a Node CLI. This grade reuses the nine generic categories of the two previous grades, so movement stays comparable. The ledger lives here, not in a separate `GRADE.md`, by this repo's precedent. Neither earlier grade recorded weights, and this one weights the nine categories **equally**. Recomputed the same way, the previous grade's categories give 85.2.
+
+Baseline: branch `main`, worktree clean, Node v26.5.0, npm 11.17.0. Four read-only reviewers ran in parallel (security, correctness/reliability, code health, tests/docs/governance), plus direct execution. AUDIT.md provenance is trusted: every entry was written in this environment.
+
+Executed (exit codes captured, not eyeballed):
+- **Build, lint, typecheck:** `npm run typecheck`, `typecheck:scripts` and `lint` all exit 0. `npm run build` in a scratch worktree is byte-identical to the committed bundle (md5 `70746ffb…`). `npm run schema` regenerates `config-schema.json` identically.
+- **Tests and coverage:** `npm test` passed 1093/1093 on 3 consecutive local runs with 0 flakes. Coverage is 97.78% statements and 90.69% branches; the per-file 70% gate is green and the lowest file is `block-cache.ts` at 78.12%.
+- **Dependencies:** `npm audit` reports 19, up from 9 (2 critical / 10 high, all dev-chain: vitest, tinypool, tsdown). `npm audit --omit=dev` reports 1 moderate, valibot, which is unreachable: no `flatten` or `emoji` in the bundle.
+- **Shipped bundle, production path:** render cold and warm; invalid JSON, empty stdin, array root and null root all exit 0 with a diagnostic line (empty stdin renders `$0.00` by design, REL-003). `--version` prints `1.2.0`; `-h`; `today`; an unknown subcommand exits 1. `setup` runs twice: idempotent, with a `.bak`.
+- **Failure timelines:**
+  1. 12 sessions × 8 rounds concurrent (`harness:concurrency`): 0 lost updates.
+  2. 40 SIGKILLs mid-write: 0 corrupt files, 0 orphaned temp files in that run. The real cache *does* hold an orphan from October; see REL-008.
+  3. Blackholed pricing endpoint: covered by `pricing-blackhole`, green.
+- **Sabotage:** 11 of the fixes from #141–#148 were each reverted, and every one turned its named tests red.
+- **Git shim:** with a git that logs each call's `$PWD`, a full suite run made 0 calls in the checkout. #148 holds.
+- **CI:** 23/23 green since the repo went public, with no reruns.
+
+**Ledger corrections** (made out loud, not silently):
+1. The 2026-08-02 OPS-002 row says "every render-path I/O site is individually defended". **That's false**: the daily-shard write is not (REL-005).
+2. The #145 row says an overflowing transcript means "the cache is rewritten on each render". **That understates it**: the whole overflowing file is also re-parsed on every cache miss, measured at +135 ms on a 20 MB transcript.
+3. "0 orphaned temp files" held for one 40-kill run only. A killed write can and does leave one (REL-008).
+
+Deferred: none yet. Remediation follows in its own section.
+Accepted risks: unchanged (#91's >10× price move; #125's latent tier-stripping; the exact-key pricing poisoning residual). None were re-reported.
+
+### Grading
+
+| Category | Weight | Raw | Prev | Δ | Rationale |
+|---|---|---|---|---|---|
+| Product coherence | 1/9 | 84 | 86 | −2 | `gccusage today` and the bar's `Today:` are different figures, and that isn't documented. The README promises a `?` on `Today:` that the default mode never shows (COR-009). The calculated burn rate disagrees with the session total beside it (COR-008) |
+| Architecture | 1/9 | 87 | 89 | −2 | Still one owner for each write. Guards are now duplicated, though: the finite-schema helper is private (COR-006), there are two local-date owners and two copies of the `?` suffix rule (MAINT-003), and the pipeline re-derives the tracker's skip decision (COR-009) |
+| Correctness | 1/9 | 80 | 90 | −10 | Two processes on one session inflate `Today:` without bound, with no marker (COR-005). Subagent transcripts are unread in calculated mode (COR-007). Burn rate (COR-008). Persisted timestamps latch caches (COR-006). Offsetting this, the non-finite and prototype-key classes were closed at ingestion (#143, #145) |
+| Security & privacy | 1/9 | 86 | 90 | −4 | `setup` changes settings.json from 0600 to 0644, and its `.bak` copy too (SEC-003). The config path is relative when HOME is unset, which allows a planted `custom-command` (SEC-004, narrow). No secrets in 110 commits. CI uses `pull_request` with read-only permissions |
+| Reliability & concurrency | 1/9 | 78 | 84 | −6 | One failed shard write erases the whole bar on every render (REL-005). A widget throw erases the bar (REL-007). An uncaught refresher spawn error (REL-006). Orphaned temp files (REL-008). Atomic writes and the per-session shards hold |
+| Testing | 1/9 | 90 | 86 | +4 | 1093 tests, 11/11 sabotages caught, raw-byte assertions, the suite isolated from git, network and the real cache. Weaknesses: one diagnostic formatter is never executed (TEST-003), and the env and spawn scaffolding is copied about 9 times (TEST-004) |
+| Maintainability | 1/9 | 88 | 92 | −4 | Seven stale or misattached comments, including one stating the exact fallacy behind COR-006. Two dead type exports. Badge tooling with no verification (CLEAN-003) |
+| Operations & observability | 1/9 | 78 | 62 | +16 | `GCCUSAGE_DEBUG`, a stdin-error diagnostic, CI running and required, three tagged releases. Against that: `enforce_admins` is still off (OPS-008), there's no Dependabot, and CI doesn't test Node 26 (OPS-010) |
+| Docs & governance | 1/9 | 80 | 88 | −8 | The CHANGELOG omits 1.1.0 changes (DOC-002). The README, schema and help text have drifted (DOC-003). The documented global install fails (OPS-009) |
+| **Total** | | **83.4** | 85.2* | −1.8 | *previous categories recomputed with equal weights; the reported figure was 86 |
+
+### Cap analysis
+- **No mandatory CI (max B): applies.**
+  - `enforce_admins` is still `false` and there are no rulesets.
+  - **8 commits went to `main` without a PR after the last audit named this the one live cap.** The last was `6ef1c50` on 2026-08-15.
+  - Two of them, `79d8eb3` and `ccfee31`, never had a CI run at all. `b148b97`, the commit tagged **v1.0.0**, has only billing-era failed runs that never executed.
+  - Mitigation, which doesn't lift the cap: every change since 2026-11-10 (#140–#152) went through a green, required PR.
+- **Secrets committed / exploitable critical vulnerability (F): doesn't apply.**
+  - No credentials in 110 commits.
+  - SEC-004 is reachable only with HOME unset or a relative XDG value, so it's a finding, not a cap.
+  - 29 commits record a personal, non-noreply author address. That's informational, and the address is deliberately not quoted here.
+- **Primary workflow broken (C): doesn't apply.** REL-005 is conditional on a root-owned or full cache directory, so it's a P1 finding rather than a cap.
+- **No validation at trust boundaries (B−): doesn't apply.** Every external input is schema-validated. COR-006 is a gap in coverage, not an absence.
+- **Race-prone processing (max B, from 2026-08-01): doesn't apply.** REL-001 holds (0 lost updates in 96 concurrent renders). COR-005 is a modelling error, not a write race.
+- **ServiceNow-specific caps: N/A.** No GlideRecord, sys_ids, AI agents, Fluent, ATF or classic artifacts. This is a Node CLI.
+
+### Findings
+
+| ID | Pri | Conf | Title |
+|---|---|---|---|
+| REL-005 | P1 | High | The daily-shard write in `trackDailyCost` isn't caught: EACCES, ENOTDIR or ENOSPC erases the whole bar on every render |
+| COR-005 | P1 | High mechanism / Med frequency | Two Claude Code processes on one `session_id` (`--resume` in a second terminal) each look like a restart to the other, so `Today:` grows without bound with no marker |
+| OPS-008 | P1 | High | `enforce_admins: false`: 8 direct pushes after the last audit flagged it, and 2 commits never had CI |
+| COR-006 | P2 | High | Persisted timestamps (pricing, statusline and block caches, the refresh stamp, `updatedAt`) accept `1e400` or a future time, and age checks treat a negative age as fresh. A clock set backwards freezes pricing silently, which is #133's shape. Today-aggregate counts also skip `finite()` on read. `finiteNumber()` is private, so each schema re-derives the rule |
+| COR-007 | P2 | High | Subagent transcripts (`<project>/<session>/subagents/*.jsonl`) are never read. Calculated cost, tokens, burn rate and today under-count by the subagent share, measured at 14.6% of tokens over 7 days, with no marker |
+| COR-008 | P2 | High | The calculated burn rate prices all session tokens at the *current* model's rate: 5× apart for the same session depending on `/model`, and never marked uncertain |
+| COR-009 | P2 | High | `Today:` uncertainty in store mode is per-render and never persisted. A partially priced or stale figure shows unmarked on other sessions' bars. The README promises `Today: $4.10?`. The pipeline re-derives the tracker's skip decision and misses its overflow path, and the outer guard is untested |
+| SEC-003 | P2 | High | `setup` rewrites `~/.claude/settings.json` from 0600 to 0644 and leaves a 0644 `.bak`, exposing `env` secrets. It also replaces a symlinked settings file with a regular one. Cache directories are 0755 |
+| SEC-004 | P2 | High code / Med reach | `getConfigDir` uses `HOME \|\| "~"` and accepts a relative `XDG_*`. With HOME unset, a repo-committed `~/.config/gccusage/settings.json` loads and its `custom-command` runs on every render (reproduced via clone) |
+| TEST-003 | P2 | High | `formatStdinReadError` and `formatStdinError` are never executed: the entry test mocks them. If either broke, the REL-004 bar erasure would return with the suite green |
+| DOC-002 | P2 | High | The 1.1.0 CHANGELOG omits `GCCUSAGE_DEBUG` and the stdin-error diagnostic. The 1.0.0 "known limitations" (CI never ran, no debug flag) were never marked resolved |
+| OPS-009 | P2 | Med | The README's `npm install -g github:…` failed on Node 26 / npm 11.17: `prepare` runs `tsdown` without dev dependencies, even though the bundle is committed |
+| REL-006 | P3 | High | The detached refresher's `ChildProcess` has no `error` listener. A spawn failure (EAGAIN) exits 1 and prints a stack trace outside the `GCCUSAGE_DEBUG` gate |
+| REL-007 | P3 | High | Any widget throw erases the whole bar. `buildBar` doesn't clamp the ratio, so `"-".repeat(-1)` throws with exact-token payloads |
+| REL-008 | P3 | High | `writeFileAtomic` leaves `*.tmp` files behind when a write is killed or fails, and nothing sweeps them. One exists in the real cache |
+| SEC-005 | P3 | High mechanism / Low impact | Pricing tables keyed by the feed are plain `{}` objects written with `__proto__`-able keys. Reads use `hasOwn`, so it's inert today, but the guard covers reads only |
+| TEST-004 | P3 | Med | `cli-exit-code`, `stdin-timeout` and `concurrency` pass through the developer's `XDG_*`. The spawn env and `render()` are copied about 9 times and `makeContext` 5 times. The #148 comment was pasted into 8 files |
+| MAINT-003 | P3 | High | Two production local-date owners (`dateStr`, `localDateKey`) must roll over together, and four test copies restate the format. The `?`-suffix rule is copied into both cost widgets |
+| DOC-003 | P3 | High | Drift across README, schema and help: the `compact.mode` schema text is wrong, `format` is shown as working, "flag typos" is overstated, two Troubleshooting entries are wrong, there's no Known limitations section (Windows), `XDG_*` is undocumented, the version row is missing, and `today` vs `Today:` is unexplained |
+| OPS-010 | P3 | High | No Dependabot. Dev advisories went from 9 to 19, the critical ones semver-major. The CI matrix lacks Node 26, the maintainer's runtime |
+| OPS-011 | P3 | Med | `harness:concurrency` lacks the refresher suppression and `cwd` its scaled-down test received (TEST-002 and #148 in a script) |
+| CLEAN-003 | Cleanup | High | Batch: the orphaned JSDoc in `today-aggregate-cache`; stale comments in `ci.yml` (build-badge.yml), `format.ts` (pre-#145), cache-key (pre-#96), CLAUDE.md pointers, the `.oxlintrc` file count, `git-deadline.ts`, the `todayCostUncertain` doc; three redundant `as` casts; dead exports `ModelTokenMetrics` and `LineConfig`; unverified badge tooling; the vestigial `controlled.turnCount` fixture block; runtime deps that are bundled (move to dev); actions pinned by tag, not SHA; `cli.ts` `process.exit(1)`; tag the release in the same step as the merge |
+
+```json
+{
+  "audit_date": "2026-11-16", "commit": "3d3740e", "overall_score": 83, "overall_grade": "B",
+  "production_ready": false, "senior_quality": true,
+  "applied_grade_caps": ["no_mandatory_ci"],
+  "category_scores": { "product_coherence": 84, "architecture": 87, "correctness": 80,
+    "security_privacy": 86, "reliability_concurrency": 78, "testing_ai_quality": 90,
+    "maintainability": 88, "operations_observability": 78, "documentation_governance": 80 },
+  "weights": "equal",
+  "release_blockers": ["REL-005"],
+  "p0_count": 0, "p1_count": 3, "p2_count": 9, "p3_count": 9, "cleanup_batches": 1,
+  "fixed_since_previous_review": ["TEST-002","OPS-005","OPS-006","REL-004","OPS-007","DOC-001","CLI-001"],
+  "remaining_existing_issues": [],
+  "new_findings": ["REL-005","COR-005","OPS-008","COR-006","COR-007","COR-008","COR-009","SEC-003",
+    "SEC-004","TEST-003","DOC-002","OPS-009","REL-006","REL-007","REL-008","SEC-005","TEST-004",
+    "MAINT-003","DOC-003","OPS-010","OPS-011","CLEAN-003"],
+  "top_three_next_actions": [
+    "Catch the daily-shard write so a failed write costs the store update, not the bar (REL-005)",
+    "Turn on enforce_admins so CI binds the owner too (OPS-008)",
+    "Key the daily store per Claude Code process, not per session_id (COR-005)"
+  ]
+}
+```
+
+### Path to A
+1. **Remove the cap and the P1s.**
+   - OPS-008: one `gh api` call, made by the owner.
+   - REL-005: try/catch around the shard write, with a test that makes the directory unwritable.
+   - COR-005: needs a design decision.
+   - Exit: `enforce_admins` true, and the alternating-process reproduction shows `Today:` equal to the true spend.
+2. **P2s.** COR-006 via one shared persisted-timestamp schema, then SEC-003, SEC-004, TEST-003, DOC-002, COR-007, COR-008, COR-009 and OPS-009. Exit: each with a test that fails against 3d3740e.
+3. **P3s and cleanup.** Exit: lint clean, no stale comment that names a removed file or behaviour, and the README checked against `--help` and the schema.
+
+### Senior-engineer assessment
+A new senior engineer could own this. The evidence trail in this ledger, raw-byte tests, sabotage-checked fixes and single-owner persistence make it unusually legible. Trust boundaries are enforced at runtime for every external input, apart from the timestamp gap. Operators can now diagnose a blank bar (`GCCUSAGE_DEBUG`).
+
+What prevents an A today:
+- REL-005 can erase the bar for every session after one root-owned run.
+- COR-005 silently over-reports spend for anyone resuming a session in a second terminal.
+- CI still doesn't bind the person who merges most of the code.
+
 ## Verification — 2026-08-04 @ e9b2123 (Node matrix)
 
 **The Node 22/24 debt spanning #114–#132 is closed.** It had been recorded as
