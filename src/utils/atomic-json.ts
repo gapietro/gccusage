@@ -34,22 +34,22 @@ export function writeFileAtomic(filePath: string, contents: string, mode?: numbe
   // before a single byte lands, so a write failing part-way (ENOSPC, EIO)
   // used to leave it behind with nothing to remove it (REL-008).
   try {
-    if (mode === undefined) {
-      fs.writeFileSync(tmpPath, contents, "utf-8");
-    } else {
-      // Created with `mode` so it is never wider than asked for, then chmod'd
-      // because creation is masked by the umask (0640 under 077 would land as
-      // 0600) and an existing file — a leftover from a reused pid — keeps its
-      // old mode. This is our own temp file; no user path is chmod'd.
-      fs.writeFileSync(tmpPath, contents, { encoding: "utf-8", mode });
+    createExclusive(tmpPath, contents, mode);
+    if (mode !== undefined) {
+      // Creation is masked by the umask (0640 under 077 would land as 0600),
+      // so the mode is made exact here. The file is the one createExclusive
+      // just made; swapping it for a link before this chmod would need write
+      // access to the target's directory, which already lets anyone replace
+      // the target itself.
       try {
         fs.chmodSync(tmpPath, mode);
       } catch {
         // A filesystem that refuses chmod (vfat, some network mounts). The
-        // creation mode already bounds the file at or below `mode`, so the
-        // write is still safe. Failing it instead would throw from every
-        // cache write, and the daily-shard write on the render path is not
-        // yet caught (REL-005), so that would erase the bar.
+        // file was freshly created with `mode`, so it is already at or below
+        // it — true only because createExclusive never reuses a file.
+        // Failing the write instead would throw from every cache write, and
+        // the daily-shard write on the render path is not yet caught
+        // (REL-005), so that would erase the bar.
       }
     }
     fs.renameSync(tmpPath, filePath);
@@ -61,6 +61,31 @@ export function writeFileAtomic(filePath: string, contents: string, mode?: numbe
       // matters, and an ENOENT here just means no temp file was created.
     }
     throw err;
+  }
+}
+
+/**
+ * Write `contents` to a file at `tmpPath` that this call creates, never one
+ * that was already there.
+ *
+ * The temp name is predictable (`<target>.<pid>.<n>.tmp`). With flag "w" a
+ * symlink planted at that name was followed, so the write — and the chmod
+ * after it — landed on whatever the link pointed at, and a leftover regular
+ * file from a reused pid kept its own, possibly wider, mode (SEC-003, review
+ * of #154). "wx" (O_CREAT|O_EXCL) refuses to open anything that exists,
+ * symlinks included. On EEXIST the squatter is unlinked — which removes a
+ * link, never its target — and the create is retried once. A second EEXIST
+ * means someone is racing us for the name, and the write fails rather than
+ * loop.
+ */
+function createExclusive(tmpPath: string, contents: string, mode: number | undefined): void {
+  const options: fs.WriteFileOptions = { encoding: "utf-8", flag: "wx", ...(mode === undefined ? {} : { mode }) };
+  try {
+    fs.writeFileSync(tmpPath, contents, options);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    fs.unlinkSync(tmpPath);
+    fs.writeFileSync(tmpPath, contents, options);
   }
 }
 

@@ -23,7 +23,15 @@ import {
 //
 // `failChmod` stands in for a filesystem that refuses chmod (vfat, some
 // network mounts).
-const mockFs = vi.hoisted(() => ({ failTempWrite: false, umask077: false, failChmod: false }));
+//
+// `lastTempPath` records the most recent temp-file write, so a test can
+// predict the writer's next temp name (same pid, counter + 1).
+const mockFs = vi.hoisted(() => ({
+  failTempWrite: false,
+  umask077: false,
+  failChmod: false,
+  lastTempPath: "",
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -31,6 +39,7 @@ vi.mock("node:fs", async (importOriginal) => {
     ...actual,
     writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
       const [target, data, options] = args;
+      if (String(target).endsWith(".tmp")) mockFs.lastTempPath = String(target);
       if (mockFs.failTempWrite && String(target).endsWith(".tmp")) {
         actual.writeFileSync(target, String(data).slice(0, 3));
         const err = new Error("ENOSPC: no space left on device, write") as NodeJS.ErrnoException;
@@ -211,6 +220,64 @@ describe("file modes (SEC-003)", () => {
     const target = path.join(tmpDir, "pricing.json");
     writeJsonAtomic(target, { a: 1 });
     expect(mode(target)).toBe(0o600);
+  });
+});
+
+// SEC-003, review of #154. The temp name `<target>.<pid>.<n>.tmp` is
+// predictable, and the temp file was opened with flag "w": a symlink planted
+// at that name was followed, so the write (and the chmod after it) landed on
+// whatever the link pointed at, and a leftover regular file kept its own
+// mode. The temp file must always be one this write created.
+describe("the temp file is always freshly created (SEC-003)", () => {
+  const mode = (p: string): number => fs.statSync(p).mode & 0o777;
+
+  /** The temp path the next writeFileAtomic call in this process will use. */
+  function nextTempPath(target: string): string {
+    writeFileAtomic(path.join(tmpDir, "probe.json"), "{}");
+    const match = /\.(\d+)\.(\d+)\.tmp$/.exec(mockFs.lastTempPath);
+    expect(match, "the probe write recorded its temp name").not.toBeNull();
+    return `${target}.${match![1]}.${Number(match![2]) + 1}.tmp`;
+  }
+
+  it("does not follow a symlink planted at the temp name", () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-victim-"));
+    try {
+      const victim = path.join(outside, "victim.txt");
+      fs.writeFileSync(victim, "untouched");
+      fs.chmodSync(victim, 0o644);
+      const target = path.join(tmpDir, "settings.json");
+      fs.symlinkSync(victim, nextTempPath(target));
+
+      writeFileAtomic(target, "new contents", 0o600);
+
+      expect(fs.readFileSync(victim, "utf-8")).toBe("untouched");
+      expect(mode(victim)).toBe(0o644);
+      expect(fs.readFileSync(target, "utf-8")).toBe("new contents");
+      expect(fs.lstatSync(target).isSymbolicLink()).toBe(false);
+      expect(mode(target)).toBe(0o600);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does not inherit a stale leftover's wide mode, even where chmod is refused", () => {
+    // With "w" the leftover is reused and keeps 0644; on a filesystem that
+    // refuses chmod nothing narrows it. Only a fresh create gives 0600.
+    const target = path.join(tmpDir, "pricing.json");
+    const leftover = nextTempPath(target);
+    fs.writeFileSync(leftover, "stale");
+    fs.chmodSync(leftover, 0o644);
+
+    mockFs.failChmod = true;
+    try {
+      writeJsonAtomic(target, { a: 1 });
+    } finally {
+      mockFs.failChmod = false;
+    }
+
+    expect(JSON.parse(fs.readFileSync(target, "utf-8"))).toEqual({ a: 1 });
+    expect(mode(target)).toBe(0o600);
+    expect(siblings(tmpDir).sort()).toEqual(["pricing.json", "probe.json"]);
   });
 });
 
