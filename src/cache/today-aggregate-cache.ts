@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir, findTodayJsonlFileStats } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
+import { localDateKey } from "../utils/local-date.js";
 import { parseJsonlFile, filterTodayEntries } from "../data/jsonl-reader.js";
 import type { TokenMetrics } from "../types/token-metrics.js";
 import {
@@ -26,13 +27,6 @@ export interface TodayAggregate {
 function cachePath(): string | null {
   const dir = getCacheDir();
   return dir === null ? null : path.join(dir, "today-aggregates.json");
-}
-
-/** Local date, matching how `filterTodayEntries` picks its midnight. */
-function localDateKey(now: Date): string {
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 /**

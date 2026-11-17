@@ -3708,6 +3708,24 @@ function maybeSpawnPricingRefresh(stale) {
 }
 
 //#endregion
+//#region src/utils/local-date.ts
+/**
+* The local calendar date as `YYYY-MM-DD`: the key both daily stores reset on
+* (the per-session cost shards and the today-aggregate cache).
+*
+* One owner on purpose (MAINT-003). The two stores used to carry identical
+* private copies, and they must roll over at the same instant: if one moved to
+* UTC or a zone override and the other didn't, `Today:` and the calculated
+* today figure would reset at different times. Local, not UTC, to match
+* `isEntryFromToday`'s local midnight.
+*/
+function localDateKey(d) {
+	const month = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${d.getFullYear()}-${month}-${day}`;
+}
+
+//#endregion
 //#region src/cache/today-aggregate-cache.ts
 const TodayAggregateCacheSchema = object({
 	date: string(),
@@ -3717,12 +3735,6 @@ const TodayAggregateCacheSchema = object({
 function cachePath() {
 	const dir = getCacheDir();
 	return dir === null ? null : path$4.join(dir, "today-aggregates.json");
-}
-/** Local date, matching how `filterTodayEntries` picks its midnight. */
-function localDateKey(now) {
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	const day = String(now.getDate()).padStart(2, "0");
-	return `${now.getFullYear()}-${month}-${day}`;
 }
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
@@ -4919,10 +4931,12 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 const ShardSchema = object({
 	sessionId: string(),
 	date: string(),
-	costUsd: pipe(number(), finite()),
-	baselineUsd: fallback(pipe(number(), finite()), 0),
+	costUsd: finiteNumber(),
+	baselineUsd: fallback(finiteNumber(), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(pipe(number(), safeInteger()), 0)
+	updatedAt: fallback(persistedTimestamp(), 0),
+	processStart: fallback(optional(persistedTimestamp()), void 0),
+	uncertain: fallback(boolean(), false)
 });
 const LegacyStoreSchema = object({
 	date: fallback(optional(string()), void 0),
@@ -4930,12 +4944,25 @@ const LegacyStoreSchema = object({
 });
 const LegacyEntrySchema = object({
 	sessionId: string(),
-	costUsd: pipe(number(), finite()),
-	baselineUsd: fallback(pipe(number(), finite()), 0),
+	costUsd: finiteNumber(),
+	baselineUsd: fallback(finiteNumber(), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(optional(pipe(number(), safeInteger())), void 0)
+	updatedAt: fallback(optional(persistedTimestamp()), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
+/**
+* Whether a shard is old enough to prune. Pruning deletes data, so a stamp in
+* the future (COR-006) is not simply "stale" the way it is for a cache: a
+* clock stepped back by more than `ageSince`'s skew allowance would then
+* delete every live session's spend. A future stamp within the stale window
+* is kept (it still counts only on its own `date`); one further out than
+* that is no clock correction, just garbage, and is pruned.
+*/
+function isStale(updatedAt, now) {
+	const age = ageSince(updatedAt, now.getTime());
+	if (age === null) return updatedAt - now.getTime() > STALE_SESSION_MS;
+	return age >= STALE_SESSION_MS;
+}
 /**
 * Null when there is no cache dir (SEC-004: no home and no absolute
 * XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
@@ -4949,29 +4976,34 @@ function getStorePaths() {
 	};
 }
 /**
-* Whether `trackDailyCost` has a store to total across. Without one it can
-* see only the session in front of it, so its figure is this session's
-* spend rather than today's — and the pipeline marks it uncertain. Exported
-* so that decision has one owner, here, rather than the pipeline re-deriving
-* it from `getCacheDir()`.
+* One file per session, or per Claude Code process for stdin costs
+* (COR-005), so a render only ever writes its own entry's file. Concurrent
+* sessions and processes therefore cannot clobber each other's entries —
+* there is no shared read-modify-write left to lose an update.
 */
-function hasDailyStore() {
-	return getStorePaths() !== null;
+function shardPath(store, sessionId, processStart) {
+	const suffix = processStart === void 0 ? "" : `.p${processStart}`;
+	return path$3.join(store.shardDir, `${shardKey(sessionId)}${suffix}.json`);
 }
 /**
-* One file per session, so a render only ever writes its own session's data.
-* Concurrent sessions therefore cannot clobber each other's entries — there
-* is no shared read-modify-write left to lose an update.
+* How far apart two computed starts of one process may be. `now -
+* total_duration_ms` is exact in Claude Code, but `now` is taken here after
+* the spawn and the stdin read (before any transcript parse, see
+* pipeline.ts), so each estimate is late by roughly a second. Two processes of
+* one session started closer than this share an entry; resumes of the same
+* saved state in quick succession can (a tmux restore), so it is kept small.
 */
-function shardPath(store, sessionId) {
-	return path$3.join(store.shardDir, `${shardKey(sessionId)}.json`);
-}
-function dateStr(d) {
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
+const PROCESS_START_TOLERANCE_MS = 1e4;
+/**
+* Claude Code runs the statusline command when its statusline controller
+* starts (2.1.326: `#S()` calls the run method immediately), so a fresh
+* process's first render lands seconds in. A first render further in than
+* this, already carrying spend, is a process whose cost was restored
+* (`--resume`, including `--fork-session`, which hands the parent's cost to a
+* new session_id) or a statusline switched on mid-session. Either way the
+* spend so far is not today's to count when no stored entry accounts for it.
+*/
+const RESTORED_FIRST_RENDER_MS = 12e4;
 /**
 * Split a pre-shard `daily-costs.json` into per-session files, then remove it.
 * Without this, today's total would reset to zero once on upgrade. Two
@@ -4995,7 +5027,7 @@ function migrateLegacyStore(store, now) {
 		legacy = null;
 	}
 	const sessions = legacy?.sessions ?? [];
-	const date = legacy?.date ?? dateStr(now);
+	const date = legacy?.date ?? localDateKey(now);
 	try {
 		for (const sessionRaw of sessions) {
 			const parsed = safeParse(LegacyEntrySchema, sessionRaw);
@@ -5009,7 +5041,8 @@ function migrateLegacyStore(store, now) {
 				costUsd: s.costUsd,
 				baselineUsd: s.baselineUsd,
 				source: s.source,
-				updatedAt: s.updatedAt ?? now.getTime()
+				updatedAt: s.updatedAt ?? now.getTime(),
+				uncertain: false
 			};
 			writeJsonAtomic(target, entry);
 		}
@@ -5039,7 +5072,7 @@ function readEntries(store, now) {
 		const fullPath = path$3.join(store.shardDir, file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
-		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
+		if (isStale(entry.updatedAt, now)) {
 			try {
 				fs$1.unlinkSync(fullPath);
 			} catch {}
@@ -5053,22 +5086,32 @@ function readEntries(store, now) {
 * The entry `trackDailyCost` would store for this render. Pure: `prev` is not
 * mutated, so the caller can discard the result if it isn't safe to write.
 */
-function nextEntry(prev, sessionId, costUsd, source, today, now) {
+function nextEntry(prev, input, newBaseline, today, now) {
+	const { sessionId, costUsd, source, processStart } = input;
+	const uncertain = input.uncertain ?? false;
 	if (!prev) return {
 		sessionId,
 		date: today,
 		costUsd,
-		baselineUsd: 0,
+		baselineUsd: newBaseline,
 		source,
-		updatedAt: now.getTime()
+		updatedAt: now.getTime(),
+		processStart,
+		uncertain
 	};
-	const entry = { ...prev };
+	const entry = {
+		...prev,
+		uncertain
+	};
 	if (entry.date !== today) {
 		entry.baselineUsd = entry.costUsd;
 		entry.date = today;
 	}
 	const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
-	if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
+	if (entry.source !== void 0 && entry.source !== source) {
+		if (prev.uncertain && prev.date === today) entry.uncertain = true;
+		entry.baselineUsd = costUsd - accruedToday;
+	} else if (costUsd < entry.costUsd && source === "calculated") entry.baselineUsd = costUsd - accruedToday;
 	else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
 	entry.costUsd = costUsd;
 	entry.source = source;
@@ -5076,39 +5119,171 @@ function nextEntry(prev, sessionId, costUsd, source, today, now) {
 	return entry;
 }
 /**
-* Record the current session's cumulative cost and return today's total
-* across all sessions (spend since local midnight only).
+* The stored entry this render belongs to, and the baseline a new entry
+* should start from.
 *
-* A non-finite `costUsd` is not recorded: the session's shard is left exactly
-* as it was and today's total uses its last good figure. Persisting it would
+* With a `processStart` (stdin costs only; see `recordDailyCost`), each Claude
+* Code process gets its own entry, in its own shard file, so two processes
+* never write the same file and the REL-001 single-writer property holds per
+* process. Keyed by session alone, two terminals on one session_id read every
+* alternation between their independent cumulative costs as a restart and
+* folded the other process's whole cost into Today each time (COR-005).
+*
+* Without one, the render updates the session's most recently updated entry
+* of any kind. A calculated cost is the whole session's transcript, so every
+* process reports the same series and must share one entry; and one process
+* whose payload sometimes lacks a duration must not grow a second entry.
+*
+* A NEW process entry's baseline, in order:
+* - the largest cost stored for this session, from the same source, that its
+*   first figure reaches. `--resume` restores the cumulative cost saved at
+*   the previous process's exit, which is already counted in that entry;
+*   baselining at the stored figure, not the first one, keeps a turn that ran
+*   before the first render. Same source only: stdin and calculated figures
+*   are on different scales.
+* - its first figure, when the session's only figures are from the other
+*   source (the same spend, re-scaled; the existing entry keeps what it
+*   counted) or the first render is late enough to be restored with nothing
+*   stored to account for it (`RESTORED_FIRST_RENDER_MS`).
+* - otherwise 0: a fresh process, concurrent or first, counts from zero.
+*/
+function findEntry(entries, input, now) {
+	const { sessionId, processStart, costUsd, source } = input;
+	const session = [];
+	entries.forEach((e, i) => {
+		if (e.sessionId === sessionId) session.push(i);
+	});
+	if (processStart === void 0) {
+		let index$1 = -1;
+		for (const i of session) if (index$1 === -1 || entries[i].updatedAt > entries[index$1].updatedAt) index$1 = i;
+		return {
+			index: index$1,
+			newBaseline: 0
+		};
+	}
+	let index = -1;
+	let best = Infinity;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.processStart === void 0) continue;
+		const gap = Math.abs(e.processStart - processStart);
+		if (gap <= PROCESS_START_TOLERANCE_MS && gap < best) {
+			best = gap;
+			index = i;
+		}
+	}
+	if (index !== -1) return {
+		index,
+		newBaseline: 0
+	};
+	let newBaseline = 0;
+	let restoredFrom = false;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.source === source && e.costUsd <= costUsd && e.costUsd >= newBaseline) {
+			newBaseline = e.costUsd;
+			restoredFrom = true;
+		}
+	}
+	if (!restoredFrom) {
+		const otherSourceOnly = session.length > 0 && session.every((i) => entries[i].source !== source);
+		const lateFirstRender = now.getTime() - processStart > RESTORED_FIRST_RENDER_MS;
+		if (otherSourceOnly || lateFirstRender) newBaseline = costUsd;
+	}
+	return {
+		index: -1,
+		newBaseline
+	};
+}
+/**
+* Record the current session's cumulative cost and return today's total
+* across all sessions (spend since local midnight only), with whether that
+* total is exact.
+*
+* A non-finite `costUsd` is not recorded: the cost itself is left exactly as
+* it was and today's total uses its last good figure. Persisting it would
 * write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
 * rejects on the next read, silently dropping the session from every bar's
 * total and losing its baseline (#145). Ingestion rejects non-finite token
-* counts, but finite ones can still overflow once priced and summed, so this
-* guard is the one that holds at the storage boundary. The caller marks
-* today's figure uncertain in that case.
+* counts, but finite ones can still overflow once priced and summed, and two
+* finite stored values can differ by more than Number.MAX_VALUE, so the
+* re-baseline arithmetic is checked on what would be written, not only on
+* the argument. Either way the entry is re-stamped `uncertain`, so other
+* sessions' bars mark the stale figure too (COR-009).
+*
+* The shard write is caught. It was the one render-path write that was not,
+* so a root-owned or full cache directory threw into `main().catch()` and
+* erased the bar on every render (REL-005). A failed write costs the store
+* update and marks Today uncertain; this render's own figure is still exact.
 */
-function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
+function recordDailyCost(input, now = new Date()) {
 	const store = getStorePaths();
-	if (store === null) return Number.isFinite(costUsd) ? costUsd : 0;
-	const today = dateStr(now);
+	if (store === null) return {
+		totalUsd: Number.isFinite(input.costUsd) ? input.costUsd : 0,
+		uncertain: true
+	};
+	const today = localDateKey(now);
 	const entries = readEntries(store, now);
-	if (sessionId && Number.isFinite(costUsd)) {
-		const index = entries.findIndex((e) => e.sessionId === sessionId);
+	let notRecorded = false;
+	const { sessionId } = input;
+	if (sessionId) {
+		const processStart = input.source === "stdin" ? input.processStart : void 0;
+		const keyed = {
+			...input,
+			sessionId,
+			processStart
+		};
+		const { index, newBaseline } = findEntry(entries, keyed, now);
 		const prev = index === -1 ? void 0 : entries[index];
-		const next = nextEntry(prev, sessionId, costUsd, source, today, now);
-		if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
+		const next = Number.isFinite(input.costUsd) ? nextEntry(prev, keyed, newBaseline, today, now) : void 0;
+		if (next && Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
 			if (index === -1) entries.push(next);
 			else entries[index] = next;
-			writeJsonAtomic(shardPath(store, sessionId), next);
+			notRecorded = !tryWrite(store, next);
+		} else {
+			notRecorded = true;
+			if (prev && !prev.uncertain) {
+				const stale = {
+					...prev,
+					uncertain: true
+				};
+				entries[index] = stale;
+				tryWrite(store, stale);
+			} else if (!prev) {
+				const placeholder = {
+					sessionId,
+					date: today,
+					costUsd: 0,
+					baselineUsd: 0,
+					source: input.source,
+					updatedAt: now.getTime(),
+					processStart,
+					uncertain: true
+				};
+				entries.push(placeholder);
+				tryWrite(store, placeholder);
+			}
 		}
 	}
-	let total = 0;
+	let totalUsd = 0;
+	let uncertain = notRecorded;
 	for (const e of entries) {
 		if (e.date !== today) continue;
-		total += Math.max(0, e.costUsd - e.baselineUsd);
+		totalUsd += Math.max(0, e.costUsd - e.baselineUsd);
+		if (e.uncertain) uncertain = true;
 	}
-	return total;
+	return {
+		totalUsd,
+		uncertain
+	};
+}
+function tryWrite(store, entry) {
+	try {
+		writeJsonAtomic(shardPath(store, entry.sessionId, entry.processStart), entry);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 //#endregion
@@ -5126,6 +5301,7 @@ function getStdinBurnRate(stdin) {
 	};
 }
 async function buildRenderContext(stdin, settings) {
+	const renderStartedAt = Date.now();
 	const sessionAggregate = getSessionAggregate(stdin.session_id);
 	const metrics = sessionAggregate.metrics;
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
@@ -5144,9 +5320,16 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostSource = "stdin";
 	}
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
-	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
-	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd) || !hasDailyStore();
+	const stored = today === null ? recordDailyCost({
+		sessionId: stdin.session_id,
+		costUsd: sessionCostUsd,
+		source: sessionCostSource,
+		processStart: processStartOf(stdin, renderStartedAt),
+		uncertain: sessionCostUncertain
+	}, new Date(renderStartedAt)) : null;
+	const todayCostUsd = stored ? stored.totalUsd : calculateTotalCost(today.costs);
+	const todayCostUncertain = stored ? stored.uncertain : today.unpriced.length > 0 || today.approximated.length > 0;
 	const sessionStartTime = sessionAggregate.sessionStartTime;
 	const block = detectBlock(sessionStartTime);
 	const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
@@ -5178,6 +5361,24 @@ async function buildRenderContext(stdin, settings) {
 		}
 	};
 }
+/**
+* When this Claude Code process started, from the payload: `now -
+* cost.total_duration_ms`. Stable for the life of a process (a resumed process
+* continues its restored clock), and different for two processes sharing a
+* session_id, which is what lets the daily store keep them apart (COR-005).
+*
+* `undefined` for anything that is not a plausible start: a missing or
+* negative duration, one longer than the clock itself, or a result that is
+* not a safe integer — `ShardSchema` reads `processStart` back with
+* `v.safeInteger()`, so an unsafe one was written, dropped on read, and grew
+* a new entry on every render.
+*/
+function processStartOf(stdin, now) {
+	const duration = stdin.cost?.total_duration_ms;
+	if (duration === void 0 || !Number.isFinite(duration) || duration < 0 || duration > now) return void 0;
+	const start = Math.round(now - duration);
+	return Number.isSafeInteger(start) ? start : void 0;
+}
 
 //#endregion
 //#region src/utils/format.ts
@@ -5187,6 +5388,19 @@ function formatDollars(amount) {
 	if (amount < 1) return `$${amount.toFixed(2)}`;
 	if (amount < 100) return `$${amount.toFixed(2)}`;
 	return `$${amount.toFixed(0)}`;
+}
+/**
+* A cost with the uncertainty marker: `formatDollars` plus a trailing `?` when
+* `uncertain`, except when the amount is non-finite and already renders as
+* `$?` — stacking the two read as `$??` (#145).
+*
+* One owner for both cost widgets (MAINT-003). As two copies of the rule, a
+* change to one would bring `$??` back in the other with its tests green —
+* the #68 shape `alertBg` was consolidated to avoid.
+*/
+function formatCost(amount, uncertain) {
+	const marked = uncertain && Number.isFinite(amount);
+	return formatDollars(amount) + (marked ? "?" : "");
 }
 function formatTokens(count$1) {
 	if (!Number.isFinite(count$1)) return "?";
@@ -5333,8 +5547,7 @@ const effortWidget = { render(context, config) {
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
-	const marked = context.sessionCostUncertain && Number.isFinite(cost);
-	const amount = formatDollars(cost) + (marked ? "?" : "");
+	const amount = formatCost(cost, context.sessionCostUncertain);
 	const text = label ? `${label} ${amount}` : amount;
 	const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
@@ -5349,8 +5562,7 @@ const sessionCostWidget = { render(context, config) {
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
-	const marked = context.todayCostUncertain && Number.isFinite(cost);
-	const text = `${label} ${formatDollars(cost)}${marked ? "?" : ""}`;
+	const text = `${label} ${formatCost(cost, context.todayCostUncertain)}`;
 	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,

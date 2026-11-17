@@ -12,7 +12,7 @@ import {
   calculateBurnRate,
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
-import { trackDailyCost, hasDailyStore, type CostSource } from "./daily-cost-tracker.js";
+import { recordDailyCost, type CostSource } from "./daily-cost-tracker.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -32,6 +32,12 @@ export async function buildRenderContext(
   stdin: StatusJson,
   settings: Settings,
 ): Promise<RenderContext> {
+  // Taken before any transcript parsing: the daily store estimates this
+  // process's start as `now - cost.total_duration_ms`, and every millisecond
+  // between Claude Code building the payload and this line is error in that
+  // estimate (COR-005). Parsing a large transcript first added seconds.
+  const renderStartedAt = Date.now();
+
   // Read this session's transcripts: the main one and its subagents'
   // (COR-007), each file's aggregate cached so only live files are
   // re-parsed. Today's transcripts are read further down, and only when
@@ -76,6 +82,14 @@ export async function buildRenderContext(
       ? calculateCostByModel(getTodayAggregate().byModel, pricing)
       : null;
 
+  // A missing price can only understate a figure the pricing table produced,
+  // and so can a missing premium tier. The stdin cost is unaffected, so
+  // marking it would be a false alarm — and a bar that cries uncertain on
+  // every render is a bar nobody reads.
+  const sessionCostUncertain =
+    sessionCostSource === "calculated" &&
+    (session.unpriced.length > 0 || session.approximated.length > 0);
+
   // Today's cost: JSONL-calculated when the user forces calculated costs,
   // otherwise our per-session daily tracker. In forced-calculated mode the
   // tracked total is never displayed, so we don't touch the store at all —
@@ -83,27 +97,28 @@ export async function buildRenderContext(
   // costs on a different scale to the store's own total (issue #32). The
   // tracker is told which source fed it so a source switch isn't read as a
   // restart.
-  const todayCostUsd =
-    today !== null
-      ? calculateTotalCost(today.costs)
-      : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
-
-  // A missing price can only understate a figure the pricing table produced,
-  // and so can a missing premium tier. The stdin cost and the daily store are
-  // unaffected, so marking them would be a false alarm — and a bar that cries
-  // uncertain on every render is a bar nobody reads.
-  const sessionCostUncertain =
-    sessionCostSource === "calculated" &&
-    (session.unpriced.length > 0 || session.approximated.length > 0);
-  // In store mode, a non-finite session cost was not recorded (#145), so
-  // Today: carries this session's last good figure rather than its current
-  // spend. Flag that instead of presenting a stale number as current. With no
-  // store at all (no home, SEC-004) the figure is this session's spend only,
-  // so it is flagged too.
-  const todayCostUncertain =
-    today !== null
-      ? today.unpriced.length > 0 || today.approximated.length > 0
-      : !Number.isFinite(sessionCostUsd) || !hasDailyStore();
+  //
+  // In store mode the tracker owns Today's uncertainty (COR-009): it stores
+  // each session's flag, so a lower-bound figure is marked on every session's
+  // bar, and it alone knows whether this render's cost was recorded.
+  // Re-deriving that here missed the tracker's second skip path.
+  const stored =
+    today === null
+      ? recordDailyCost(
+          {
+            sessionId: stdin.session_id,
+            costUsd: sessionCostUsd,
+            source: sessionCostSource,
+            processStart: processStartOf(stdin, renderStartedAt),
+            uncertain: sessionCostUncertain,
+          },
+          new Date(renderStartedAt),
+        )
+      : null;
+  const todayCostUsd = stored ? stored.totalUsd : calculateTotalCost(today!.costs);
+  const todayCostUncertain = stored
+    ? stored.uncertain
+    : today!.unpriced.length > 0 || today!.approximated.length > 0;
 
   // Session timing
   const sessionStartTime = sessionAggregate.sessionStartTime;
@@ -164,4 +179,25 @@ export async function buildRenderContext(
       dailyDanger: settings.alerts?.dailyDanger ?? 25,
     },
   };
+}
+
+/**
+ * When this Claude Code process started, from the payload: `now -
+ * cost.total_duration_ms`. Stable for the life of a process (a resumed process
+ * continues its restored clock), and different for two processes sharing a
+ * session_id, which is what lets the daily store keep them apart (COR-005).
+ *
+ * `undefined` for anything that is not a plausible start: a missing or
+ * negative duration, one longer than the clock itself, or a result that is
+ * not a safe integer — `ShardSchema` reads `processStart` back with
+ * `v.safeInteger()`, so an unsafe one was written, dropped on read, and grew
+ * a new entry on every render.
+ */
+export function processStartOf(stdin: StatusJson, now: number): number | undefined {
+  const duration = stdin.cost?.total_duration_ms;
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0 || duration > now) {
+    return undefined;
+  }
+  const start = Math.round(now - duration);
+  return Number.isSafeInteger(start) ? start : undefined;
 }
