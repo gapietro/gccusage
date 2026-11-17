@@ -10,9 +10,10 @@ export const cwdWidget: Widget = {
 
     // Replace home dir with ~. Via getHomeDir() rather than process.env.HOME
     // (#69) so an unset or empty HOME still abbreviates, the same resolution
-    // the rest of the codebase uses; it always returns an absolute path.
+    // the rest of the codebase uses. Null when there is no home (SEC-004):
+    // then nothing is abbreviated.
     const home = getHomeDir();
-    if (cwd.startsWith(home)) {
+    if (home !== null && cwd.startsWith(home)) {
       cwd = "~" + cwd.slice(home.length);
     }
 

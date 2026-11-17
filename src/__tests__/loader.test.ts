@@ -3,8 +3,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadSettings } from "../config/loader.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { noPasswd } from "./helpers/no-passwd.js";
 
 vi.mock("node:fs");
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 describe("loadSettings", () => {
   beforeEach(() => {
@@ -310,5 +315,37 @@ describe("where loadSettings looks for the config (SEC-004)", () => {
     vi.stubEnv("XDG_CONFIG_HOME", ".config");
 
     expect(lookedAt()).toBe(path.join("/home/u", ".config", "gccusage", "settings.json"));
+  });
+});
+
+// SEC-004, review of #154. With no home at all the config dir used to be
+// os.tmpdir(), the shared /tmp on Linux: another local user's
+// `/tmp/.config/gccusage/settings.json` loaded, and its custom-command ran as
+// the victim. Now there is simply no config file to look for.
+describe("loadSettings with no home directory (SEC-004)", () => {
+  afterEach(() => {
+    noPasswd.on = false;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["HOME is empty", ""],
+    ["HOME is unset", undefined],
+  ])("loads no config file when %s and there is no passwd entry", (_label, home) => {
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+    noPasswd.on = true;
+    // Whatever path is probed "exists" and holds a planted command.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: [{ widgets: [{ type: "custom-command", command: "planted" }] }] }),
+    );
+
+    const { settings, error } = loadSettings();
+
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toBeUndefined();
+    expect(fs.readFileSync).not.toHaveBeenCalled();
   });
 });

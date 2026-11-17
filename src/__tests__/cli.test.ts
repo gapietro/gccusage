@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { shellQuote, buildStatusLineCommand, runCli } from "../cli.js";
+import { noPasswd } from "./helpers/no-passwd.js";
 
 describe("shellQuote", () => {
   it("wraps plain paths in single quotes", () => {
@@ -54,16 +55,18 @@ vi.mock("node:fs", async (importOriginal) => {
 // Same narrow shape as mockFs: null passes userInfo() through untouched. Set,
 // it stands in for the passwd entry, so a test of the HOME-empty fallback
 // resolves into its own temp dir instead of the developer's real home.
+// Layered over helpers/no-passwd.ts, whose `noPasswd.on` removes the passwd
+// entry altogether.
 const mockOs = vi.hoisted(() => ({ passwdHome: null as string | null }));
 
 vi.mock("node:os", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:os")>();
+  const base = await (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal);
   return {
-    ...actual,
-    userInfo: (...args: Parameters<typeof actual.userInfo>) => {
-      const info = actual.userInfo(...args);
+    ...base,
+    userInfo: ((...args: Parameters<typeof base.userInfo>) => {
+      const info = base.userInfo(...args);
       return mockOs.passwdHome === null ? info : { ...info, homedir: mockOs.passwdHome };
-    },
+    }) as typeof base.userInfo,
   };
 });
 
@@ -324,6 +327,30 @@ describe("gccusage setup", () => {
       expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
     } finally {
       fs.rmSync(cwdDir, { recursive: true, force: true });
+    }
+  });
+
+  // SEC-004, review of #154. With no passwd entry either, getHomeDir() used to
+  // fall back to os.tmpdir(), so setup wrote `<tmpdir>/.claude/settings.json`
+  // — on Linux, into the shared /tmp. It must refuse before writing anything.
+  it.each([
+    ["HOME is empty", ""],
+    ["HOME is unset", undefined],
+  ])("refuses with a clear error, writing nothing, when %s and there is no passwd entry", async (_label, home) => {
+    const sharedTmp = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-tmp-"));
+    const originalTmpdir = process.env["TMPDIR"];
+    process.env["TMPDIR"] = sharedTmp;
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+    noPasswd.on = true;
+    try {
+      await expect(runCli(["setup"])).rejects.toThrow("cannot determine home directory");
+      expect(fs.readdirSync(sharedTmp)).toEqual([]);
+    } finally {
+      noPasswd.on = false;
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+      fs.rmSync(sharedTmp, { recursive: true, force: true });
     }
   });
 

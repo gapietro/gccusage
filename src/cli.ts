@@ -54,10 +54,14 @@ export async function runCli(args: string[]): Promise<void> {
     // It also sweeps orphaned temp files from the cache (REL-008): this child
     // is already off the render path and rate-limited by the pricing TTL and
     // refresh backoff, which is the cadence a directory walk should run at.
-    case "refresh-pricing":
-      sweepStaleTempFiles(getCacheDir());
+    case "refresh-pricing": {
+      // The refresher is never spawned without a cache dir, but the command
+      // is reachable by hand, so it checks rather than assumes.
+      const cacheDir = getCacheDir();
+      if (cacheDir !== null) sweepStaleTempFiles(cacheDir);
       await refreshPricing();
       break;
+    }
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
@@ -219,6 +223,7 @@ function readExistingSettings(
  */
 function removeLegacyTurnStore(): void {
   const cacheDir = getCacheDir();
+  if (cacheDir === null) return;
   for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) {
     try {
       rmSync(target, { recursive: true, force: true });
@@ -283,8 +288,17 @@ function runSetup(): void {
   const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
   // getHomeDir(), not os.homedir(): the latter returns "" for HOME="", and
   // resolve("", ".claude", …) would edit a settings.json in the cwd — the
-  // same relative-home class as SEC-004.
-  const settingsPath = resolve(getHomeDir(), ".claude", "settings.json");
+  // same relative-home class as SEC-004. With no home at all there is no
+  // ~/.claude to configure, and guessing one (the old tmpdir fallback) wrote
+  // into a shared directory, so refuse before touching anything.
+  const home = getHomeDir();
+  if (home === null) {
+    throw new Error(
+      "cannot determine home directory: HOME is unset or empty and there is no passwd entry. " +
+        "Set HOME and re-run `gccusage setup`.",
+    );
+  }
+  const settingsPath = resolve(home, ".claude", "settings.json");
 
   // Validate before writing anything at all: a refused file leaves no .bak
   // and no partial write.

@@ -62,7 +62,7 @@ describe("formatConfigError", () => {
   ])("collapses the resolved home directory when HOME is %s", (_label, home) => {
     if (home === undefined) delete process.env["HOME"];
     else process.env["HOME"] = home;
-    const resolvedHome = getHomeDir();
+    const resolvedHome = getHomeDir()!;
     const configPath = path.join(resolvedHome, ".config", "gccusage", "settings.json");
 
     expect(formatConfigError(MESSAGE, configPath)).toContain(

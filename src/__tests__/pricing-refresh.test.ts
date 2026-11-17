@@ -13,6 +13,10 @@ const spawnMock = vi.fn(
     Object.assign(new EventEmitter(), { unref: vi.fn() }),
 );
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
+const { noPasswd } = await import("./helpers/no-passwd.js");
 
 const { maybeSpawnPricingRefresh, REFRESH_BACKOFF_MS } = await import("../data/pricing-refresh.js");
 
@@ -123,5 +127,30 @@ describe("maybeSpawnPricingRefresh", () => {
     const err = Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" });
     expect(() => child.emit("error", err)).not.toThrow();
     expect(child.unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("never spawns, and writes nothing, when there is no cache dir (SEC-004)", () => {
+    // No home and no XDG_CACHE_HOME: the child would have nowhere to save
+    // prices, and with nowhere to write the stamp there is no backoff — every
+    // render would spawn another refresher. The old tmpdir fallback instead
+    // wrote the stamp into the shared tmpdir.
+    const originalHome = process.env["HOME"];
+    const originalTmpdir = process.env["TMPDIR"];
+    delete process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = tmpDir;
+    noPasswd.on = true;
+    try {
+      maybeSpawnPricingRefresh(true);
+    } finally {
+      noPasswd.on = false;
+      if (originalHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = originalHome;
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+    }
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 });

@@ -3,28 +3,48 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
-// os.homedir() honours HOME on POSIX and USERPROFILE on Windows, but returns an
-// empty string when HOME is set-but-empty. Fall back to the passwd entry so we
-// never build a relative path that resolves against the launch directory.
-export function getHomeDir(): string {
-  const home = os.homedir();
-  if (path.isAbsolute(home)) return home;
+/**
+ * The user's home directory as an absolute path, or null when there is no
+ * trustworthy answer.
+ *
+ * os.homedir() honours HOME on POSIX and USERPROFILE on Windows, but returns
+ * an empty string when HOME is set-but-empty, and throws when HOME is unset
+ * and there is no passwd entry. The passwd entry is the fallback for both.
+ *
+ * Past that there is deliberately nothing. This used to fall back to
+ * `os.tmpdir()`, which on Linux is the shared, world-writable `/tmp`: any
+ * local user could plant `/tmp/.config/gccusage/settings.json` and have its
+ * `custom-command` run as the victim on every render, and the cache, setup's
+ * settings.json and the transcript scan all followed it there (SEC-004,
+ * review of #154). `os.tmpdir()` also honours a relative TMPDIR. Every caller
+ * treats null as "no such directory": no config, no cache, no transcripts.
+ */
+export function getHomeDir(): string | null {
+  try {
+    const home = os.homedir();
+    if (path.isAbsolute(home)) return home;
+  } catch {
+    // HOME unset and no passwd entry: os.homedir() throws. Try userInfo anyway.
+  }
   try {
     const fromPasswd = os.userInfo().homedir;
     if (path.isAbsolute(fromPasswd)) return fromPasswd;
   } catch {
-    // No passwd entry (some containers); fall through.
+    // No passwd entry (some containers).
   }
-  return os.tmpdir();
+  return null;
 }
 
-export function getClaudeDataDir(): string {
-  // Claude Code stores data in ~/.claude
-  return path.join(getHomeDir(), ".claude");
+/** `~/.claude`, where Claude Code keeps its data, or null with no home. */
+export function getClaudeDataDir(): string | null {
+  const home = getHomeDir();
+  return home === null ? null : path.join(home, ".claude");
 }
 
-export function getProjectsDir(): string {
-  return path.join(getClaudeDataDir(), "projects");
+/** Claude Code's transcript tree, or null with no home: then none are read. */
+export function getProjectsDir(): string | null {
+  const dataDir = getClaudeDataDir();
+  return dataDir === null ? null : path.join(dataDir, "projects");
 }
 
 // The UUIDs Claude Code sends. Anything else is hashed rather than trusted: a
@@ -54,10 +74,23 @@ function xdgBaseDir(name: "XDG_CACHE_HOME" | "XDG_CONFIG_HOME"): string | undefi
   return value && path.isAbsolute(value) ? value : undefined;
 }
 
-export function getCacheDir(): string {
+/**
+ * The cache directory, or null when there is neither an absolute
+ * XDG_CACHE_HOME nor a home directory — and then nothing is cached.
+ *
+ * Disabled rather than relocated. The alternative was a private
+ * `<tmpdir>/gccusage-<uid>`, but that dir has to be verified (created 0700,
+ * not a symlink, owned by us, no group/other bits) and a failed verification
+ * still needs this same disabled path — so it would add a second code path,
+ * with its own races, on top of the one it cannot avoid. Every cache here is
+ * an optimisation: with none, the bar still renders, it just recomputes, and
+ * the daily store reports this session's spend marked uncertain.
+ */
+export function getCacheDir(): string | null {
   const xdg = xdgBaseDir("XDG_CACHE_HOME");
   if (xdg) return path.join(xdg, "gccusage");
-  return path.join(getHomeDir(), ".cache", "gccusage");
+  const home = getHomeDir();
+  return home === null ? null : path.join(home, ".cache", "gccusage");
 }
 
 /**
@@ -66,11 +99,15 @@ export function getCacheDir(): string {
  * empty HOME is the relative path `~/.config/gccusage`. That resolves against
  * the cwd, so a repo committing that path had its config, and its
  * `custom-command`, loaded and run (SEC-004, reproduced via clone).
+ *
+ * Null when there is neither an absolute XDG_CONFIG_HOME nor a home: then
+ * there is no config file and the defaults apply. Never a shared directory.
  */
-export function getConfigDir(): string {
+export function getConfigDir(): string | null {
   const xdg = xdgBaseDir("XDG_CONFIG_HOME");
   if (xdg) return path.join(xdg, "gccusage");
-  return path.join(getHomeDir(), ".config", "gccusage");
+  const home = getHomeDir();
+  return home === null ? null : path.join(home, ".config", "gccusage");
 }
 
 /**
@@ -106,7 +143,7 @@ export function findSessionJsonlFiles(sessionId?: string): string[] {
   if (!sessionId) return [];
 
   const projectsDir = getProjectsDir();
-  if (!fs.existsSync(projectsDir)) return [];
+  if (projectsDir === null || !fs.existsSync(projectsDir)) return [];
 
   const files: string[] = [];
   try {
@@ -137,7 +174,7 @@ export interface TodayJsonlFile {
  */
 export function findTodayJsonlFileStats(): TodayJsonlFile[] {
   const projectsDir = getProjectsDir();
-  if (!fs.existsSync(projectsDir)) return [];
+  if (projectsDir === null || !fs.existsSync(projectsDir)) return [];
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);

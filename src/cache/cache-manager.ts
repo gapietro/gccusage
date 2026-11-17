@@ -21,12 +21,16 @@ const CacheEntrySchema = v.object({
   key: v.string(),
 });
 
-function getCachePath(): string {
-  return path.join(getCacheDir(), "statusline-cache.json");
+/** Null when there is no cache dir (SEC-004): every check misses. */
+function getCachePath(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "statusline-cache.json");
 }
 
 export function checkCache(ttlMs: number, key: string): string | null {
-  const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
+  const cachePath = getCachePath();
+  if (cachePath === null) return null;
+  const entry = readJsonValidated(cachePath, CacheEntrySchema);
   if (!entry) return null;
 
   // The key covers every render input the bar depends on — see
@@ -42,6 +46,7 @@ export function checkCache(ttlMs: number, key: string): string | null {
 
 export function writeCache(output: string, key: string): void {
   const cachePath = getCachePath();
+  if (cachePath === null) return;
   try {
     const entry: CacheEntry = { output, timestamp: Date.now(), key };
     writeJsonAtomic(cachePath, entry);

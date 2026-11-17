@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+import { noPasswd } from "./helpers/no-passwd.js";
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
+
 import {
+  getHomeDir,
   findSessionJsonlFiles,
   getCacheDir,
   getConfigDir,
@@ -44,28 +52,28 @@ describe("home directory resolution", () => {
 
   it("resolves an absolute data dir when HOME is unset", () => {
     delete process.env["HOME"];
-    expect(path.isAbsolute(getClaudeDataDir())).toBe(true);
+    expect(path.isAbsolute(getClaudeDataDir()!)).toBe(true);
   });
 
   it("resolves an absolute data dir when HOME is empty", () => {
     process.env["HOME"] = "";
-    expect(path.isAbsolute(getClaudeDataDir())).toBe(true);
+    expect(path.isAbsolute(getClaudeDataDir()!)).toBe(true);
   });
 
   it("never resolves the data dir under a directory literally named ~", () => {
     delete process.env["HOME"];
-    expect(getClaudeDataDir().split(path.sep)).not.toContain("~");
+    expect(getClaudeDataDir()!.split(path.sep)).not.toContain("~");
   });
 
   it("resolves an absolute projects dir when HOME is unset", () => {
     delete process.env["HOME"];
-    expect(path.isAbsolute(getProjectsDir())).toBe(true);
+    expect(path.isAbsolute(getProjectsDir()!)).toBe(true);
   });
 
   it("resolves an absolute cache dir when HOME and XDG_CACHE_HOME are unset", () => {
     delete process.env["HOME"];
     delete process.env["XDG_CACHE_HOME"];
-    const dir = getCacheDir();
+    const dir = getCacheDir()!;
     expect(path.isAbsolute(dir)).toBe(true);
     expect(dir.split(path.sep)).not.toContain("~");
   });
@@ -73,7 +81,7 @@ describe("home directory resolution", () => {
   it("resolves an absolute cache dir when HOME is empty and XDG_CACHE_HOME is unset", () => {
     process.env["HOME"] = "";
     delete process.env["XDG_CACHE_HOME"];
-    expect(path.isAbsolute(getCacheDir())).toBe(true);
+    expect(path.isAbsolute(getCacheDir()!)).toBe(true);
   });
 
   it("still prefers XDG_CACHE_HOME when it is set", () => {
@@ -122,7 +130,7 @@ describe("getConfigDir", () => {
     if (home === undefined) delete process.env["HOME"];
     else process.env["HOME"] = home;
 
-    const dir = getConfigDir();
+    const dir = getConfigDir()!;
     expect(path.isAbsolute(dir)).toBe(true);
     expect(dir.split(path.sep)).not.toContain("~");
   });
@@ -141,6 +149,71 @@ describe("getConfigDir", () => {
       expect(dir).not.toBe(path.resolve(relative, "gccusage"));
     },
   );
+});
+
+// SEC-004, review of #154. With no usable HOME and no passwd entry,
+// getHomeDir() fell back to os.tmpdir() — the shared, world-writable /tmp on
+// Linux — so `/tmp/.config/gccusage/settings.json` planted by another user
+// loaded and its custom-command ran. Every directory derived from home must
+// now be null instead: no config, no cache, no transcripts.
+describe("with no home directory at all (SEC-004)", () => {
+  let originalTmpdir: string | undefined;
+  let originalXdgConfig: string | undefined;
+  let sharedTmp: string;
+
+  beforeEach(() => {
+    originalTmpdir = process.env["TMPDIR"];
+    originalXdgConfig = process.env["XDG_CONFIG_HOME"];
+    delete process.env["XDG_CACHE_HOME"];
+    delete process.env["XDG_CONFIG_HOME"];
+    // A planted config in what os.tmpdir() returns, to prove it is never read.
+    sharedTmp = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-shared-tmp-"));
+    process.env["TMPDIR"] = sharedTmp;
+    noPasswd.on = true;
+  });
+
+  afterEach(() => {
+    noPasswd.on = false;
+    if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = originalTmpdir;
+    if (originalXdgConfig === undefined) delete process.env["XDG_CONFIG_HOME"];
+    else process.env["XDG_CONFIG_HOME"] = originalXdgConfig;
+    fs.rmSync(sharedTmp, { recursive: true, force: true });
+  });
+
+  it.each([
+    ["HOME is empty", ""],
+    ["HOME is unset", undefined],
+  ])("resolves no home, cache, config or transcripts when %s", (_label, home) => {
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+
+    expect(getHomeDir()).toBeNull();
+    expect(getClaudeDataDir()).toBeNull();
+    expect(getProjectsDir()).toBeNull();
+    expect(getCacheDir()).toBeNull();
+    expect(getConfigDir()).toBeNull();
+    expect(findSessionJsonlFiles("session-1")).toEqual([]);
+    expect(findTodayJsonlFileStats()).toEqual([]);
+  });
+
+  it("does not fall back to a relative TMPDIR either", () => {
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = "relative-tmp";
+
+    expect(getHomeDir()).toBeNull();
+    expect(getCacheDir()).toBeNull();
+    expect(getConfigDir()).toBeNull();
+  });
+
+  it("still honours an absolute XDG_CACHE_HOME and XDG_CONFIG_HOME", () => {
+    process.env["HOME"] = "";
+    process.env["XDG_CACHE_HOME"] = path.join(tmpHome, "xdg-cache");
+    process.env["XDG_CONFIG_HOME"] = path.join(tmpHome, "xdg-config");
+
+    expect(getCacheDir()).toBe(path.join(tmpHome, "xdg-cache", "gccusage"));
+    expect(getConfigDir()).toBe(path.join(tmpHome, "xdg-config", "gccusage"));
+  });
 });
 
 // SEC-003. Cache directories came out 0755: anyone on the machine could list

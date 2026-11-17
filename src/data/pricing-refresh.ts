@@ -21,8 +21,8 @@ export const REFRESH_BACKOFF_MS = 10 * 60 * 1000;
  */
 export const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
 
-function stampPath(): string {
-  return path.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
+function stampPath(cacheDir: string): string {
+  return path.join(cacheDir, PRICING_REFRESH_STAMP_FILE);
 }
 
 /**
@@ -35,11 +35,11 @@ function stampPath(): string {
  */
 const StampSchema = v.object({ timestamp: v.pipe(v.number(), v.finite()) });
 
-function attemptedRecently(): boolean {
+function attemptedRecently(cacheDir: string): boolean {
   // No stamp, an unreadable one, or one that fails the schema: treat as never
   // attempted. Failing open here only costs one spawn, and the stamp write
   // below re-arms the guard.
-  const stamp = readJsonValidated(stampPath(), StampSchema);
+  const stamp = readJsonValidated(stampPath(cacheDir), StampSchema);
   if (stamp === null) return false;
   return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
 }
@@ -59,15 +59,21 @@ function attemptedRecently(): boolean {
 export function maybeSpawnPricingRefresh(stale: boolean): void {
   if (!stale) return;
 
+  // No cache dir (SEC-004): the child would have nowhere to save prices, and
+  // with no stamp to write there is no backoff either — every render would
+  // spawn another refresher. Render from the bundled fallback instead.
+  const cacheDir = getCacheDir();
+  if (cacheDir === null) return;
+
   try {
-    if (attemptedRecently()) return;
+    if (attemptedRecently(cacheDir)) return;
 
     // Stamped BEFORE the spawn, by the parent. A child killed mid-fetch on a
     // blackholed network never reaches a stamp write of its own, so
     // child-side backoff would fail open on precisely the broken network this
     // exists for, and every prompt would spawn another refresher.
-    ensureDir(getCacheDir());
-    writeJsonAtomic(stampPath(), { timestamp: Date.now() });
+    ensureDir(cacheDir);
+    writeJsonAtomic(stampPath(cacheDir), { timestamp: Date.now() });
 
     // Our own file, not process.argv[1]. Everything ships as one bundle, so
     // this resolves to dist/index.js — the file that handles the command —

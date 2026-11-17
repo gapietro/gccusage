@@ -23,7 +23,7 @@ const RESET = "[0m";
 function shortenPath(filePath: string): string {
   const home = getHomeDir();
   // A home of "/" would prefix-match every absolute path.
-  if (home === "/" || !filePath.startsWith(home)) return filePath;
+  if (home === null || home === "/" || !filePath.startsWith(home)) return filePath;
   return `~${filePath.slice(home.length)}`;
 }
 

@@ -748,7 +748,7 @@ describe("cwdWidget", () => {
     // Same distinguishing assertion as projectWidget's: reading
     // process.env.HOME directly leaves the path unabbreviated here.
     delete process.env["HOME"];
-    const out = cwdWidget.render(ctx(path.join(getHomeDir(), "projects")), { type: "cwd" });
+    const out = cwdWidget.render(ctx(path.join(getHomeDir()!, "projects")), { type: "cwd" });
     expect(out?.text).toBe("~/projects");
   });
 
