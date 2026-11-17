@@ -354,6 +354,20 @@ describe("gccusage setup", () => {
     }
   });
 
+  it("narrows an existing install's cache modes (SEC-003)", async () => {
+    // XDG_CACHE_HOME is tmpDir in this block, so the cache is tmpDir/gccusage.
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "daily"), { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "daily", "abc.json"), "{}");
+    fs.chmodSync(cacheDir, 0o755);
+    fs.chmodSync(path.join(cacheDir, "daily", "abc.json"), 0o644);
+
+    await runCli(["setup"]);
+
+    expect(fs.statSync(cacheDir).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.join(cacheDir, "daily", "abc.json")).mode & 0o777).toBe(0o600);
+  });
+
   it("removes the orphaned turn store left by the pre-#129 tracker", async () => {
     const cacheDir = path.join(tmpDir, "gccusage");
     fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
@@ -605,5 +619,21 @@ describe("gccusage refresh-pricing", () => {
     await runCli(["refresh-pricing"]);
 
     expect(fs.existsSync(orphan)).toBe(false);
+  });
+
+  // SEC-003, review of #154: likewise for narrowing a pre-SEC-003 cache.
+  it("narrows an existing install's cache modes", async () => {
+    const shard = path.join(tmpDir, "gccusage", "daily", "abc.json");
+    fs.mkdirSync(path.dirname(shard), { recursive: true });
+    fs.writeFileSync(shard, "{}");
+    fs.chmodSync(path.join(tmpDir, "gccusage"), 0o755);
+    fs.chmodSync(path.dirname(shard), 0o755);
+    fs.chmodSync(shard, 0o644);
+
+    await runCli(["refresh-pricing"]);
+
+    expect(fs.statSync(path.join(tmpDir, "gccusage")).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.dirname(shard)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(shard).mode & 0o777).toBe(0o600);
   });
 });

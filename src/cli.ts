@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic, sweepStaleTempFiles } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
 import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
-import { getCacheDir, getHomeDir } from "./utils/paths.js";
+import { getCacheDir, getHomeDir, narrowCacheModes } from "./utils/paths.js";
 import { VERSION } from "./version.js";
 import type { TokenMetrics } from "./types/token-metrics.js";
 
@@ -59,8 +59,12 @@ export async function runCli(args: string[]): Promise<void> {
     case "refresh-pricing": {
       // The refresher is never spawned without a cache dir, but the command
       // is reachable by hand, so it checks rather than assumes.
+      // Narrowing a pre-SEC-003 cache tree runs here for the same reason.
       const cacheDir = getCacheDir();
-      if (cacheDir !== null) sweepStaleTempFiles(cacheDir);
+      if (cacheDir !== null) {
+        sweepStaleTempFiles(cacheDir);
+        narrowCacheModes(cacheDir);
+      }
       await refreshPricing();
       break;
     }
@@ -402,6 +406,9 @@ function runSetup(): void {
   writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 
   removeLegacyTurnStore();
+  // Off the render path, like the refresh child: narrow a pre-SEC-003 cache.
+  const cacheDir = getCacheDir();
+  if (cacheDir !== null) narrowCacheModes(cacheDir);
 
   console.log("gccusage setup complete!\n");
   // Name the file actually written when a symlink redirected it, so a

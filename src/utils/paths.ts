@@ -125,6 +125,81 @@ export function ensureDir(dir: string): void {
   }
 }
 
+/**
+ * Strip group and other permission bits from an EXISTING cache tree: the
+ * cache dir, its direct subdirectories (`daily/`, `blocks/`), and the files
+ * at those two levels (SEC-003, review of #154).
+ *
+ * `ensureDir` only narrows directories it creates, and cache files only
+ * become 0600 when rewritten, so an install from before SEC-003 kept a 0755
+ * `~/.cache/gccusage`, a 0755 `daily/`, and 0644 shards for sessions that
+ * never write again. This is the one-time fix-up for that.
+ *
+ * Bits are only ever removed (`mode & ~0o077`), never set, so this cannot
+ * widen anything. Each entry is lstat'ed and skipped if it is a symlink or
+ * is not owned by this uid: the tree is ours, but a link inside it could
+ * point anywhere, and someone else's file is not ours to change. Skipped
+ * entirely where there is no uid (Windows).
+ *
+ * Not run on the render path. Its callers are the detached refresh child
+ * and `setup`. It needs no "done" marker: once the tree is narrowed, every
+ * pass is a stat walk over a few dozen entries that changes nothing, at
+ * the refresh cadence. A marker would be more state to get wrong, for a
+ * saving no one would notice.
+ */
+export function narrowCacheModes(cacheDir: string): void {
+  if (typeof process.getuid !== "function") return;
+  const uid = process.getuid();
+  if (!narrowOwned(cacheDir, uid, true)) return;
+
+  let names: string[];
+  try {
+    names = fs.readdirSync(cacheDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const entry = path.join(cacheDir, name);
+    if (!narrowOwned(entry, uid, true)) continue; // Files: narrowed, nothing to walk.
+    let inner: string[];
+    try {
+      inner = fs.readdirSync(entry);
+    } catch {
+      continue;
+    }
+    for (const innerName of inner) narrowOwned(path.join(entry, innerName), uid, false);
+  }
+}
+
+/**
+ * Narrow one entry if it is ours and not a link. Returns true only for a
+ * directory the caller may walk into. With `dirsToo` false, a directory is
+ * left as found — the walk's depth limit.
+ */
+function narrowOwned(p: string, uid: number, dirsToo: boolean): boolean {
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(p);
+  } catch {
+    return false;
+  }
+  if (st.isSymbolicLink() || st.uid !== uid) return false;
+  const isDir = st.isDirectory();
+  if (!st.isFile() && !isDir) return false;
+  if (isDir && !dirsToo) return false;
+
+  const current = st.mode & 0o777;
+  const narrowed = current & ~0o077;
+  if (narrowed !== current) {
+    try {
+      fs.chmodSync(p, narrowed);
+    } catch {
+      // Best effort: the next pass retries.
+    }
+  }
+  return isDir;
+}
+
 export function findJsonlFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   try {

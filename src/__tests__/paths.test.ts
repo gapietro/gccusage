@@ -16,6 +16,7 @@ import {
   getConfigDir,
   getClaudeDataDir,
   ensureDir,
+  narrowCacheModes,
   getProjectsDir,
   findTodayJsonlFileStats,
   shardKey,
@@ -243,6 +244,89 @@ describe("ensureDir", () => {
 
     expect(mode(existing)).toBe(0o755);
     expect(mode(path.join(existing, "gccusage"))).toBe(0o700);
+  });
+});
+
+// SEC-003, review of #154. ensureDir only narrows what it creates, so an
+// install from before that fix kept a 0755 cache dir and 0644 shards that are
+// never rewritten. narrowCacheModes strips group/other bits from OUR tree:
+// the cache dir, its direct subdirectories, and the files at those two levels.
+describe("narrowCacheModes", () => {
+  const mode = (p: string): number => fs.lstatSync(p).mode & 0o777;
+  let cache: string;
+
+  beforeEach(() => {
+    cache = path.join(tmpHome, "cache", "gccusage");
+    fs.mkdirSync(path.join(cache, "daily", "deeper"), { recursive: true });
+    fs.writeFileSync(path.join(cache, "pricing.json"), "{}");
+    fs.writeFileSync(path.join(cache, "daily", "s1.json"), "{}");
+    fs.writeFileSync(path.join(cache, "daily", "deeper", "x.json"), "{}");
+    for (const d of [cache, path.join(cache, "daily"), path.join(cache, "daily", "deeper")]) {
+      fs.chmodSync(d, 0o755);
+    }
+    for (const f of ["pricing.json", "daily/s1.json", "daily/deeper/x.json"]) {
+      fs.chmodSync(path.join(cache, f), 0o644);
+    }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("narrows the cache dir, its subdirectories and the files at both levels", () => {
+    narrowCacheModes(cache);
+
+    expect(mode(cache)).toBe(0o700);
+    expect(mode(path.join(cache, "daily"))).toBe(0o700);
+    expect(mode(path.join(cache, "pricing.json"))).toBe(0o600);
+    expect(mode(path.join(cache, "daily", "s1.json"))).toBe(0o600);
+  });
+
+  it("goes no deeper than one level of subdirectories", () => {
+    narrowCacheModes(cache);
+
+    expect(mode(path.join(cache, "daily", "deeper"))).toBe(0o755);
+    expect(mode(path.join(cache, "daily", "deeper", "x.json"))).toBe(0o644);
+  });
+
+  it("only removes bits, never adds them", () => {
+    fs.chmodSync(path.join(cache, "pricing.json"), 0o400);
+    narrowCacheModes(cache);
+    expect(mode(path.join(cache, "pricing.json"))).toBe(0o400);
+  });
+
+  it("does not follow a symlinked subdirectory or file out of the cache", () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-outside-"));
+    try {
+      fs.chmodSync(outside, 0o755);
+      const victim = path.join(outside, "victim.json");
+      fs.writeFileSync(victim, "{}");
+      fs.chmodSync(victim, 0o644);
+      fs.symlinkSync(outside, path.join(cache, "linked-dir"));
+      fs.symlinkSync(victim, path.join(cache, "linked-file.json"));
+
+      narrowCacheModes(cache);
+
+      expect(mode(outside)).toBe(0o755);
+      expect(mode(victim)).toBe(0o644);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves entries owned by another uid alone", () => {
+    // `getuid` is optional on the type (absent on Windows).
+    const proc = process as { getuid: () => number };
+    vi.spyOn(proc, "getuid").mockReturnValue(proc.getuid() + 1);
+
+    narrowCacheModes(cache);
+
+    expect(mode(cache)).toBe(0o755);
+    expect(mode(path.join(cache, "pricing.json"))).toBe(0o644);
+  });
+
+  it("never throws for a missing directory", () => {
+    expect(() => narrowCacheModes(path.join(tmpHome, "absent"))).not.toThrow();
   });
 });
 
