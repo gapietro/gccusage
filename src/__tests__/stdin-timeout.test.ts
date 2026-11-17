@@ -15,6 +15,7 @@ import {
   resolveTimeoutMs,
   DEFAULT_STDIN_TIMEOUT_MS,
 } from "../data/stdin-reader.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * `readStdin` sat at 0% coverage because it read the global `process.stdin`
@@ -183,8 +184,7 @@ describe.skipIf(!distExists)("slow stdin against the shipped bundle", () => {
         // Outside any repo: a render must never run git in the checkout (#148).
         cwd: dir,
         env: {
-          ...process.env,
-          HOME: dir,
+          ...isolatedEnv(dir),
           ...refresher.env,
           GCCUSAGE_STDIN_TIMEOUT_MS: String(opts.timeoutMs),
           COLUMNS: "120",

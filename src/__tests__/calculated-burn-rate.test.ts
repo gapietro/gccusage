@@ -16,6 +16,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * COR-008: the calculated burn rate priced ALL session tokens at the CURRENT
@@ -331,9 +332,7 @@ describe.skipIf(!distExists)("the calculated burn rate through the real bundle (
       cwd: dir,
       input: JSON.stringify({ session_id: SESSION, model: { id: modelId, display_name: "M" } }),
       env: {
-        ...process.env,
-        HOME: dir,
-        XDG_CONFIG_HOME: path.join(dir, "config"),
+        ...isolatedEnv(dir),
         ...refresher.env,
         COLUMNS: "200",
       },

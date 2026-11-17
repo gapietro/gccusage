@@ -9,6 +9,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * REL-001 — concurrent renders losing daily-cost updates — reached production
@@ -58,11 +59,11 @@ function render(sessionId: string, costUsd: number): Promise<void> {
     const child = spawn(process.execPath, [DIST], {
       // Outside any repo: a render must never run git in the checkout (#148).
       cwd: dir,
-      // HOME isolates it from the user's transcripts and settings;
-      // XDG_CACHE_HOME isolates the daily store this test is measuring.
+      // HOME and XDG_CONFIG_HOME isolate it from the user's transcripts and
+      // settings; refresher.env's XDG_CACHE_HOME (the temp dir itself, see
+      // above) isolates the daily store this test is measuring.
       env: {
-        ...process.env,
-        HOME: dir,
+        ...isolatedEnv(dir),
         ...refresher.env,
       },
       stdio: ["pipe", "ignore", "ignore"],

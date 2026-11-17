@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * #145 through the shipped bundle. A non-finite calculated session cost used
@@ -111,9 +112,7 @@ function render(): string {
     cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, model: OPUS }),
     env: {
-      ...process.env,
-      HOME: dir,
-      XDG_CONFIG_HOME: path.join(dir, "config"),
+      ...isolatedEnv(dir),
       ...refresher.env,
       COLUMNS: "200",
     },

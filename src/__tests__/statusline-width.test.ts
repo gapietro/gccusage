@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -60,9 +61,7 @@ afterEach(() => {
 
 function runStatusline(columns: string | undefined): string {
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: dir,
-    XDG_CONFIG_HOME: path.join(dir, "config"),
+    ...isolatedEnv(dir),
     ...refresher.env,
   };
   if (columns === undefined) delete env["COLUMNS"];
