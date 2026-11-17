@@ -11,15 +11,12 @@ on:
   push:
     branches: [main]
 
-# This workflow only reads. build-badge.yml needs contents: write because it
-# commits; nothing here does.
+# Read-only: nothing in CI commits, tags or publishes.
 permissions:
   contents: read
 
-# Superseding a run is correct here and would NOT be in build-badge.yml. That
-# workflow reads a shared, mutating value (the branch tip) and explains at
-# length why serialising it by queue loses counts. CI reads only the commit it
-# was triggered for, so an obsoleted run has nothing to preserve.
+# Superseding a run is correct: each run reads only the commit it was
+# triggered for, so an obsoleted run has nothing to preserve.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -35,20 +32,24 @@ jobs:
         # 22 is the floor the whole project claims: package.json engines,
         # devEngines and tsdown's target all say 22, and scripts/ are .ts
         # files Node runs directly, needing native type stripping (22.18+).
-        node: ["22", "24"]
+        # 26 is the current release line and what the maintainer runs (OPS-010).
+        node: ["22", "24", "26"]
     name: test (node ${{ matrix.node }})
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
-      # Note that this also runs `prepare`, i.e. `npm run build`. The suite
-      # depends on that: statusline-width.test.ts execs dist/index.js as a real
-      # child process to catch what vitest's resolver would paper over.
       - run: npm ci
+
+      # The suite execs dist/index.js as a real child process to catch what
+      # vitest's resolver would paper over, so build it here. This used to
+      # happen implicitly through `prepare`, which was removed because it also
+      # ran on `npm install -g github:…` without the dev toolchain (OPS-009).
+      - run: npm run build
 
       - run: npm run typecheck
 
@@ -68,16 +69,14 @@ jobs:
     # it suppressed; as an error rather than the default warning, that exact
     # decay now fails the build instead of accumulating quietly.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
 
-      # No build needed: oxlint reads source, never dist/. `--ignore-scripts`
-      # skips `prepare`, so this job stays a few seconds rather than paying for
-      # a bundle it will not look at.
+      # No build needed: oxlint reads source, never dist/.
       - run: npm ci --ignore-scripts
 
       - run: npm run lint
@@ -89,17 +88,18 @@ jobs:
     # This job asks a different question — is any single file unmeasured — and
     # the answer does not vary by Node version, so it runs once.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
 
-      # `prepare` builds dist/index.js during this, which the suite needs:
-      # the concurrency and CLI tests spawn the shipped bundle as a real child
-      # process rather than importing src.
       - run: npm ci
+
+      # The concurrency and CLI tests spawn the shipped bundle as a real child
+      # process rather than importing src.
+      - run: npm run build
 
       # Fails when any file on the production path drops below 70% statements.
       # The bar is per-file, not global: coverage was 87.78% overall when the
@@ -110,19 +110,16 @@ jobs:
   bundle-drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
 
       - run: npm ci
 
-      # Idempotent — `prepare` already built during `npm ci`. Kept explicit so
-      # the ordering is legible: the diff below is only meaningful *after* an
-      # install, never before, because npm has already rewritten the file by
-      # then.
+      # The diff below compares this fresh build with the committed bundle.
       - run: npm run build
 
       - name: Committed bundle matches a fresh build
