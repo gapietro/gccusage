@@ -16,21 +16,39 @@ import {
 // to a temp file lands a few bytes and then fails — the shape of ENOSPC, or of
 // a write interrupted after open(2) created the file. Declared via vi.hoisted
 // because a vi.mock factory cannot close over an ordinary top-level variable.
-const mockFs = vi.hoisted(() => ({ failTempWrite: false }));
+//
+// `umask077` stands in for a restrictive umask without changing the real
+// one for the whole worker: a `mode` passed at creation is masked with 077,
+// as open(2) would under that umask.
+//
+// `failChmod` stands in for a filesystem that refuses chmod (vfat, some
+// network mounts).
+const mockFs = vi.hoisted(() => ({ failTempWrite: false, umask077: false, failChmod: false }));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
     writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
-      const [target, data] = args;
+      const [target, data, options] = args;
       if (mockFs.failTempWrite && String(target).endsWith(".tmp")) {
         actual.writeFileSync(target, String(data).slice(0, 3));
         const err = new Error("ENOSPC: no space left on device, write") as NodeJS.ErrnoException;
         err.code = "ENOSPC";
         throw err;
       }
+      if (mockFs.umask077 && typeof options === "object" && options?.mode !== undefined) {
+        return actual.writeFileSync(target, data, { ...options, mode: Number(options.mode) & 0o700 });
+      }
       return actual.writeFileSync(...args);
+    },
+    chmodSync: (...args: Parameters<typeof actual.chmodSync>) => {
+      if (mockFs.failChmod) {
+        const err = new Error("EPERM: operation not permitted, chmod") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      }
+      return actual.chmodSync(...args);
     },
   };
 });
@@ -137,6 +155,62 @@ describe("writeFileAtomic", () => {
 
     expect(siblings(tmpDir)).toEqual(["settings.json"]);
     expect(fs.readFileSync(target, "utf-8")).toBe("previous");
+  });
+});
+
+// SEC-003. The temp file was created with the umask default (0644 under the
+// usual 022), and renaming it over the target replaced the target's mode.
+describe("file modes (SEC-003)", () => {
+  const mode = (p: string): number => fs.statSync(p).mode & 0o777;
+
+  it("writeFileAtomic applies an explicit mode to the file it creates", () => {
+    const target = path.join(tmpDir, "settings.json");
+    writeFileAtomic(target, "{}", 0o600);
+    expect(mode(target)).toBe(0o600);
+  });
+
+  it("writeFileAtomic applies the mode exactly, replacing a wider existing file", () => {
+    const target = path.join(tmpDir, "settings.json");
+    fs.writeFileSync(target, "old");
+    fs.chmodSync(target, 0o644);
+
+    writeFileAtomic(target, "new", 0o600);
+
+    expect(mode(target)).toBe(0o600);
+  });
+
+  it("writeFileAtomic applies the mode exactly under a restrictive umask", () => {
+    // Creation alone is umask-masked: setup preserving a user's 0640 would
+    // land 0600 under umask 077. The explicit chmod is what makes it exact.
+    const target = path.join(tmpDir, "settings.json");
+    mockFs.umask077 = true;
+    try {
+      writeFileAtomic(target, "{}", 0o640);
+    } finally {
+      mockFs.umask077 = false;
+    }
+    expect(mode(target)).toBe(0o640);
+  });
+
+  it("still writes, no wider than asked, on a filesystem that refuses chmod", () => {
+    // Every cache write passes a mode, and the render-path daily-shard write
+    // is not yet caught (REL-005): a chmod failure that failed the write
+    // would erase the bar on every render on such a filesystem.
+    const target = path.join(tmpDir, "pricing.json");
+    mockFs.failChmod = true;
+    try {
+      expect(() => writeJsonAtomic(target, { a: 1 })).not.toThrow();
+    } finally {
+      mockFs.failChmod = false;
+    }
+    expect(JSON.parse(fs.readFileSync(target, "utf-8"))).toEqual({ a: 1 });
+    expect(mode(target) & ~0o600).toBe(0);
+  });
+
+  it("writeJsonAtomic writes cache files as 0600", () => {
+    const target = path.join(tmpDir, "pricing.json");
+    writeJsonAtomic(target, { a: 1 });
+    expect(mode(target)).toBe(0o600);
   });
 });
 

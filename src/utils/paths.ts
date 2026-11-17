@@ -73,9 +73,18 @@ export function getConfigDir(): string {
   return path.join(getHomeDir(), ".config", "gccusage");
 }
 
+/**
+ * Create `dir`, and any missing parents, as 0700 (SEC-003). The cache holds
+ * session ids and per-session spend, and at the umask default of 0755 any
+ * local user could list and read them.
+ *
+ * The mode applies only to directories this call creates. One that already
+ * exists — `~/.cache` itself, say — is the user's, and its mode is their
+ * choice, so nothing here chmods it.
+ */
 export function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
 }
 

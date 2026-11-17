@@ -14,8 +14,15 @@ let counter = 0;
  * already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
  * a file the user reads and edits, so it keeps its 2-space indentation and
  * trailing newline rather than the compact encoding `writeJsonAtomic` emits.
+ *
+ * `mode`, when given, is the exact permission set the file ends up with. The
+ * rename replaces the target's inode, so the target's own mode never survives
+ * a write: without this the result is whatever the umask gives a new file,
+ * and setup turned a 0600 settings.json holding `env` secrets into 0644
+ * (SEC-003). It is applied to the temp file before the rename, so the target
+ * is never visible with a wider mode, even briefly.
  */
-export function writeFileAtomic(filePath: string, contents: string): void {
+export function writeFileAtomic(filePath: string, contents: string, mode?: number): void {
   const dir = path.dirname(filePath);
   ensureDir(dir);
 
@@ -27,7 +34,24 @@ export function writeFileAtomic(filePath: string, contents: string): void {
   // before a single byte lands, so a write failing part-way (ENOSPC, EIO)
   // used to leave it behind with nothing to remove it (REL-008).
   try {
-    fs.writeFileSync(tmpPath, contents, "utf-8");
+    if (mode === undefined) {
+      fs.writeFileSync(tmpPath, contents, "utf-8");
+    } else {
+      // Created with `mode` so it is never wider than asked for, then chmod'd
+      // because creation is masked by the umask (0640 under 077 would land as
+      // 0600) and an existing file — a leftover from a reused pid — keeps its
+      // old mode. This is our own temp file; no user path is chmod'd.
+      fs.writeFileSync(tmpPath, contents, { encoding: "utf-8", mode });
+      try {
+        fs.chmodSync(tmpPath, mode);
+      } catch {
+        // A filesystem that refuses chmod (vfat, some network mounts). The
+        // creation mode already bounds the file at or below `mode`, so the
+        // write is still safe. Failing it instead would throw from every
+        // cache write, and the daily-shard write on the render path is not
+        // yet caught (REL-005), so that would erase the bar.
+      }
+    }
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     try {
@@ -114,9 +138,13 @@ function sweepDir(dir: string, now: number, depthLeft: number): void {
  * filesystem, which is what makes the rename atomic.
  *
  * Throws on failure; callers keep whatever error posture they already have.
+ *
+ * Always 0600: every caller is a cache file under `getCacheDir()` — session
+ * ids, per-session spend, transcript-derived aggregates — and nobody but the
+ * user needs to read them (SEC-003).
  */
 export function writeJsonAtomic(filePath: string, data: unknown): void {
-  writeFileAtomic(filePath, JSON.stringify(data));
+  writeFileAtomic(filePath, JSON.stringify(data), 0o600);
 }
 
 /**

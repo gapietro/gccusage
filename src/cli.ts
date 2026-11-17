@@ -2,7 +2,15 @@ import { getTodayAggregate } from "./cache/today-aggregate-cache.js";
 import { fetchPricing, refreshPricing } from "./data/pricing-fetcher.js";
 import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator.js";
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
-import { readFileSync, existsSync, rmSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  rmSync,
+  realpathSync,
+  lstatSync,
+  readlinkSync,
+  statSync,
+} from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic, sweepStaleTempFiles } from "./utils/atomic-json.js";
@@ -220,6 +228,56 @@ function removeLegacyTurnStore(): void {
   }
 }
 
+/** Owner read/write only: for files that may hold `env` secrets. */
+const PRIVATE_FILE_MODE = 0o600;
+
+/**
+ * The file a write to `settingsPath` should actually replace.
+ *
+ * `writeFileAtomic` renames a temp file over its target, and a rename over a
+ * symlink replaces the link, not the file it points to. Dotfiles managers
+ * link `~/.claude/settings.json` into a repo, so setup was silently turning
+ * that link into a detached regular file (SEC-003). Writing to the resolved
+ * path keeps the link and updates the file the user actually manages.
+ *
+ * Only the write is redirected. Reads, error messages and the `.bak` stay on
+ * the logical path: it is the one the user knows, and a backup beside the
+ * real target could land inside their dotfiles repo.
+ *
+ * A dangling link (its target does not exist yet) is followed one level, so
+ * setup creates the file the link names rather than replacing the link.
+ */
+function resolveWriteTarget(settingsPath: string): string {
+  try {
+    return realpathSync(settingsPath);
+  } catch {
+    // Missing or dangling; only the latter is a link worth following.
+  }
+  try {
+    if (lstatSync(settingsPath).isSymbolicLink()) {
+      return resolve(dirname(settingsPath), readlinkSync(settingsPath));
+    }
+  } catch {
+    // No file at all: write a new one at the logical path.
+  }
+  return settingsPath;
+}
+
+/**
+ * The permission bits `target` already has, so a rewrite does not change them,
+ * or 0600 for a file setup is creating. settings.json often carries `env`
+ * secrets, and the atomic writer's temp file would otherwise take the umask
+ * default: 0600 came back as 0644 (SEC-003). Preserved rather than forced to
+ * 0600, because a user who chose a mode for their own file chose it.
+ */
+function existingModeOr(target: string): number {
+  try {
+    return statSync(target).mode & 0o777;
+  } catch {
+    return PRIVATE_FILE_MODE;
+  }
+}
+
 function runSetup(): void {
   // Resolve the absolute path to this script's dist/index.js
   const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
@@ -234,15 +292,17 @@ function runSetup(): void {
   const settings = existing?.settings ?? {};
 
   // The backup is for the success path — the common case, and the one that
-  // previously got none (#89).
-  if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw);
+  // previously got none (#89). Always 0600: it holds the same `env` secrets
+  // as the original, whatever the original's mode (SEC-003).
+  if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw, PRIVATE_FILE_MODE);
 
   const node = resolveStableNodePath();
   const command = buildStatusLineCommand(node.path, scriptPath);
   settings["statusLine"] = { type: "command", command };
 
   // Indented with a trailing newline: this is a file the user reads and edits.
-  writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  const target = resolveWriteTarget(settingsPath);
+  writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 
   removeLegacyTurnStore();
 

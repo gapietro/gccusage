@@ -7,6 +7,7 @@ import {
   getCacheDir,
   getConfigDir,
   getClaudeDataDir,
+  ensureDir,
   getProjectsDir,
   findTodayJsonlFileStats,
   shardKey,
@@ -140,6 +141,36 @@ describe("getConfigDir", () => {
       expect(dir).not.toBe(path.resolve(relative, "gccusage"));
     },
   );
+});
+
+// SEC-003. Cache directories came out 0755: anyone on the machine could list
+// session ids and read per-session spend. Only directories ensureDir creates
+// are narrowed — an existing directory is the user's, and is left as found.
+describe("ensureDir", () => {
+  const mode = (p: string): number => fs.statSync(p).mode & 0o777;
+
+  it("creates every missing level as 0700", () => {
+    const outer = path.join(tmpHome, "cache-root");
+    const inner = path.join(outer, "gccusage", "daily");
+
+    ensureDir(inner);
+
+    expect(mode(outer)).toBe(0o700);
+    expect(mode(path.join(outer, "gccusage"))).toBe(0o700);
+    expect(mode(inner)).toBe(0o700);
+  });
+
+  it("does not chmod a directory that already exists", () => {
+    const existing = path.join(tmpHome, "users-own");
+    fs.mkdirSync(existing);
+    fs.chmodSync(existing, 0o755);
+
+    ensureDir(existing);
+    ensureDir(path.join(existing, "gccusage"));
+
+    expect(mode(existing)).toBe(0o755);
+    expect(mode(path.join(existing, "gccusage"))).toBe(0o700);
+  });
 });
 
 describe("findSessionJsonlFiles", () => {

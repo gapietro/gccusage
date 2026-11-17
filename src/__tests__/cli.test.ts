@@ -345,6 +345,88 @@ describe("gccusage setup", () => {
     expect(fs.existsSync(path.join(cacheDir, "turn-count.json"))).toBe(false);
   });
 
+  // SEC-003. settings.json often carries `env` secrets (API keys, tokens).
+  // setup rewrote it through the atomic writer, whose temp file took the
+  // umask default: a 0600 file came back 0644, and the .bak was 0644 too.
+  describe("file modes and symlinks (SEC-003)", () => {
+    const mode = (p: string): number => fs.statSync(p).mode & 0o777;
+
+    it("preserves an existing settings.json's 0600 mode", async () => {
+      fs.writeFileSync(settingsPath(), '{"env":{"ANTHROPIC_API_KEY":"sk-test"}}\n');
+      fs.chmodSync(settingsPath(), 0o600);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o600);
+    });
+
+    it("preserves a mode wider than 0600 rather than narrowing the user's choice", async () => {
+      fs.writeFileSync(settingsPath(), "{}\n");
+      fs.chmodSync(settingsPath(), 0o640);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o640);
+    });
+
+    it("creates a new settings.json as 0600", async () => {
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o600);
+    });
+
+    it("writes the backup as 0600 even when settings.json is 0644", async () => {
+      // The backup holds the same secrets as the original; it gets the
+      // narrow mode regardless, and a stale wider .bak is replaced.
+      fs.writeFileSync(settingsPath(), '{"env":{"ANTHROPIC_API_KEY":"sk-test"}}\n');
+      fs.chmodSync(settingsPath(), 0o644);
+      fs.writeFileSync(backupPath(), "stale");
+      fs.chmodSync(backupPath(), 0o644);
+
+      await runCli(["setup"]);
+
+      expect(mode(backupPath())).toBe(0o600);
+    });
+
+    it("writes through a symlinked settings.json, leaving the link in place", async () => {
+      // A dotfiles manager links ~/.claude/settings.json into a repo. Renaming
+      // a temp file over the link replaced it with a regular file, silently
+      // detaching the user's managed copy.
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.writeFileSync(target, '{\n  "model": "opus"\n}\n');
+      fs.chmodSync(target, 0o600);
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(settingsPath())).toBe(target);
+      const after = JSON.parse(read(target));
+      expect(after.model).toBe("opus");
+      expect(after.statusLine.type).toBe("command");
+      expect(mode(target)).toBe(0o600);
+      // The backup stays beside the path the user knows, not in their
+      // dotfiles repo, and no temp file is left behind in either place.
+      expect(read(backupPath())).toBe('{\n  "model": "opus"\n}\n');
+      expect(fs.readdirSync(dotfiles)).toEqual(["claude-settings.json"]);
+    });
+
+    it("writes through a dangling symlink, creating its target", async () => {
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(read(target)).statusLine.type).toBe("command");
+      expect(mode(target)).toBe(0o600);
+    });
+  });
+
   it("completes setup even when the turn store cannot be deleted", async () => {
     // Flips on the mocked rmSync (top of file) so it throws EACCES for the
     // "turns" target — the case `{ force: true }` does NOT swallow. A cleanup
