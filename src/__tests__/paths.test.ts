@@ -17,6 +17,7 @@ import {
   getClaudeDataDir,
   ensureDir,
   narrowCacheModes,
+  collapseHome,
   getProjectsDir,
   findTodayJsonlFileStats,
   shardKey,
@@ -327,6 +328,34 @@ describe("narrowCacheModes", () => {
 
   it("never throws for a missing directory", () => {
     expect(() => narrowCacheModes(path.join(tmpHome, "absent"))).not.toThrow();
+  });
+});
+
+// Review of #154: one owner for "collapse home to ~", shared by the config
+// error line and the cwd widget, matching on a segment boundary only.
+describe("collapseHome", () => {
+  afterEach(() => {
+    noPasswd.on = false;
+  });
+
+  it("collapses home itself and paths under it", () => {
+    expect(collapseHome(tmpHome)).toBe("~");
+    expect(collapseHome(path.join(tmpHome, "a", "b"))).toBe(path.join("~", "a", "b"));
+  });
+
+  it("leaves a sibling that merely shares home's prefix alone", () => {
+    expect(collapseHome(`${tmpHome}2${path.sep}x`)).toBe(`${tmpHome}2${path.sep}x`);
+  });
+
+  it("collapses nothing when HOME is /", () => {
+    process.env["HOME"] = "/";
+    expect(collapseHome("/etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("collapses nothing when there is no home at all", () => {
+    process.env["HOME"] = "";
+    noPasswd.on = true;
+    expect(collapseHome(path.join(tmpHome, "a"))).toBe(path.join(tmpHome, "a"));
   });
 });
 

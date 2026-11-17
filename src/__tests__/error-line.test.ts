@@ -37,6 +37,15 @@ describe("formatConfigError", () => {
     expect(formatConfigError(MESSAGE, CONFIG)).toContain("~/.config/gccusage/settings.json");
   });
 
+  it("does not collapse a sibling directory that merely shares $HOME's prefix", () => {
+    // A bare startsWith turned /home/u2/x into "~2/x" (review of #154).
+    process.env["HOME"] = "/home/u";
+    const sibling = "/home/u2/.config/gccusage/settings.json";
+    const line = formatConfigError(MESSAGE, sibling);
+    expect(line).toContain(sibling);
+    expect(line).not.toContain("~2");
+  });
+
   it("leaves a path outside $HOME alone", () => {
     process.env["HOME"] = "/home/other";
     expect(formatConfigError(MESSAGE, CONFIG)).toContain(CONFIG);

@@ -35,6 +35,22 @@ export function getHomeDir(): string | null {
   return null;
 }
 
+/**
+ * `p` with the home directory collapsed to `~`, for display.
+ *
+ * Only on a path-segment boundary: a bare `startsWith(home)` turned
+ * `/home/u2/x` into `~2/x` when home was `/home/u` (review of #154). With no
+ * home, or a home of "/" (which would prefix-match every absolute path),
+ * nothing is collapsed. The one owner for the error line and the cwd widget.
+ */
+export function collapseHome(p: string): string {
+  const home = getHomeDir();
+  if (home === null || home === "/") return p;
+  if (p === home) return "~";
+  const prefix = home.endsWith(path.sep) ? home : home + path.sep;
+  return p.startsWith(prefix) ? `~${path.sep}${p.slice(prefix.length)}` : p;
+}
+
 /** `~/.claude`, where Claude Code keeps its data, or null with no home. */
 export function getClaudeDataDir(): string | null {
   const home = getHomeDir();

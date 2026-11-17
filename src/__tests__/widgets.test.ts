@@ -744,6 +744,13 @@ describe("cwdWidget", () => {
     expect(cwdWidget.render(ctx("/opt/src"), { type: "cwd" })?.text).toBe("/opt/src");
   });
 
+  it("does not abbreviate a sibling that merely shares home's prefix", () => {
+    // A bare startsWith turned /Users/x2/src into "~2/src" (review of #154).
+    process.env["HOME"] = "/Users/x";
+    expect(cwdWidget.render(ctx("/Users/x2/src"), { type: "cwd" })?.text).toBe("/Users/x2/src");
+    expect(cwdWidget.render(ctx("/Users/x"), { type: "cwd" })?.text).toBe("~");
+  });
+
   it("still abbreviates the resolved home when HOME is unset (#69)", () => {
     // Same distinguishing assertion as projectWidget's: reading
     // process.env.HOME directly leaves the path unabbreviated here.
