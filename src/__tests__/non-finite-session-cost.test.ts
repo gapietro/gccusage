@@ -139,7 +139,10 @@ describe.skipIf(!distExists)("non-finite session cost through the real bundle (#
     expect((JSON.parse(raw) as { costUsd: number }).costUsd).toBeCloseTo(0.03, 10);
   });
 
-  it("leaves the shard byte-identical when the summed cost overflows", () => {
+  // Not byte-identical since COR-009: the shard is re-stamped
+  // `"uncertain": true` so other sessions' bars mark the stale figure. The
+  // figures themselves, which is what #145 protected, must not move.
+  it("leaves the shard's figures unchanged when the summed cost overflows", () => {
     const before = seedShard(0.5, 0.2);
     writeTranscript([
       `{"input_tokens":1.7e308,"output_tokens":0}`,
@@ -147,7 +150,14 @@ describe.skipIf(!distExists)("non-finite session cost through the real bundle (#
     ]);
     render();
 
-    expect(fs.readFileSync(shardPath(), "utf8")).toBe(before);
+    const after = fs.readFileSync(shardPath(), "utf8");
+    expect(after).not.toContain("null");
+    const parsed = JSON.parse(after) as Record<string, unknown>;
+    expect(parsed["uncertain"]).toBe(true);
+    expect({ ...parsed, uncertain: undefined }).toEqual({
+      ...(JSON.parse(before) as object),
+      uncertain: undefined,
+    });
   });
 
   it("renders one $? for the session and keeps its last good spend in Today:, marked", () => {

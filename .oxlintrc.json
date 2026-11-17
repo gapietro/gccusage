@@ -32,7 +32,7 @@
     "unicorn/consistent-function-scoping": "off"
   },
 
-  // `src/` (including its 54 test files) and `scripts/` are both linted.
+  // `src/` (including its tests) and `scripts/` are both linted.
   // Linting the tests is the point rather than an afterthought: this repo's
   // history records seven distinct ways a test in it has asserted nothing.
   "ignorePatterns": ["dist", "coverage", "node_modules"]

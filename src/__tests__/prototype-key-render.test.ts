@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -77,7 +77,7 @@ function writeTranscript(models: string[]): void {
 }
 
 function render(stdin: Record<string, unknown>): string {
-  const out = execFileSync(process.execPath, [DIST], {
+  const result = spawnSync(process.execPath, [DIST], {
     // Outside any repo: a render must never run git in the checkout (#148).
     cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, ...stdin }),
@@ -87,11 +87,16 @@ function render(stdin: Record<string, unknown>): string {
       XDG_CONFIG_HOME: path.join(dir, "config"),
       ...refresher.env,
       COLUMNS: "200",
+      // The renderer contains a widget throw as a missing segment (REL-007),
+      // so "drops the burn-rate segment" would pass on a crash. Under this
+      // flag a contained throw is reported on stderr, checked below.
+      GCCUSAGE_DEBUG: "1",
     },
     encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
   });
-  return stripAnsi(out);
+  expect(result.status).toBe(0);
+  expect(result.stderr, "a widget threw and was contained").not.toContain("gccusage: widget");
+  return stripAnsi(result.stdout);
 }
 
 function shardCostUsd(): unknown {
@@ -161,9 +166,9 @@ describe.skipIf(!distExists)("prototype-key model ids through the real bundle (#
       // The same rendering an ordinary unknown model gets: a lower bound with
       // the uncertainty marker, not "$?" for the whole session.
       expect(out).toContain("$0.03?");
-      // Deliberately silent on a `?` after Today: in store mode Today is not
-      // marked uncertain for ANY unpriced model, which predates #143. Pre-fix
-      // this read "Today: $?", so the assertion still discriminates.
+      // Since COR-009 the store marks Today: too ("Today: $0.03?"); a
+      // substring match covers both. Pre-fix (#143) this read "Today: $?", so
+      // the assertion still discriminates.
       expect(out).toContain("Today: $0.03");
       expect(shardCostUsd()).toBeCloseTo(0.03, 10);
     },
@@ -175,13 +180,18 @@ describe.skipIf(!distExists)("prototype-key model ids through the real bundle (#
     expect(render({ model: OPUS })).toContain("/hr");
   });
 
-  it.each(PROTOTYPE_KEYS)("drops the burn-rate segment for stdin model id %j", (id) => {
+  it.each(PROTOTYPE_KEYS)("rates the transcript, not stdin model id %j", (id) => {
     writeSettings(COST_LAYOUT);
     writeTranscript(["claude-opus-4-6"]);
     const out = render({ model: { id, display_name: "X" } });
-    // calculateBurnRate's contract for an unpriced model: no segment rather
-    // than a figure it cannot back. Pre-fix this rendered "$?/hr".
-    expect(out).not.toContain("/hr");
+    // Pre-#143 this rendered "$?/hr": the stdin id was looked up as pricing.
+    // #143 then dropped the segment for an unpriced stdin id. Since COR-008
+    // the stdin id no longer reaches the rate at all: it divides the
+    // per-model session cost, so it is the opus transcript's rate — $0.03
+    // over the five minutes `writeTranscript` backdates — exactly as in the
+    // control above.
+    expect(out).not.toContain("$?/hr");
+    expect(out).toMatch(/\$0\.3[56]\/hr/);
     expect(out).toContain("$0.03");
   });
 });

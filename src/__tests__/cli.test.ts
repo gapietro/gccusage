@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { shellQuote, buildStatusLineCommand, runCli } from "../cli.js";
+import { noPasswd } from "./helpers/no-passwd.js";
 
 describe("shellQuote", () => {
   it("wraps plain paths in single quotes", () => {
@@ -51,6 +52,24 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+// Same narrow shape as mockFs: null passes userInfo() through untouched. Set,
+// it stands in for the passwd entry, so a test of the HOME-empty fallback
+// resolves into its own temp dir instead of the developer's real home.
+// Layered over helpers/no-passwd.ts, whose `noPasswd.on` removes the passwd
+// entry altogether.
+const mockOs = vi.hoisted(() => ({ passwdHome: null as string | null }));
+
+vi.mock("node:os", async (importOriginal) => {
+  const base = await (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal);
+  return {
+    ...base,
+    userInfo: ((...args: Parameters<typeof base.userInfo>) => {
+      const info = base.userInfo(...args);
+      return mockOs.passwdHome === null ? info : { ...info, homedir: mockOs.passwdHome };
+    }) as typeof base.userInfo,
+  };
+});
+
 // `gccusage today` prices straight from the table, so an unpriced model was
 // dropped from both the total and the by-model list with nothing said (#82).
 vi.mock("../data/pricing-fetcher.js", () => ({
@@ -62,6 +81,8 @@ vi.mock("../data/pricing-fetcher.js", () => ({
       cacheReadCostPerToken: 0,
     },
   })),
+  // `refresh-pricing` must never reach the network from a test.
+  refreshPricing: vi.fn(async () => false),
 }));
 
 describe("gccusage today", () => {
@@ -286,6 +307,67 @@ describe("gccusage setup", () => {
     await expect(runCli(["setup"])).rejects.toThrow("re-run `gccusage setup`");
   });
 
+  // SEC-004's class, in setup: `os.homedir()` returns "" for HOME="", and
+  // `resolve("", ".claude", "settings.json")` is relative to the cwd — so
+  // setup wrote a settings.json into whatever directory it was run from.
+  it("writes under the passwd home, not the working directory, when HOME is empty", async () => {
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-cwd-"));
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwdDir);
+    process.env["HOME"] = "";
+    mockOs.passwdHome = tmpDir;
+    try {
+      await runCli(["setup"]);
+    } finally {
+      mockOs.passwdHome = null;
+      cwdSpy.mockRestore();
+    }
+
+    try {
+      expect(fs.existsSync(path.join(cwdDir, ".claude", "settings.json"))).toBe(false);
+      expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
+    } finally {
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+    }
+  });
+
+  // SEC-004, review of #154. With no passwd entry either, getHomeDir() used to
+  // fall back to os.tmpdir(), so setup wrote `<tmpdir>/.claude/settings.json`
+  // — on Linux, into the shared /tmp. It must refuse before writing anything.
+  it.each([
+    ["HOME is empty", ""],
+    ["HOME is unset", undefined],
+  ])("refuses with a clear error, writing nothing, when %s and there is no passwd entry", async (_label, home) => {
+    const sharedTmp = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-tmp-"));
+    const originalTmpdir = process.env["TMPDIR"];
+    process.env["TMPDIR"] = sharedTmp;
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+    noPasswd.on = true;
+    try {
+      await expect(runCli(["setup"])).rejects.toThrow("cannot determine home directory");
+      expect(fs.readdirSync(sharedTmp)).toEqual([]);
+    } finally {
+      noPasswd.on = false;
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+      fs.rmSync(sharedTmp, { recursive: true, force: true });
+    }
+  });
+
+  it("narrows an existing install's cache modes (SEC-003)", async () => {
+    // XDG_CACHE_HOME is tmpDir in this block, so the cache is tmpDir/gccusage.
+    const cacheDir = path.join(tmpDir, "gccusage");
+    fs.mkdirSync(path.join(cacheDir, "daily"), { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "daily", "abc.json"), "{}");
+    fs.chmodSync(cacheDir, 0o755);
+    fs.chmodSync(path.join(cacheDir, "daily", "abc.json"), 0o644);
+
+    await runCli(["setup"]);
+
+    expect(fs.statSync(cacheDir).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.join(cacheDir, "daily", "abc.json")).mode & 0o777).toBe(0o600);
+  });
+
   it("removes the orphaned turn store left by the pre-#129 tracker", async () => {
     const cacheDir = path.join(tmpDir, "gccusage");
     fs.mkdirSync(path.join(cacheDir, "turns"), { recursive: true });
@@ -304,6 +386,213 @@ describe("gccusage setup", () => {
     expect(fs.existsSync(path.join(cacheDir, "turn-count.json"))).toBe(false);
   });
 
+  // SEC-003. settings.json often carries `env` secrets (API keys, tokens).
+  // setup rewrote it through the atomic writer, whose temp file took the
+  // umask default: a 0600 file came back 0644, and the .bak was 0644 too.
+  describe("file modes and symlinks (SEC-003)", () => {
+    const mode = (p: string): number => fs.statSync(p).mode & 0o777;
+
+    it("preserves an existing settings.json's 0600 mode", async () => {
+      fs.writeFileSync(settingsPath(), '{"env":{"ANTHROPIC_API_KEY":"sk-test"}}\n');
+      fs.chmodSync(settingsPath(), 0o600);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o600);
+    });
+
+    it("preserves a mode wider than 0600 rather than narrowing the user's choice", async () => {
+      fs.writeFileSync(settingsPath(), "{}\n");
+      fs.chmodSync(settingsPath(), 0o640);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o640);
+    });
+
+    it("drops group and other write bits instead of re-emitting a world-writable file", async () => {
+      // Preserving is applied with an explicit chmod, which bypasses the
+      // umask — so a 0666 file would otherwise come back 0666, and setup
+      // would re-certify a file anyone can rewrite (review of #154).
+      fs.writeFileSync(settingsPath(), "{}\n");
+      fs.chmodSync(settingsPath(), 0o666);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o644);
+    });
+
+    it("creates a new settings.json as 0600", async () => {
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o600);
+    });
+
+    it("writes the backup as 0600 even when settings.json is 0644", async () => {
+      // The backup holds the same secrets as the original; it gets the
+      // narrow mode regardless, and a stale wider .bak is replaced.
+      fs.writeFileSync(settingsPath(), '{"env":{"ANTHROPIC_API_KEY":"sk-test"}}\n');
+      fs.chmodSync(settingsPath(), 0o644);
+      fs.writeFileSync(backupPath(), "stale");
+      fs.chmodSync(backupPath(), 0o644);
+
+      await runCli(["setup"]);
+
+      expect(mode(backupPath())).toBe(0o600);
+    });
+
+    it("writes through a symlinked settings.json, leaving the link in place", async () => {
+      // A dotfiles manager links ~/.claude/settings.json into a repo. Renaming
+      // a temp file over the link replaced it with a regular file, silently
+      // detaching the user's managed copy.
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.writeFileSync(target, '{\n  "model": "opus"\n}\n');
+      fs.chmodSync(target, 0o600);
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(settingsPath())).toBe(target);
+      const after = JSON.parse(read(target));
+      expect(after.model).toBe("opus");
+      expect(after.statusLine.type).toBe("command");
+      expect(mode(target)).toBe(0o600);
+      // The backup stays beside the path the user knows, not in their
+      // dotfiles repo, and no temp file is left behind in either place.
+      expect(read(backupPath())).toBe('{\n  "model": "opus"\n}\n');
+      expect(fs.readdirSync(dotfiles)).toEqual(["claude-settings.json"]);
+    });
+
+    it("names the file it actually wrote when a symlink redirected it", async () => {
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.writeFileSync(target, "{}\n");
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      // realpath: on macOS the temp dir is itself under a symlink (/var).
+      expect(logged).toContain(`Settings: ${settingsPath()} -> ${fs.realpathSync(target)}`);
+    });
+
+    it("prints the plain path when nothing redirected the write", async () => {
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).toContain(`Settings: ${settingsPath()}\n`);
+    });
+
+    it("does not treat a symlinked ancestor as a redirect when settings.json is a regular file", async () => {
+      // realpath differs from the logical path whenever ANY ancestor is a
+      // link — macOS /var, Fedora Atomic /home -> /var/home, FreeBSD
+      // /home -> /usr/home, a linked ~/.claude. Only a link at settings.json
+      // itself is a redirect. Built explicitly so it holds on Linux CI too.
+      const realHome = path.join(tmpDir, "real-home");
+      const linkHome = path.join(tmpDir, "link-home");
+      fs.mkdirSync(path.join(realHome, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(realHome, ".claude", "settings.json"), "{}\n");
+      fs.symlinkSync(realHome, linkHome);
+      process.env["HOME"] = linkHome;
+      const logical = path.join(linkHome, ".claude", "settings.json");
+
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).toContain(`Settings: ${logical}\n`);
+      expect(logged).not.toContain("->");
+      expect(JSON.parse(read(logical)).statusLine.type).toBe("command");
+    });
+
+    it("refuses a symlink into a read-only directory before writing anything", async () => {
+      // The nix home-manager shape: settings.json links into a read-only
+      // store. Writing through it failed with a bare EACCES on the temp file —
+      // after the .bak had already been written (review of #154).
+      const store = path.join(tmpDir, "store");
+      fs.mkdirSync(store);
+      const target = path.join(store, "settings.json");
+      fs.writeFileSync(target, '{"model":"opus"}\n');
+      fs.chmodSync(target, 0o444);
+      fs.chmodSync(store, 0o555);
+      fs.symlinkSync(target, settingsPath());
+      try {
+        await expect(runCli(["setup"])).rejects.toThrow(/is a symlink to .*settings\.json/);
+        await expect(runCli(["setup"])).rejects.toThrow("Add the statusLine entry there yourself");
+
+        expect(fs.existsSync(backupPath())).toBe(false);
+        expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+        expect(read(target)).toBe('{"model":"opus"}\n');
+      } finally {
+        // Or the afterEach rmSync cannot empty the directory.
+        fs.chmodSync(store, 0o755);
+      }
+    });
+
+    it("resolves a dangling relative link against the real directory, not lexically", async () => {
+      // ~/.claude is itself a link into dotfiles, and settings.json is a
+      // dangling `../shared/settings.json`. The kernel resolves `..` from the
+      // link's REAL directory (dotfiles/claude), so the file it names is
+      // dotfiles/shared/settings.json. Lexical resolution from ~/.claude
+      // wrote ~/shared/settings.json and left the link dangling (review of
+      // #154).
+      fs.rmSync(path.join(tmpDir, ".claude"), { recursive: true });
+      const claudeDir = path.join(tmpDir, "dotfiles", "claude");
+      const shared = path.join(tmpDir, "dotfiles", "shared");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.mkdirSync(shared);
+      fs.symlinkSync(claudeDir, path.join(tmpDir, ".claude"));
+      fs.symlinkSync(path.join("..", "shared", "settings.json"), path.join(claudeDir, "settings.json"));
+
+      await runCli(["setup"]);
+
+      expect(JSON.parse(read(path.join(shared, "settings.json"))).statusLine.type).toBe("command");
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(settingsPath()), "the link now resolves").toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "shared"))).toBe(false);
+    });
+
+    it("refuses a dangling link into a directory that does not exist", async () => {
+      // An unmounted volume. Following the link created a shadow directory
+      // chain where the volume should be (review of #154).
+      const missing = path.join(tmpDir, "Volumes", "dotfiles", "claude", "settings.json");
+      fs.symlinkSync(missing, settingsPath());
+
+      await expect(runCli(["setup"])).rejects.toThrow(/does not exist/);
+
+      expect(fs.existsSync(path.join(tmpDir, "Volumes"))).toBe(false);
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(backupPath())).toBe(false);
+    });
+
+    it("refuses a symlink loop instead of replacing one of its links", async () => {
+      const other = path.join(tmpDir, ".claude", "b.json");
+      fs.symlinkSync(other, settingsPath());
+      fs.symlinkSync(settingsPath(), other);
+
+      await expect(runCli(["setup"])).rejects.toThrow(/symlink loop/);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(other).isSymbolicLink()).toBe(true);
+    });
+
+    it("writes through a dangling symlink, creating its target", async () => {
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(read(target)).statusLine.type).toBe("command");
+      expect(mode(target)).toBe(0o600);
+    });
+  });
+
   it("completes setup even when the turn store cannot be deleted", async () => {
     // Flips on the mocked rmSync (top of file) so it throws EACCES for the
     // "turns" target — the case `{ force: true }` does NOT swallow. A cleanup
@@ -320,5 +609,52 @@ describe("gccusage setup", () => {
     }
 
     expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
+  });
+});
+
+describe("gccusage refresh-pricing", () => {
+  let tmpDir: string;
+  let originalXdg: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-refresh-cmd-"));
+    originalXdg = process.env["XDG_CACHE_HOME"];
+    process.env["XDG_CACHE_HOME"] = tmpDir;
+  });
+
+  afterEach(() => {
+    if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = originalXdg;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // REL-008: the sweep is only as good as its caller. Deleting the call would
+  // leave every sweepStaleTempFiles unit test green and orphans accumulating.
+  it("sweeps orphaned temp files out of the cache directory", async () => {
+    const orphan = path.join(tmpDir, "gccusage", "daily", "abc.json.4242.0.tmp");
+    fs.mkdirSync(path.dirname(orphan), { recursive: true });
+    fs.writeFileSync(orphan, "");
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(orphan, old, old);
+
+    await runCli(["refresh-pricing"]);
+
+    expect(fs.existsSync(orphan)).toBe(false);
+  });
+
+  // SEC-003, review of #154: likewise for narrowing a pre-SEC-003 cache.
+  it("narrows an existing install's cache modes", async () => {
+    const shard = path.join(tmpDir, "gccusage", "daily", "abc.json");
+    fs.mkdirSync(path.dirname(shard), { recursive: true });
+    fs.writeFileSync(shard, "{}");
+    fs.chmodSync(path.join(tmpDir, "gccusage"), 0o755);
+    fs.chmodSync(path.dirname(shard), 0o755);
+    fs.chmodSync(shard, 0o644);
+
+    await runCli(["refresh-pricing"]);
+
+    expect(fs.statSync(path.join(tmpDir, "gccusage")).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.dirname(shard)).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(shard).mode & 0o777).toBe(0o600);
   });
 });

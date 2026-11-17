@@ -70,6 +70,13 @@ describe("non-finite stdin cost does not put \"Infinity\" on the bar (#131)", ()
     // actually appears, so this cannot pass by the widgets silently going
     // dark instead of rendering the (guarded) value.
     expect(output).toContain("$?");
+    // And one per widget the test names: "$?" alone could come from
+    // session-cost while burn-rate and today-spend crashed, which the
+    // renderer now contains as missing segments (REL-007, review of #154).
+    const visible = stripAnsi(output);
+    expect(visible).toContain("$?/hr");
+    // The store keeps the session's last good figure (#145), marked uncertain.
+    expect(visible).toMatch(/Today: \$[\d.]*\?/);
   });
 });
 

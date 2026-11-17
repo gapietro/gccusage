@@ -180,11 +180,24 @@ export function findPricing(model: string, table: PricingTable): ModelPricing | 
   return best === null ? null : table[best]!;
 }
 
+/**
+ * The calculated session cost per unit of elapsed time: the SAME per-model
+ * figure the session total shows, divided by how long the session has run.
+ *
+ * COR-008: this used to price the session's token totals at the CURRENT
+ * model's rate (the stdin model). A session of 400k opus and 1.6M haiku input
+ * tokens over an hour read $10.00/hr with opus selected and $2.00/hr with
+ * haiku, beside a per-model session total of $3.60. Taking `CostByModel`
+ * rather than raw totals makes the rate agree with that total by
+ * construction, whatever `/model` says now.
+ *
+ * Uncertainty is the caller's to flag, from the same `unpriced` and
+ * `approximated` lists that mark the session total: the rate divides a lower
+ * bound, so it is one too.
+ */
 export function calculateBurnRate(
-  sessionMetrics: TokenMetrics,
+  session: CostByModel,
   sessionStartTime: number | null,
-  pricing: PricingTable,
-  sessionModel?: string,
 ): BurnRate | null {
   if (!sessionStartTime) return null;
 
@@ -193,15 +206,17 @@ export function calculateBurnRate(
 
   const elapsedMinutes = elapsedMs / 60000;
 
-  // Without pricing there is no cost rate to report. Returning zero here
-  // would render a confident "$0.00/hr" next to real token usage, so the
-  // segment is dropped instead — the same stance getStdinBurnRate takes when
-  // stdin carries no cost.
-  if (!sessionModel) return null;
-  const modelPricing = findPricing(sessionModel, pricing);
-  if (!modelPricing) return null;
+  // Nothing priced, but tokens were used: there is no cost rate to report.
+  // Returning zero would render a confident "$0.00/hr" next to real token
+  // usage, so the segment is dropped instead — the same stance
+  // getStdinBurnRate takes when stdin carries no cost. This was the old
+  // contract for an unpriced CURRENT model; the current model no longer
+  // enters into it, so it now applies when no transcript model was priced. A
+  // partly priced session gets a rate, flagged uncertain by the caller, just
+  // as its total is kept and flagged.
+  if (session.costs.size === 0 && session.unpriced.length > 0) return null;
 
-  const sessionCost = calculateCost(sessionMetrics, modelPricing);
+  const sessionCost = calculateTotalCost(session.costs);
   const costPerMinute = sessionCost / elapsedMinutes;
 
   return {

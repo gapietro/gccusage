@@ -42,6 +42,9 @@ function render(sessionId: string, costUsd: number, env: NodeJS.ProcessEnv): Pro
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [bundlePath], {
       env,
+      // Outside any repo, so the default layout's git widgets never run git in
+      // the checkout this harness lives in (#148, OPS-011).
+      cwd: env["HOME"],
       stdio: ["pipe", "ignore", "ignore"],
     });
     child.on("error", reject);
@@ -122,10 +125,23 @@ async function main(): Promise<void> {
 
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-concurrency-"));
+  // The suite's refresher suppression (TEST-002, src/__tests__/helpers/
+  // pricing-refresher.ts), restated because scripts/ cannot import src/
+  // (OPS-011). A fresh refresh stamp keeps every render inside the backoff
+  // window, so none spawns the detached refresher: no live LiteLLM fetch, and
+  // nothing writes into tmpDir after it is removed. The refused URL is the
+  // backstop if one ever does.
+  fs.mkdirSync(path.join(tmpDir, "gccusage"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmpDir, "gccusage", "pricing-refresh-attempt.json"),
+    JSON.stringify({ timestamp: Date.now() }),
+  );
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: tmpDir, // no transcripts, no user settings
     XDG_CACHE_HOME: tmpDir,
+    XDG_CONFIG_HOME: path.join(tmpDir, "config"),
+    GCCUSAGE_PRICING_URL: "http://127.0.0.1:1/pricing.json",
   };
 
   console.log(

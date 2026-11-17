@@ -25,6 +25,20 @@ export function formatDollars(amount: number): string {
   return `$${amount.toFixed(0)}`;
 }
 
+/**
+ * A cost with the uncertainty marker: `formatDollars` plus a trailing `?` when
+ * `uncertain`, except when the amount is non-finite and already renders as
+ * `$?` — stacking the two read as `$??` (#145).
+ *
+ * One owner for both cost widgets (MAINT-003). As two copies of the rule, a
+ * change to one would bring `$??` back in the other with its tests green —
+ * the #68 shape `alertBg` was consolidated to avoid.
+ */
+export function formatCost(amount: number, uncertain: boolean): string {
+  const marked = uncertain && Number.isFinite(amount);
+  return formatDollars(amount) + (marked ? "?" : "");
+}
+
 // Same reasoning as `formatDollars` above, and the same "?" convention — but
 // this guard is NOT made redundant by `StatusJsonSchema` now rejecting
 // non-finite numbers (#137). Token counts also arrive from JSONL transcripts

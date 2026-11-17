@@ -16,6 +16,16 @@ export interface RenderContext {
   metrics: AggregatedMetrics;
   block: BlockMetrics | null;
   burnRate: BurnRate | null;
+  /**
+   * True when `burnRate` is the calculated rate and the session cost it
+   * divides was missing a model's price or approximated one, so the rate is a
+   * lower bound (COR-008). Not `sessionCostUncertain`: when the session total
+   * is stdin's but stdin reports no duration, or under 10s of it, the pipeline
+   * falls back to the calculated rate while the total beside it stays stdin's
+   * and certain. Always false for the stdin rate, which no missing price can
+   * affect.
+   */
+  burnRateUncertain: boolean;
   pricing: PricingTable;
   sessionCostUsd: number;
   todayCostUsd: number;
@@ -40,7 +50,13 @@ export interface RenderContext {
    * rate can affect.
    */
   sessionCostUncertain: boolean;
-  /** As `sessionCostUncertain`, for `todayCostUsd`. */
+  /**
+   * `todayCostUsd` is not exact. In calculated mode: an unpriced or
+   * approximated model contributed. In store mode (the default): some
+   * session's stored figure is a lower bound, or a session's latest cost could
+   * not be recorded so its stored figure is stale (COR-009). The daily store
+   * owns this flag; the pipeline does not re-derive it.
+   */
   todayCostUncertain: boolean;
   sessionStartTime: number | null;
   /** True terminal width, or undefined when it cannot be determined. */
