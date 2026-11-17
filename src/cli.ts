@@ -404,7 +404,9 @@ function runSetup(): void {
   removeLegacyTurnStore();
 
   console.log("gccusage setup complete!\n");
-  console.log(`  Settings: ${settingsPath}`);
+  // Name the file actually written when a symlink redirected it, so a
+  // dotfiles user can see which copy changed (review of #154).
+  console.log(`  Settings: ${settingsPath}${target === settingsPath ? "" : ` -> ${target}`}`);
   console.log(`  Command:  ${command}`);
   if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
   console.log();

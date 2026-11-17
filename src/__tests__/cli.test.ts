@@ -452,6 +452,27 @@ describe("gccusage setup", () => {
       expect(fs.readdirSync(dotfiles)).toEqual(["claude-settings.json"]);
     });
 
+    it("names the file it actually wrote when a symlink redirected it", async () => {
+      const dotfiles = path.join(tmpDir, "dotfiles");
+      fs.mkdirSync(dotfiles);
+      const target = path.join(dotfiles, "claude-settings.json");
+      fs.writeFileSync(target, "{}\n");
+      fs.symlinkSync(target, settingsPath());
+
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      // realpath: on macOS the temp dir is itself under a symlink (/var).
+      expect(logged).toContain(`Settings: ${settingsPath()} -> ${fs.realpathSync(target)}`);
+    });
+
+    it("prints the plain path when nothing redirected the write", async () => {
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).toContain(`Settings: ${settingsPath()}\n`);
+    });
+
     it("refuses a symlink into a read-only directory before writing anything", async () => {
       // The nix home-manager shape: settings.json links into a read-only
       // store. Writing through it failed with a bare EACCES on the temp file —
