@@ -52,7 +52,18 @@ export interface RenderPricing {
  */
 export function getPricingForRender(ttlMs: number): RenderPricing {
   const entry = loadPricingCacheEntry();
-  if (!entry || entry.ageMs >= MAX_STALE_MS) {
+  if (!entry) {
+    return { pricing: mergePricingTables(FALLBACK_PRICING), stale: true };
+  }
+  // A future stamp: the age is unknown, the prices are not. Serve them and
+  // refresh now, which rewrites the stamp. MAX_STALE_MS cannot be judged
+  // without an age, and FALLBACK_PRICING is the worse guess: it lacks current
+  // models and fuzzy-matches newer ones to older prices unmarked (COR-006,
+  // PR #155 review).
+  if (entry.ageMs === null) {
+    return { pricing: mergePricingTables(FALLBACK_PRICING, entry.data), stale: true };
+  }
+  if (entry.ageMs >= MAX_STALE_MS) {
     return { pricing: mergePricingTables(FALLBACK_PRICING), stale: true };
   }
   return {

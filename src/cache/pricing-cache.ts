@@ -49,7 +49,13 @@ function getCachePath(): string {
 
 export interface PricingCacheEntry {
   data: PricingTable;
-  ageMs: number;
+  /**
+   * `null` when the stamp is in the future and the table's age is unknown
+   * (`ageSince`). The prices are still usable — they passed the same
+   * sanitising as any read — so a caller must treat the table as stale, never
+   * as fresh, and never discard it for that reason alone (COR-006).
+   */
+  ageMs: number | null;
 }
 
 /**
@@ -63,14 +69,15 @@ export function loadPricingCacheEntry(): PricingCacheEntry | null {
   const cache = readJsonValidated(getCachePath(), PricingCacheSchema);
   if (!cache) return null;
 
-  // A future stamp is a miss, not a fresh table. Read as fresh, it reported
-  // `stale: false`, so the render path never spawned the refresher — the only
-  // writer of this file — and prices froze silently: the file causing the
-  // wrong answer gated its own repair, #133's shape (COR-006). A miss
-  // degrades to FALLBACK_PRICING and spawns a refresh, which rewrites the
-  // stamp from the current clock and heals the file.
+  // A future stamp makes the age unknown, reported as `ageMs: null` — never
+  // as fresh. Read as fresh, it reported `stale: false`, so the render path
+  // never spawned the refresher — the only writer of this file — and prices
+  // froze silently: the file causing the wrong answer gated its own repair,
+  // #133's shape (COR-006). Not a miss either: only the stamp is suspect, and
+  // dropping to FALLBACK_PRICING until the refresh landed mis-priced silently
+  // (models missing from the snapshot, a fuzzy match at +25%, unmarked; PR
+  // #155 review). The refresh rewrites the stamp from the current clock.
   const ageMs = ageSince(cache.timestamp);
-  if (ageMs === null) return null;
 
   // Bounds only, never the snapshot anchor: the anchor is about trusting the
   // feed, these entries already passed it at write time, and re-running it
@@ -82,9 +89,14 @@ export function loadPricingCacheEntry(): PricingCacheEntry | null {
   return { data, ageMs };
 }
 
+/**
+ * The cache only while it is known to be fresh. An unknown age is not fresh,
+ * so `fetchPricing` refetches at once — the CLI's equivalent of the render
+ * path's `stale: true`.
+ */
 export function loadPricingCache(ttlMs: number): PricingTable | null {
   const entry = loadPricingCacheEntry();
-  if (!entry) return null;
+  if (!entry || entry.ageMs === null) return null;
   return entry.ageMs < ttlMs ? entry.data : null;
 }
 

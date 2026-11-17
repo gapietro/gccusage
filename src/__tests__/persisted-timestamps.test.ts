@@ -116,6 +116,28 @@ describe("pricing cache timestamp (COR-006)", () => {
     expect(getPricingForRender(TTL).stale).toBe(true);
   });
 
+  // PR #155 review: only the stamp is suspect, not the prices. Falling back to
+  // FALLBACK_PRICING until the refresh landed mis-priced silently for that
+  // window — the snapshot lacked 9 current models, and `claude-opus-5-5`
+  // fuzzy-matched `claude-opus-5` at +25% without being marked approximate.
+  // 1e400 is not here: it fails the schema, so the envelope is rejected whole,
+  // as any corrupt cache file is.
+  it.each(untrustedStamps().filter(([label]) => label !== "1e400"))(
+    "serves the cached prices, marked stale, for a timestamp of %s",
+    (_label, stamp) => {
+      writePricing(stamp);
+
+      const entry = loadPricingCacheEntry();
+      expect(entry).not.toBeNull();
+      expect(entry!.ageMs).toBeNull();
+
+      const { pricing, stale } = getPricingForRender(TTL);
+      expect(stale).toBe(true);
+      expect(Object.hasOwn(pricing, MODEL)).toBe(true);
+      expect(pricing[MODEL]!.inputCostPerToken).toBe(1e-6);
+    },
+  );
+
   it.each(untrustedStamps())("does not serve the CLI a cached table stamped %s", (_label, stamp) => {
     // `fetchPricing`'s cache gate, the second consumer of the same stamp.
     writePricing(stamp);

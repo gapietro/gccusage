@@ -170,4 +170,20 @@ describe("a pricing cache with an untrusted timestamp (COR-006)", () => {
     renderOnce();
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
+
+  // PR #155 review: while that refresh is in flight, render with the cached
+  // prices rather than FALLBACK_PRICING — only the stamp is suspect. 1e400 is
+  // excluded because it fails the schema and the envelope is rejected whole.
+  it.each([
+    ["9e15", () => "9e15"],
+    ["1 day in the future", () => String(Date.now() + 24 * 60 * 60 * 1000)],
+  ])("renders with the cached prices AND spawns the refresher for a timestamp of %s", (_label, stamp) => {
+    writePricing(stamp());
+
+    const { pricing, stale } = getPricingForRender(24 * 60 * 60 * 1000);
+    maybeSpawnPricingRefresh(stale);
+
+    expect(Object.hasOwn(pricing, "claude-stamp-test")).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
 });
