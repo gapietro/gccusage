@@ -87,7 +87,26 @@ export function shardKey(sessionId: string): string {
  */
 function xdgBaseDir(name: "XDG_CACHE_HOME" | "XDG_CONFIG_HOME"): string | undefined {
   const value = process.env[name];
-  return value && path.isAbsolute(value) ? value : undefined;
+  if (!value) return undefined;
+  if (path.isAbsolute(value)) return value;
+  reportIgnoredXdg(name, value);
+  return undefined;
+}
+
+/** `NAME=value` pairs already reported, so each is logged once per process. */
+const reportedXdg = new Set<string>();
+
+/**
+ * Ignoring a relative value moves the cache or config somewhere the user did
+ * not ask for, silently. Say so under GCCUSAGE_DEBUG (review of #154) — once
+ * per value, since getCacheDir runs many times per render.
+ */
+function reportIgnoredXdg(name: string, value: string): void {
+  if (!process.env["GCCUSAGE_DEBUG"]) return;
+  const key = `${name}=${value}`;
+  if (reportedXdg.has(key)) return;
+  reportedXdg.add(key);
+  console.error(`gccusage: ignoring relative ${name}=${JSON.stringify(value)} — the XDG spec requires an absolute path`);
 }
 
 /**

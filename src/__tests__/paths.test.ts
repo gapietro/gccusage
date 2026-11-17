@@ -331,6 +331,51 @@ describe("narrowCacheModes", () => {
   });
 });
 
+// Review of #154: a relative XDG value is ignored per the spec (SEC-004), which
+// silently moves the cache or config somewhere the user did not say. Under
+// GCCUSAGE_DEBUG that is reported — once per value, since getCacheDir runs
+// many times per render.
+describe("ignored relative XDG values under GCCUSAGE_DEBUG", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("reports an ignored XDG_CACHE_HOME once, naming the variable and value", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "1");
+    vi.stubEnv("XDG_CACHE_HOME", "relative-cache-once");
+
+    getCacheDir();
+    getCacheDir();
+
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    const logged = errSpy.mock.calls[0]!.join(" ");
+    expect(logged).toContain("XDG_CACHE_HOME");
+    expect(logged).toContain("relative-cache-once");
+  });
+
+  it("reports an ignored XDG_CONFIG_HOME too", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "1");
+    vi.stubEnv("XDG_CONFIG_HOME", "relative-config");
+
+    getConfigDir();
+
+    expect(errSpy.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("XDG_CONFIG_HOME");
+  });
+
+  it("stays silent without GCCUSAGE_DEBUG", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "");
+    vi.stubEnv("XDG_CACHE_HOME", "relative-cache-silent");
+
+    getCacheDir();
+
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+});
+
 // Review of #154: one owner for "collapse home to ~", shared by the config
 // error line and the cwd widget, matching on a segment boundary only.
 describe("collapseHome", () => {
