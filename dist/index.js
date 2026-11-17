@@ -2313,8 +2313,8 @@ function detectBlock(sessionStartTime) {
 		blockDurationMs: BLOCK_DURATION_MS
 	};
 	if (sessionStartTime !== null) {
-		const elapsed = now - sessionStartTime;
-		if (elapsed < BLOCK_DURATION_MS) {
+		const elapsed = ageSince(sessionStartTime, now);
+		if (elapsed !== null && elapsed < BLOCK_DURATION_MS) {
 			saveBlockCache({ blockStartTime: sessionStartTime });
 			return {
 				blockStartTime: sessionStartTime,
@@ -2768,7 +2768,6 @@ function loadPricingCacheEntry() {
 	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
 	if (!cache) return null;
 	const ageMs = ageSince(cache.timestamp);
-	if (ageMs === null) return null;
 	const data = sanitisePricingTable(cache.data);
 	if (Object.keys(data).length === 0) return null;
 	return {
@@ -2776,9 +2775,14 @@ function loadPricingCacheEntry() {
 		ageMs
 	};
 }
+/**
+* The cache only while it is known to be fresh. An unknown age is not fresh,
+* so `fetchPricing` refetches at once — the CLI's equivalent of the render
+* path's `stale: true`.
+*/
 function loadPricingCache(ttlMs) {
 	const entry = loadPricingCacheEntry();
-	if (!entry) return null;
+	if (!entry || entry.ageMs === null) return null;
 	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
@@ -2823,7 +2827,15 @@ const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1e3;
 */
 function getPricingForRender(ttlMs) {
 	const entry = loadPricingCacheEntry();
-	if (!entry || entry.ageMs >= MAX_STALE_MS) return {
+	if (!entry) return {
+		pricing: mergePricingTables(FALLBACK_PRICING),
+		stale: true
+	};
+	if (entry.ageMs === null) return {
+		pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
+		stale: true
+	};
+	if (entry.ageMs >= MAX_STALE_MS) return {
 		pricing: mergePricingTables(FALLBACK_PRICING),
 		stale: true
 	};
@@ -5110,7 +5122,7 @@ const perModelBreakdownWidget = { render(context, config) {
 //#region src/widgets/session-clock.ts
 const sessionClockWidget = { render(context, config) {
 	if (!context.sessionStartTime) return null;
-	const elapsed = Date.now() - context.sessionStartTime;
+	const elapsed = ageSince(context.sessionStartTime) ?? Number.NaN;
 	const label = config.label ?? "Session:";
 	const text = label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed);
 	return {
