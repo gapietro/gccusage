@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { EventEmitter } from "node:events";
 
+// A real EventEmitter, not a bare `{ unref }`: the production code attaches an
+// `error` listener (REL-006), and against a fake with no `on` that call would
+// throw inside the outer try, be swallowed, skip `unref()` — and leave every
+// test here green.
 const spawnMock = vi.fn(
-  (_command: string, _args: readonly string[], _options: Record<string, unknown>) => ({
-    unref: vi.fn(),
-  }),
+  (_command: string, _args: readonly string[], _options: Record<string, unknown>) =>
+    Object.assign(new EventEmitter(), { unref: vi.fn() }),
 );
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
@@ -106,5 +110,18 @@ describe("maybeSpawnPricingRefresh", () => {
 
     // A statusline must render regardless; a refresh is best-effort.
     expect(() => maybeSpawnPricingRefresh(true)).not.toThrow();
+  });
+
+  it("swallows a spawn failure instead of crashing the render (REL-006)", () => {
+    maybeSpawnPricingRefresh(true);
+
+    const child = spawnMock.mock.results[0]!.value as EventEmitter & { unref: () => void };
+    // `spawn` reports EAGAIN/ENOENT by emitting `error` on a later tick, after
+    // this function has returned, so its try/catch cannot see it. An emitter
+    // with no `error` listener throws on emit — in production that is an
+    // uncaught exception: exit 1 and a stack trace, outside GCCUSAGE_DEBUG.
+    const err = Object.assign(new Error("spawn EAGAIN"), { code: "EAGAIN" });
+    expect(() => child.emit("error", err)).not.toThrow();
+    expect(child.unref).toHaveBeenCalledTimes(1);
   });
 });

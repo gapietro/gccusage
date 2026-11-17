@@ -83,6 +83,18 @@ export function maybeSpawnPricingRefresh(stale: boolean): void {
       detached: true,
       stdio: "ignore",
     });
+    // A spawn that fails (EAGAIN at the process limit, ENOENT for a vanished
+    // execPath) does not throw here: Node emits `error` on the ChildProcess on
+    // a later tick, after this function and its try/catch have returned. With
+    // no listener that emit is an uncaught exception — the render exits 1 with
+    // a stack trace on stderr, the one place GCCUSAGE_DEBUG exists to keep it
+    // out of (REL-006). Swallowed like every other failure here, and surfaced
+    // under the same gate `main()` uses.
+    child.on("error", (err) => {
+      if (process.env["GCCUSAGE_DEBUG"]) {
+        console.error("gccusage: pricing refresher failed to spawn —", err.message);
+      }
+    });
     child.unref();
   } catch {
     // ignore
