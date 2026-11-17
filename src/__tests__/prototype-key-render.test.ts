@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -77,7 +77,7 @@ function writeTranscript(models: string[]): void {
 }
 
 function render(stdin: Record<string, unknown>): string {
-  const out = execFileSync(process.execPath, [DIST], {
+  const result = spawnSync(process.execPath, [DIST], {
     // Outside any repo: a render must never run git in the checkout (#148).
     cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, ...stdin }),
@@ -87,11 +87,16 @@ function render(stdin: Record<string, unknown>): string {
       XDG_CONFIG_HOME: path.join(dir, "config"),
       ...refresher.env,
       COLUMNS: "200",
+      // The renderer contains a widget throw as a missing segment (REL-007),
+      // so "drops the burn-rate segment" would pass on a crash. Under this
+      // flag a contained throw is reported on stderr, checked below.
+      GCCUSAGE_DEBUG: "1",
     },
     encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
   });
-  return stripAnsi(out);
+  expect(result.status).toBe(0);
+  expect(result.stderr, "a widget threw and was contained").not.toContain("gccusage: widget");
+  return stripAnsi(result.stdout);
 }
 
 function shardCostUsd(): unknown {

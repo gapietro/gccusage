@@ -69,12 +69,34 @@ const LegacyEntrySchema = v.object({
 
 const STALE_SESSION_MS = 48 * 3600 * 1000;
 
-function getShardDir(): string {
-  return path.join(getCacheDir(), "daily");
+/** Where the store lives, resolved once per call from the cache dir. */
+interface StorePaths {
+  shardDir: string;
+  legacyPath: string;
 }
 
-function getLegacyPath(): string {
-  return path.join(getCacheDir(), "daily-costs.json");
+/**
+ * Null when there is no cache dir (SEC-004: no home and no absolute
+ * XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
+ */
+function getStorePaths(): StorePaths | null {
+  const cacheDir = getCacheDir();
+  if (cacheDir === null) return null;
+  return {
+    shardDir: path.join(cacheDir, "daily"),
+    legacyPath: path.join(cacheDir, "daily-costs.json"),
+  };
+}
+
+/**
+ * Whether `trackDailyCost` has a store to total across. Without one it can
+ * see only the session in front of it, so its figure is this session's
+ * spend rather than today's — and the pipeline marks it uncertain. Exported
+ * so that decision has one owner, here, rather than the pipeline re-deriving
+ * it from `getCacheDir()`.
+ */
+export function hasDailyStore(): boolean {
+  return getStorePaths() !== null;
 }
 
 /**
@@ -82,8 +104,8 @@ function getLegacyPath(): string {
  * Concurrent sessions therefore cannot clobber each other's entries — there
  * is no shared read-modify-write left to lose an update.
  */
-function shardPath(sessionId: string): string {
-  return path.join(getShardDir(), `${shardKey(sessionId)}.json`);
+function shardPath(store: StorePaths, sessionId: string): string {
+  return path.join(store.shardDir, `${shardKey(sessionId)}.json`);
 }
 
 function dateStr(d: Date): string {
@@ -99,8 +121,8 @@ function dateStr(d: Date): string {
  * processes migrating at the same time write identical shards, so it is safe
  * to run unsynchronised.
  */
-function migrateLegacyStore(now: Date): void {
-  const legacyPath = getLegacyPath();
+function migrateLegacyStore(store: StorePaths, now: Date): void {
+  const legacyPath = store.legacyPath;
   if (!fs.existsSync(legacyPath)) return; // The common case.
 
   // Unlike the four `readJsonValidated` call sites, this caller cannot treat
@@ -137,7 +159,7 @@ function migrateLegacyStore(now: Date): void {
       if (!parsed.success) continue;
       const s = parsed.output;
 
-      const target = shardPath(s.sessionId);
+      const target = shardPath(store, s.sessionId);
       // A shard already written by the new code is newer than the legacy file.
       if (fs.existsSync(target)) continue;
 
@@ -171,12 +193,12 @@ function migrateLegacyStore(now: Date): void {
  * entries from an earlier day are returned as they are, and re-baseline
  * lazily when their own session next writes.
  */
-function readEntries(now: Date): SessionCostEntry[] {
-  migrateLegacyStore(now);
+function readEntries(store: StorePaths, now: Date): SessionCostEntry[] {
+  migrateLegacyStore(store, now);
 
   let files: string[];
   try {
-    files = fs.readdirSync(getShardDir());
+    files = fs.readdirSync(store.shardDir);
   } catch {
     return []; // No store yet.
   }
@@ -184,7 +206,7 @@ function readEntries(now: Date): SessionCostEntry[] {
   const entries: SessionCostEntry[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const fullPath = path.join(getShardDir(), file);
+    const fullPath = path.join(store.shardDir, file);
 
     const entry = readJsonValidated(fullPath, ShardSchema);
     if (!entry) continue; // Unreadable shard: one session's data, not the whole day.
@@ -263,8 +285,15 @@ export function trackDailyCost(
   source: CostSource,
   now: Date = new Date(),
 ): number {
+  const store = getStorePaths();
+  // No store (SEC-004): this session's own spend is the best figure there is,
+  // and the pipeline marks it uncertain via `hasDailyStore`. Returning before
+  // any path is built also keeps the shard write below — still uncaught,
+  // REL-005 — from ever running against a missing directory.
+  if (store === null) return Number.isFinite(costUsd) ? costUsd : 0;
+
   const today = dateStr(now);
-  const entries = readEntries(now);
+  const entries = readEntries(store, now);
 
   if (sessionId && Number.isFinite(costUsd)) {
     const index = entries.findIndex((e) => e.sessionId === sessionId);
@@ -279,7 +308,7 @@ export function trackDailyCost(
     if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
       if (index === -1) entries.push(next);
       else entries[index] = next;
-      writeJsonAtomic(shardPath(sessionId), next);
+      writeJsonAtomic(shardPath(store, sessionId), next);
     }
   }
 

@@ -4,6 +4,10 @@ import { TYPE_ONLY_FILES } from "./src/__tests__/fixtures/type-only-files.js";
 export default defineConfig({
   test: {
     include: ["src/**/__tests__/**/*.test.ts", "scripts/**/__tests__/**/*.test.ts"],
+    // Fails a test in which the renderer silently contained a widget throw
+    // (REL-007): containment otherwise lets an absence-only assertion pass on
+    // a crash.
+    setupFiles: ["src/__tests__/setup/contained-widget-errors.ts"],
     coverage: {
       include: ["src/**/*.ts"],
       // TYPE_ONLY_FILES emit no JavaScript, so v8 scores them 0% and they

@@ -17,8 +17,10 @@ export interface LiveBlock extends BlockCacheData {
   elapsedMs: number;
 }
 
-function getBlockCachePath(): string {
-  return path.join(getCacheDir(), "blocks", "current.json");
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
+function getBlockCachePath(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "blocks", "current.json");
 }
 
 /**
@@ -28,6 +30,7 @@ function getBlockCachePath(): string {
  */
 export function loadBlockCache(now: number = Date.now()): LiveBlock | null {
   const cachePath = getBlockCachePath();
+  if (cachePath === null) return null;
   const data = readJsonValidated(cachePath, BlockCacheSchema);
   if (!data) return null;
 
@@ -51,6 +54,7 @@ export function loadBlockCache(now: number = Date.now()): LiveBlock | null {
 
 export function saveBlockCache(data: BlockCacheData): void {
   const cachePath = getBlockCachePath();
+  if (cachePath === null) return;
   try {
     writeJsonAtomic(cachePath, data);
   } catch {

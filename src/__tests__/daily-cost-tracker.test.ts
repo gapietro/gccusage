@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { trackDailyCost } from "../data/daily-cost-tracker.js";
+import { vi } from "vitest";
+import { trackDailyCost, hasDailyStore } from "../data/daily-cost-tracker.js";
+import { noPasswd } from "./helpers/no-passwd.js";
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 let tmpDir: string;
 let originalXdg: string | undefined;
@@ -386,5 +392,37 @@ describe("trackDailyCost never writes a derived non-finite baseline", () => {
     const after = fs.readFileSync(file, "utf-8");
     expect(after).not.toContain("null");
     expect(after).toBe(before);
+  });
+});
+
+// SEC-004, review of #154. No home and no XDG_CACHE_HOME means no cache dir,
+// so no store. The shard write is uncaught (REL-005), so it must not run at
+// all — and the old tmpdir fallback put the store in the shared tmpdir.
+describe("trackDailyCost with no cache dir (SEC-004)", () => {
+  let originalHome: string | undefined;
+  let originalTmpdir: string | undefined;
+
+  beforeEach(() => {
+    originalHome = process.env["HOME"];
+    originalTmpdir = process.env["TMPDIR"];
+    delete process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = tmpDir;
+    noPasswd.on = true;
+  });
+
+  afterEach(() => {
+    noPasswd.on = false;
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+    if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = originalTmpdir;
+  });
+
+  it("reports this session's own spend, writes nothing, and says there is no store", () => {
+    expect(hasDailyStore()).toBe(false);
+    expect(trackDailyCost("session-a", 2.5, "stdin")).toBe(2.5);
+    expect(trackDailyCost("session-a", Infinity, "stdin")).toBe(0);
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 });

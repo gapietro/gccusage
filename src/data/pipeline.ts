@@ -14,7 +14,7 @@ import {
   calculateBurnRate,
 } from "./cost-calculator.js";
 import { getTerminalWidth } from "../utils/terminal.js";
-import { trackDailyCost, type CostSource } from "./daily-cost-tracker.js";
+import { trackDailyCost, hasDailyStore, type CostSource } from "./daily-cost-tracker.js";
 import type { BurnRate } from "../types/burn-rate.js";
 
 function getStdinBurnRate(stdin: StatusJson): BurnRate | null {
@@ -100,11 +100,13 @@ export async function buildRenderContext(
     (session.unpriced.length > 0 || session.approximated.length > 0);
   // In store mode, a non-finite session cost was not recorded (#145), so
   // Today: carries this session's last good figure rather than its current
-  // spend. Flag that instead of presenting a stale number as current.
+  // spend. Flag that instead of presenting a stale number as current. With no
+  // store at all (no home, SEC-004) the figure is this session's spend only,
+  // so it is flagged too.
   const todayCostUncertain =
     today !== null
       ? today.unpriced.length > 0 || today.approximated.length > 0
-      : !Number.isFinite(sessionCostUsd);
+      : !Number.isFinite(sessionCostUsd) || !hasDailyStore();
 
   // Session timing
   const sessionStartTime = getFirstTimestamp(sessionEntries);

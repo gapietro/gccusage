@@ -43,8 +43,10 @@ const PricingCacheSchema = v.object({
   data: v.record(v.string(), v.unknown()),
 });
 
-function getCachePath(): string {
-  return path.join(getCacheDir(), "pricing.json");
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
+function getCachePath(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "pricing.json");
 }
 
 export interface PricingCacheEntry {
@@ -66,7 +68,9 @@ export interface PricingCacheEntry {
  * the table is too old to price from at all.
  */
 export function loadPricingCacheEntry(): PricingCacheEntry | null {
-  const cache = readJsonValidated(getCachePath(), PricingCacheSchema);
+  const cachePath = getCachePath();
+  if (cachePath === null) return null;
+  const cache = readJsonValidated(cachePath, PricingCacheSchema);
   if (!cache) return null;
 
   // A future stamp makes the age unknown, reported as `ageMs: null` — never
@@ -102,6 +106,7 @@ export function loadPricingCache(ttlMs: number): PricingTable | null {
 
 export function savePricingCache(data: PricingTable): void {
   const cachePath = getCachePath();
+  if (cachePath === null) return;
   try {
     const cache: PricingCacheFile = { version: PRICING_CACHE_VERSION, timestamp: Date.now(), data };
     writeJsonAtomic(cachePath, cache);

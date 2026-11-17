@@ -76,8 +76,10 @@ export interface TodayAggregate {
   fileCount: number;
 }
 
-function cachePath(): string {
-  return path.join(getCacheDir(), "today-aggregates.json");
+/** Null when there is no cache dir (SEC-004): every file is re-parsed. */
+function cachePath(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "today-aggregates.json");
 }
 
 /** Local date, matching how `filterTodayEntries` picks its midnight. */
@@ -170,7 +172,8 @@ export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
   const files = findTodayJsonlFileStats();
   const date = localDateKey(now);
 
-  const cached = readJsonValidated(cachePath(), TodayAggregateCacheSchema);
+  const target = cachePath();
+  const cached = target === null ? null : readJsonValidated(target, TodayAggregateCacheSchema);
   // A different date discards everything: that is the midnight reset.
   const previous = cached && cached.date === date ? cached.files : {};
 
@@ -199,14 +202,14 @@ export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
     changed = true;
   }
 
-  if (changed) {
+  if (changed && target !== null) {
     try {
       // An overflowing file is used for this render but not cached; it is
       // re-parsed next time while every other file is still a cache hit.
       const persistable = Object.fromEntries(
         Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)),
       );
-      writeJsonAtomic(cachePath(), { date, files: persistable });
+      writeJsonAtomic(target, { date, files: persistable });
     } catch {
       // The next render recomputes; a cache that cannot be written costs
       // speed, never correctness.
