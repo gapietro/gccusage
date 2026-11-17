@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -7,6 +8,7 @@ import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import * as path$11 from "node:path";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -238,6 +240,22 @@ function finite(message$1) {
 		message: message$1,
 		"~run"(dataset, config$1) {
 			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "finite", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function integer(message$1) {
+	return {
+		kind: "validation",
+		type: "integer",
+		reference: integer,
+		async: false,
+		expects: null,
+		requirement: Number.isInteger,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "integer", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -1167,11 +1185,11 @@ function assembleStyles() {
 				];
 				let [colorString] = matches;
 				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
-				const integer = Number.parseInt(colorString, 16);
+				const integer$1 = Number.parseInt(colorString, 16);
 				return [
-					integer >> 16 & 255,
-					integer >> 8 & 255,
-					integer & 255
+					integer$1 >> 16 & 255,
+					integer$1 >> 8 & 255,
+					integer$1 & 255
 				];
 			},
 			enumerable: false
@@ -1695,11 +1713,11 @@ const DEFAULT_SETTINGS = {
 //#region src/config/loader.ts
 function getConfigDir() {
 	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
+	if (xdg) return path$11.join(xdg, "gccusage");
+	return path$11.join(process.env["HOME"] || "~", ".config", "gccusage");
 }
 function getConfigPath() {
-	return path$10.join(getConfigDir(), "settings.json");
+	return path$11.join(getConfigDir(), "settings.json");
 }
 /**
 * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
@@ -1746,10 +1764,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$7.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$7.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1835,18 +1853,18 @@ function formatDeadline(ms) {
 //#region src/utils/paths.ts
 function getHomeDir() {
 	const home = os$1.homedir();
-	if (path$9.isAbsolute(home)) return home;
+	if (path$10.isAbsolute(home)) return home;
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
-		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
+		if (path$10.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return os$1.tmpdir();
 }
 function getClaudeDataDir() {
-	return path$9.join(getHomeDir(), ".claude");
+	return path$10.join(getHomeDir(), ".claude");
 }
 function getProjectsDir() {
-	return path$9.join(getClaudeDataDir(), "projects");
+	return path$10.join(getClaudeDataDir(), "projects");
 }
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function shardKey(sessionId) {
@@ -1854,26 +1872,27 @@ function shardKey(sessionId) {
 }
 function getCacheDir() {
 	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$9.join(xdg, "gccusage");
-	return path$9.join(getHomeDir(), ".cache", "gccusage");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(getHomeDir(), ".cache", "gccusage");
 }
 function ensureDir(dir) {
-	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
+	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, { recursive: true });
 }
 function findJsonlFiles(dir) {
-	if (!fs$5.existsSync(dir)) return [];
+	if (!fs$6.existsSync(dir)) return [];
 	try {
-		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$10.join(dir, f));
 	} catch {
 		return [];
 	}
 }
 const SUBAGENT_TRANSCRIPT = /^agent-.*\.jsonl$/;
+/** The agent transcripts in `dir`, or null when `dir` cannot be listed. */
 function subagentTranscriptsIn(dir) {
 	try {
-		return fs$5.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path$9.join(dir, f));
+		return fs$6.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path$10.join(dir, f));
 	} catch {
-		return [];
+		return null;
 	}
 }
 /**
@@ -1903,42 +1922,49 @@ function subagentTranscriptsIn(dir) {
 * over-count bounded by that overlap, against a ~15% under-count fixed.
 */
 function findSubagentJsonlFiles(sessionDir) {
-	const subagentsDir = path$9.join(sessionDir, "subagents");
+	const subagentsDir = path$10.join(sessionDir, "subagents");
 	const files = subagentTranscriptsIn(subagentsDir);
-	const workflowsDir = path$9.join(subagentsDir, "workflows");
+	if (files === null) return [];
+	const workflowsDir = path$10.join(subagentsDir, "workflows");
 	let runs;
 	try {
-		runs = fs$5.readdirSync(workflowsDir);
+		runs = fs$6.readdirSync(workflowsDir);
 	} catch {
 		return files;
 	}
-	for (const run of runs) files.push(...subagentTranscriptsIn(path$9.join(workflowsDir, run)));
+	for (const run of runs) files.push(...subagentTranscriptsIn(path$10.join(workflowsDir, run)) ?? []);
 	return files;
 }
 /**
-* Every transcript of one session: `<project>/<sessionId>.jsonl`, then its
-* subagent transcripts (COR-007). The main files come first because
-* `getFirstTimestamp` takes the first timestamped entry, and a session starts
-* in its main transcript.
+* Every transcript of one session, split by kind. Callers that need to know
+* where the session started, or what the user typed, read `main`; nothing
+* depends on the order of either list.
 */
-function findSessionJsonlFiles(sessionId) {
-	if (!sessionId) return [];
+function findSessionTranscripts(sessionId) {
+	const none = {
+		main: [],
+		subagents: []
+	};
+	if (!sessionId) return none;
 	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return none;
 	const joinable = SAFE_SESSION_ID.test(sessionId);
 	const mainFiles = [];
 	const subagentFiles = [];
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$10.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			mainFiles.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
-			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path$9.join(fullPath, sessionId)));
+			mainFiles.push(...jsonlFiles.filter((f) => path$10.basename(f, ".jsonl") === sessionId));
+			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path$10.join(fullPath, sessionId)));
 		}
 	} catch {}
-	return [...mainFiles, ...subagentFiles];
+	return {
+		main: mainFiles,
+		subagents: subagentFiles
+	};
 }
 /**
 * Today's transcripts with the `mtimeMs` and `size` from the stat this walk
@@ -1960,14 +1986,14 @@ function findSessionJsonlFiles(sessionId) {
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
+	if (!fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	const addIfToday = (f) => {
 		try {
-			const fstat = fs$5.statSync(f);
+			const fstat = fs$6.statSync(f);
 			if (fstat.mtimeMs >= todayMs) files.push({
 				path: f,
 				mtimeMs: fstat.mtimeMs,
@@ -1976,24 +2002,86 @@ function findTodayJsonlFileStats() {
 		} catch {}
 	};
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$10.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			let entries;
 			try {
-				entries = fs$5.readdirSync(fullPath, { withFileTypes: true });
+				entries = fs$6.readdirSync(fullPath, { withFileTypes: true });
 			} catch {
 				continue;
 			}
 			for (const entry of entries) {
-				const entryPath = path$9.join(fullPath, entry.name);
+				const entryPath = path$10.join(fullPath, entry.name);
 				if (entry.name.endsWith(".jsonl")) addIfToday(entryPath);
 				else if (entry.isDirectory()) for (const f of findSubagentJsonlFiles(entryPath)) addIfToday(f);
 			}
 		}
 	} catch {}
 	return files;
+}
+
+//#endregion
+//#region src/utils/atomic-json.ts
+let counter = 0;
+/**
+* The same atomicity guarantee as `writeJsonAtomic`, for content that is
+* already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
+* a file the user reads and edits, so it keeps its 2-space indentation and
+* trailing newline rather than the compact encoding `writeJsonAtomic` emits.
+*/
+function writeFileAtomic(filePath, contents) {
+	const dir = path$9.dirname(filePath);
+	ensureDir(dir);
+	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
+	fs$5.writeFileSync(tmpPath, contents, "utf-8");
+	try {
+		fs$5.renameSync(tmpPath, filePath);
+	} catch (err) {
+		try {
+			fs$5.unlinkSync(tmpPath);
+		} catch {}
+		throw err;
+	}
+}
+/**
+* Write JSON to `filePath` so that readers see either the previous contents
+* or the new ones, never a partial file: serialise into a uniquely named
+* sibling, then rename it over the target. Same directory means same
+* filesystem, which is what makes the rename atomic.
+*
+* Throws on failure; callers keep whatever error posture they already have.
+*/
+function writeJsonAtomic(filePath, data) {
+	writeFileAtomic(filePath, JSON.stringify(data));
+}
+/**
+* Read a JSON file and validate it, or get nothing. Every cache file in this
+* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
+* checks nothing at runtime — while config got full valibot validation. The
+* caches are the files that can actually be corrupted, by a torn write or by
+* hand (#92).
+*
+* Returns null for a missing file, an unreadable one, malformed JSON, or a
+* document that does not match `schema`. Callers treat null as "rebuild from
+* scratch", which is the posture they already had for a missing file.
+*/
+function readJsonValidated(filePath, schema) {
+	let raw;
+	try {
+		raw = fs$5.readFileSync(filePath, "utf-8");
+	} catch {
+		return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const result = safeParse(schema, parsed);
+	return result.success ? result.output : null;
 }
 
 //#endregion
@@ -2229,76 +2317,271 @@ function getFirstTimestamp(entries) {
 * which is neither a turn nor a render.
 */
 function countHumanTurns(entries) {
-	let count = 0;
-	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count++;
-	return count;
+	let count$1 = 0;
+	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count$1++;
+	return count$1;
+}
+
+//#endregion
+//#region src/cache/file-aggregate.ts
+/**
+* Per-file transcript aggregates, cached on disk and reused while the file's
+* `mtimeMs` and `size` both still match. Shared by the today aggregate
+* (`today-aggregate-cache.ts`, #94) and the session aggregate
+* (`session-aggregate-cache.ts`, COR-007), which cache different entries of
+* the same files: today's are filtered to today, the session's are not.
+*/
+const count = pipe(number(), finite(), minValue(0));
+const TokenCountsSchema = object({
+	inputTokens: count,
+	outputTokens: count,
+	cacheCreationTokens: count,
+	cacheCreation1hTokens: count,
+	cacheReadTokens: count
+});
+/**
+* `premium` is REQUIRED, so a cache file written before the tier split fails
+* validation and is discarded rather than read as "no premium tokens" — a
+* wrong total for the rest of the day is worse than one re-parse (#103).
+*
+* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
+* TTL split fails validation and is discarded rather than read as "no 1-hour
+* tokens" — which would under-cost the rest of the day (#118).
+*/
+const TokenMetricsSchema = object({
+	...TokenCountsSchema.entries,
+	premium: TokenCountsSchema
+});
+/**
+* `byModel` is entries rather than an object because a Map does not survive
+* JSON; `totals` is stored alongside it because entries carrying usage but no
+* `model` count toward the totals and toward no bucket, so the totals cannot
+* be reconstructed by summing `byModel`.
+*
+* `firstTimestamp` and `humanTurns` are what the session render derives from
+* a transcript besides its tokens: the session's start and its turn count.
+* They are REQUIRED, so a cache written before they existed is discarded
+* rather than read as "no start, no turns".
+*/
+const FileAggregateSchema = object({
+	mtimeMs: pipe(number(), finite()),
+	size: pipe(number(), finite(), minValue(0)),
+	byModel: array(tuple([string(), TokenMetricsSchema])),
+	totals: TokenMetricsSchema,
+	firstTimestamp: nullable(pipe(number(), finite())),
+	humanTurns: pipe(number(), finite(), integer(), minValue(0))
+});
+function emptyCounts() {
+	return {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
+		cacheReadTokens: 0
+	};
+}
+function emptyMetrics() {
+	return {
+		...emptyCounts(),
+		premium: emptyCounts()
+	};
+}
+function addCountsInto(target, source) {
+	target.inputTokens += source.inputTokens;
+	target.outputTokens += source.outputTokens;
+	target.cacheCreationTokens += source.cacheCreationTokens;
+	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
+	target.cacheReadTokens += source.cacheReadTokens;
+}
+function addInto(target, source) {
+	addCountsInto(target, source);
+	if (source.premium) {
+		target.premium ??= emptyCounts();
+		addCountsInto(target.premium, source.premium);
+	}
+}
+function countsFinite(c) {
+	return Number.isFinite(c.inputTokens) && Number.isFinite(c.outputTokens) && Number.isFinite(c.cacheCreationTokens) && Number.isFinite(c.cacheCreation1hTokens) && Number.isFinite(c.cacheReadTokens);
+}
+/**
+* Whether a per-file aggregate survives a round-trip through the cache file.
+* Ingestion rejects non-finite counts, but finite ones can still sum past
+* Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails the
+* schema and discards every file's cached aggregate, so one such file would
+* force every file to be re-parsed on every render.
+*/
+function aggregateFinite(a) {
+	const metricsFinite = (m) => countsFinite(m) && (m.premium === void 0 || countsFinite(m.premium));
+	return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
+}
+/**
+* `TokenMetrics.premium` stays optional in memory (other call sites build
+* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
+* always populates it, so this is just bridging the wider in-memory type to the
+* stricter persisted one — not a silent default for genuinely-missing data.
+*/
+function withRequiredPremium(metrics) {
+	return {
+		...metrics,
+		premium: metrics.premium ?? emptyCounts()
+	};
+}
+function aggregateEntries(file, entries) {
+	const aggregate = aggregateTokens(entries);
+	return {
+		mtimeMs: file.mtimeMs,
+		size: file.size,
+		byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
+		totals: withRequiredPremium(aggregate.totals),
+		firstTimestamp: getFirstTimestamp(entries),
+		humanTurns: countHumanTurns(entries)
+	};
+}
+/**
+* Reuse each file's cached aggregate while its `mtimeMs` AND `size` both still
+* match, and re-parse the rest with `readEntries`. The result is always
+* assembled from aggregates verified against the live files during this
+* call, so two processes racing on the cache write can cost one extra
+* re-parse on a later render, never a wrong total.
+*
+* Whole files are re-parsed when they change, rather than resumed from a byte
+* offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
+* straddling an offset boundary would need that map carried across renders.
+*/
+function refreshFileAggregates(files, previous, readEntries$1) {
+	const next = {};
+	let changed = Object.keys(previous).length !== files.length;
+	for (const file of files) {
+		const hit = Object.hasOwn(previous, file.path) ? previous[file.path] : void 0;
+		if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
+			next[file.path] = hit;
+			continue;
+		}
+		next[file.path] = aggregateEntries(file, readEntries$1(file.path));
+		changed = true;
+	}
+	return {
+		files: next,
+		changed
+	};
+}
+/**
+* The aggregates that can be written. An overflowing file is used for this
+* render but not cached; it is re-parsed next time while every other file is
+* still a cache hit.
+*/
+function persistableAggregates(files) {
+	return Object.fromEntries(Object.entries(files).filter(([, a]) => aggregateFinite(a)));
+}
+/** Sum per-file aggregates into one session's or one day's metrics. */
+function sumAggregates(aggregates) {
+	const byModel = new Map();
+	const totals = emptyMetrics();
+	for (const aggregate of aggregates) {
+		addInto(totals, aggregate.totals);
+		for (const [model, metrics] of aggregate.byModel) {
+			let bucket = byModel.get(model);
+			if (!bucket) {
+				bucket = emptyMetrics();
+				byModel.set(model, bucket);
+			}
+			addInto(bucket, metrics);
+		}
+	}
+	return {
+		byModel,
+		totals
+	};
+}
+
+//#endregion
+//#region src/cache/session-aggregate-cache.ts
+const SessionAggregateCacheSchema = object({ files: record(string(), FileAggregateSchema) });
+const STALE_MS = 7 * 24 * 60 * 60 * 1e3;
+function cacheDir() {
+	return path$8.join(getCacheDir(), "session-aggregates");
+}
+/**
+* One file per session, keyed like the daily store's shards. A single shared
+* file would make two live sessions evict each other's aggregates on every
+* write, which is the full re-parse this cache exists to avoid.
+*/
+function cachePath$1(sessionId) {
+	return path$8.join(cacheDir(), `${shardKey(sessionId)}.json`);
+}
+/**
+* Delete other sessions' caches untouched for a week. Run only when this
+* session's cache is created, so it costs one readdir per new session, not
+* per render. Judged on the file's mtime, which every write updates.
+*/
+function sweepStale(now) {
+	let names;
+	try {
+		names = fs$3.readdirSync(cacheDir());
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const filePath = path$8.join(cacheDir(), name);
+		try {
+			if (now - fs$3.statSync(filePath).mtimeMs > STALE_MS) fs$3.unlinkSync(filePath);
+		} catch {}
+	}
+}
+function statAll(paths) {
+	const stats = [];
+	for (const filePath of paths) try {
+		const s = fs$3.statSync(filePath);
+		stats.push({
+			path: filePath,
+			mtimeMs: s.mtimeMs,
+			size: s.size
+		});
+	} catch {}
+	return stats;
+}
+/**
+* This session's token usage, start time and turn count, from every session
+* transcript (main and subagents, COR-007), with each file's aggregate
+* cached on (path, mtimeMs, size).
+*
+* A finished subagent transcript never changes, so on a steady render only
+* the live files are re-parsed. Before this cache, reading subagent
+* transcripts cost about +570 ms per uncached render on the developer's
+* largest session (177 agent files, 213 MB), because every file was
+* re-parsed every time (PR #156 review).
+*/
+function getSessionAggregate(sessionId) {
+	const transcripts = findSessionTranscripts(sessionId);
+	const mainPaths = new Set(transcripts.main);
+	const files = statAll([...transcripts.main, ...transcripts.subagents]);
+	let previous = {};
+	if (sessionId && files.length > 0) {
+		const cached = readJsonValidated(cachePath$1(sessionId), SessionAggregateCacheSchema);
+		if (cached) previous = cached.files;
+		else sweepStale(Date.now());
+	}
+	const next = refreshFileAggregates(files, previous, parseJsonlFile);
+	if (sessionId && files.length > 0 && next.changed) try {
+		writeJsonAtomic(cachePath$1(sessionId), { files: persistableAggregates(next.files) });
+	} catch {}
+	const all = files.map((f) => next.files[f.path]);
+	const main$1 = files.filter((f) => mainPaths.has(f.path)).map((f) => next.files[f.path]);
+	return {
+		metrics: sumAggregates(all),
+		sessionStartTime: earliestStart(main$1) ?? earliestStart(all),
+		turnCount: main$1.reduce((sum, a) => sum + a.humanTurns, 0)
+	};
+}
+function earliestStart(aggregates) {
+	let earliest = null;
+	for (const { firstTimestamp } of aggregates) if (firstTimestamp !== null && (earliest === null || firstTimestamp < earliest)) earliest = firstTimestamp;
+	return earliest;
 }
 
 //#endregion
 //#region src/types/block-metrics.ts
 const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
-
-//#endregion
-//#region src/utils/atomic-json.ts
-let counter = 0;
-/**
-* The same atomicity guarantee as `writeJsonAtomic`, for content that is
-* already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
-* a file the user reads and edits, so it keeps its 2-space indentation and
-* trailing newline rather than the compact encoding `writeJsonAtomic` emits.
-*/
-function writeFileAtomic(filePath, contents) {
-	const dir = path$8.dirname(filePath);
-	ensureDir(dir);
-	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$3.writeFileSync(tmpPath, contents, "utf-8");
-	try {
-		fs$3.renameSync(tmpPath, filePath);
-	} catch (err) {
-		try {
-			fs$3.unlinkSync(tmpPath);
-		} catch {}
-		throw err;
-	}
-}
-/**
-* Write JSON to `filePath` so that readers see either the previous contents
-* or the new ones, never a partial file: serialise into a uniquely named
-* sibling, then rename it over the target. Same directory means same
-* filesystem, which is what makes the rename atomic.
-*
-* Throws on failure; callers keep whatever error posture they already have.
-*/
-function writeJsonAtomic(filePath, data) {
-	writeFileAtomic(filePath, JSON.stringify(data));
-}
-/**
-* Read a JSON file and validate it, or get nothing. Every cache file in this
-* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
-* checks nothing at runtime — while config got full valibot validation. The
-* caches are the files that can actually be corrupted, by a torn write or by
-* hand (#92).
-*
-* Returns null for a missing file, an unreadable one, malformed JSON, or a
-* document that does not match `schema`. Callers treat null as "rebuild from
-* scratch", which is the posture they already had for a missing file.
-*/
-function readJsonValidated(filePath, schema) {
-	let raw;
-	try {
-		raw = fs$3.readFileSync(filePath, "utf-8");
-	} catch {
-		return null;
-	}
-	let parsed;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		return null;
-	}
-	const result = safeParse(schema, parsed);
-	return result.success ? result.output : null;
-}
 
 //#endregion
 //#region src/cache/block-cache.ts
@@ -2307,21 +2590,21 @@ function getBlockCachePath() {
 	return path$7.join(getCacheDir(), "blocks", "current.json");
 }
 function loadBlockCache() {
-	const cachePath$1 = getBlockCachePath();
-	const data = readJsonValidated(cachePath$1, BlockCacheSchema);
+	const cachePath$2 = getBlockCachePath();
+	const data = readJsonValidated(cachePath$2, BlockCacheSchema);
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
 		try {
-			fs$2.unlinkSync(cachePath$1);
+			fs$2.unlinkSync(cachePath$2);
 		} catch {}
 		return null;
 	}
 	return data;
 }
 function saveBlockCache(data) {
-	const cachePath$1 = getBlockCachePath();
+	const cachePath$2 = getBlockCachePath();
 	try {
-		writeJsonAtomic(cachePath$1, data);
+		writeJsonAtomic(cachePath$2, data);
 	} catch {}
 }
 
@@ -2767,14 +3050,14 @@ function loadPricingCache(ttlMs) {
 	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
-	const cachePath$1 = getCachePath$1();
+	const cachePath$2 = getCachePath$1();
 	try {
 		const cache = {
 			version: PRICING_CACHE_VERSION,
 			timestamp: Date.now(),
 			data
 		};
-		writeJsonAtomic(cachePath$1, cache);
+		writeJsonAtomic(cachePath$2, cache);
 	} catch {}
 }
 
@@ -3015,38 +3298,6 @@ function maybeSpawnPricingRefresh(stale) {
 
 //#endregion
 //#region src/cache/today-aggregate-cache.ts
-const TokenCountsSchema = object({
-	inputTokens: pipe(number(), minValue(0)),
-	outputTokens: pipe(number(), minValue(0)),
-	cacheCreationTokens: pipe(number(), minValue(0)),
-	cacheCreation1hTokens: pipe(number(), minValue(0)),
-	cacheReadTokens: pipe(number(), minValue(0))
-});
-/**
-* `premium` is REQUIRED, so a cache file written before the tier split fails
-* validation and is discarded rather than read as "no premium tokens" — a
-* wrong total for the rest of the day is worse than one re-parse (#103).
-*
-* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
-* TTL split fails validation and is discarded rather than read as "no 1-hour
-* tokens" — which would under-cost the rest of the day (#118).
-*/
-const TokenMetricsSchema = object({
-	...TokenCountsSchema.entries,
-	premium: TokenCountsSchema
-});
-/**
-* `byModel` is entries rather than an object because a Map does not survive
-* JSON; `totals` is stored alongside it because entries carrying usage but no
-* `model` count toward the totals and toward no bucket, so the totals cannot
-* be reconstructed by summing `byModel`.
-*/
-const FileAggregateSchema = object({
-	mtimeMs: number(),
-	size: number(),
-	byModel: array(tuple([string(), TokenMetricsSchema])),
-	totals: TokenMetricsSchema
-});
 const TodayAggregateCacheSchema = object({
 	date: string(),
 	files: record(string(), FileAggregateSchema)
@@ -3060,120 +3311,26 @@ function localDateKey(now) {
 	const day = String(now.getDate()).padStart(2, "0");
 	return `${now.getFullYear()}-${month}-${day}`;
 }
-function emptyCounts() {
-	return {
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheCreationTokens: 0,
-		cacheCreation1hTokens: 0,
-		cacheReadTokens: 0
-	};
-}
-function emptyMetrics() {
-	return {
-		...emptyCounts(),
-		premium: emptyCounts()
-	};
-}
-function addCountsInto(target, source) {
-	target.inputTokens += source.inputTokens;
-	target.outputTokens += source.outputTokens;
-	target.cacheCreationTokens += source.cacheCreationTokens;
-	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
-	target.cacheReadTokens += source.cacheReadTokens;
-}
-function addInto(target, source) {
-	addCountsInto(target, source);
-	if (source.premium) {
-		target.premium ??= emptyCounts();
-		addCountsInto(target.premium, source.premium);
-	}
-}
-/**
-* `TokenMetrics.premium` stays optional in memory (other call sites build
-* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
-* always populates it, so this is just bridging the wider in-memory type to the
-* stricter persisted one — not a silent default for genuinely-missing data.
-*/
-function countsFinite(c) {
-	return Number.isFinite(c.inputTokens) && Number.isFinite(c.outputTokens) && Number.isFinite(c.cacheCreationTokens) && Number.isFinite(c.cacheCreation1hTokens) && Number.isFinite(c.cacheReadTokens);
-}
-/**
-* Whether a per-file aggregate survives a round-trip through the cache file.
-* Ingestion rejects non-finite counts, but finite ones can still sum past
-* Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails
-* `TodayAggregateCacheSchema` and discards every file's cached aggregate, so
-* one such file would force the whole day to be re-parsed on every render.
-*/
-function aggregateFinite(a) {
-	const metricsFinite = (m) => countsFinite(m) && (m.premium === void 0 || countsFinite(m.premium));
-	return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
-}
-function withRequiredPremium(metrics) {
-	return {
-		...metrics,
-		premium: metrics.premium ?? emptyCounts()
-	};
-}
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
-*
-* A cached per-file aggregate is reused only when the file's `mtimeMs` AND
-* `size` both still match, so the returned figure is always assembled from
-* entries that were verified against the live files during this call. Two
-* statuslines racing on the write can therefore cost one extra re-parse on a
-* later render, but neither can serve a wrong total — the same no-lock posture
-* as the daily cost store.
-*
-* Whole files are re-parsed when they change, rather than resuming from a byte
-* offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
-* straddling an offset boundary would need that map carried across renders.
-* The only file that changes mid-day is the active transcript, and re-parsing
-* it whole is still flat with respect to the day's total volume (#94).
+* Reuse and re-parse follow `refreshFileAggregates`: a file is re-parsed only
+* when its `mtimeMs` or `size` changed. The only file that changes mid-day is
+* the active transcript, so re-parsing it whole is still flat with respect to
+* the day's total volume (#94).
 */
 function getTodayAggregate(now = new Date()) {
 	const files = findTodayJsonlFileStats();
 	const date = localDateKey(now);
 	const cached = readJsonValidated(cachePath(), TodayAggregateCacheSchema);
 	const previous = cached && cached.date === date ? cached.files : {};
-	const next = {};
-	let changed = Object.keys(previous).length !== files.length;
-	for (const file of files) {
-		const hit = previous[file.path];
-		if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
-			next[file.path] = hit;
-			continue;
-		}
-		const entries = filterTodayEntries(parseJsonlFile(file.path), now);
-		const aggregate = aggregateTokens(entries);
-		next[file.path] = {
-			mtimeMs: file.mtimeMs,
-			size: file.size,
-			byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
-			totals: withRequiredPremium(aggregate.totals)
-		};
-		changed = true;
-	}
-	if (changed) try {
-		const persistable = Object.fromEntries(Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)));
+	const next = refreshFileAggregates(files, previous, (filePath) => filterTodayEntries(parseJsonlFile(filePath), now));
+	if (next.changed) try {
 		writeJsonAtomic(cachePath(), {
 			date,
-			files: persistable
+			files: persistableAggregates(next.files)
 		});
 	} catch {}
-	const byModel = new Map();
-	const totals = emptyMetrics();
-	for (const aggregate of Object.values(next)) {
-		addInto(totals, aggregate.totals);
-		for (const [model, metrics] of aggregate.byModel) {
-			let bucket = byModel.get(model);
-			if (!bucket) {
-				bucket = emptyMetrics();
-				byModel.set(model, bucket);
-			}
-			addInto(bucket, metrics);
-		}
-	}
+	const { byModel, totals } = sumAggregates(Object.values(next.files));
 	return {
 		byModel,
 		totals,
@@ -4537,9 +4694,8 @@ function getStdinBurnRate(stdin) {
 	};
 }
 async function buildRenderContext(stdin, settings) {
-	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-	const metrics = aggregateTokens(sessionEntries);
+	const sessionAggregate = getSessionAggregate(stdin.session_id);
+	const metrics = sessionAggregate.metrics;
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
 	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
@@ -4559,7 +4715,7 @@ async function buildRenderContext(stdin, settings) {
 	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
 	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd);
-	const sessionStartTime = getFirstTimestamp(sessionEntries);
+	const sessionStartTime = sessionAggregate.sessionStartTime;
 	const block = detectBlock(sessionStartTime);
 	const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
 	const stdinBurnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) : null;
@@ -4581,7 +4737,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUncertain,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth(),
-		turnCount: countHumanTurns(sessionEntries),
+		turnCount: sessionAggregate.turnCount,
 		alerts: {
 			sessionWarn: settings.alerts?.sessionWarn ?? 5,
 			sessionDanger: settings.alerts?.sessionDanger ?? 15,
@@ -4600,11 +4756,11 @@ function formatDollars(amount) {
 	if (amount < 100) return `$${amount.toFixed(2)}`;
 	return `$${amount.toFixed(0)}`;
 }
-function formatTokens(count) {
-	if (!Number.isFinite(count)) return "?";
-	if (count < 1e3) return `${count}`;
-	if (count < 1e6) return `${(count / 1e3).toFixed(1)}k`;
-	return `${(count / 1e6).toFixed(2)}M`;
+function formatTokens(count$1) {
+	if (!Number.isFinite(count$1)) return "?";
+	if (count$1 < 1e3) return `${count$1}`;
+	if (count$1 < 1e6) return `${(count$1 / 1e3).toFixed(1)}k`;
+	return `${(count$1 / 1e6).toFixed(2)}M`;
 }
 function formatDuration(ms) {
 	if (!Number.isFinite(ms)) return "?";
@@ -5389,10 +5545,10 @@ const compactCountdownWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/turn-counter.ts
 const turnCounterWidget = { render(context, config) {
-	const count = context.turnCount;
-	if (!count || count < 1) return null;
+	const count$1 = context.turnCount;
+	if (!count$1 || count$1 < 1) return null;
 	const label = config.label ?? "#";
-	const text = `${label}${count}`;
+	const text = `${label}${count$1}`;
 	return {
 		text,
 		fg: config.fg,
@@ -6125,14 +6281,14 @@ function checkCache(ttlMs, key) {
 	return entry.output;
 }
 function writeCache(output, key) {
-	const cachePath$1 = getCachePath();
+	const cachePath$2 = getCachePath();
 	try {
 		const entry = {
 			output,
 			timestamp: Date.now(),
 			key
 		};
-		writeJsonAtomic(cachePath$1, entry);
+		writeJsonAtomic(cachePath$2, entry);
 	} catch {}
 }
 
@@ -6419,8 +6575,8 @@ function readExistingSettings(settingsPath) {
 * command that configures the statusline.
 */
 function removeLegacyTurnStore() {
-	const cacheDir = getCacheDir();
-	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
+	const cacheDir$1 = getCacheDir();
+	for (const target of [resolve(cacheDir$1, "turns"), resolve(cacheDir$1, "turn-count.json")]) try {
 		rmSync(target, {
 			recursive: true,
 			force: true
