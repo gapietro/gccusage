@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir, findTodayJsonlFileStats } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
+import { finiteNumber } from "../utils/schemas.js";
 import { parseJsonlFile, filterTodayEntries } from "../data/jsonl-reader.js";
 import { aggregateTokens } from "../data/token-aggregator.js";
 import type { TokenCounts, TokenMetrics } from "../types/token-metrics.js";
@@ -15,12 +16,20 @@ import type { TokenCounts, TokenMetrics } from "../types/token-metrics.js";
 // unbounded case cleanly, and enforcing the cross-field invariant here would
 // require a v.custom check that dredges up the wider "which decomposition is
 // canonical" question this cache boundary should not have to answer.
+//
+// Finite as well as non-negative: `Infinity >= 0`. #145 stopped this cache
+// WRITING a non-finite count (`aggregateFinite` below), but a `1e400` in the
+// file still parsed to `Infinity` and was served as a hit (COR-006).
+function tokenCount() {
+  return v.pipe(finiteNumber(), v.minValue(0));
+}
+
 const TokenCountsSchema = v.object({
-  inputTokens: v.pipe(v.number(), v.minValue(0)),
-  outputTokens: v.pipe(v.number(), v.minValue(0)),
-  cacheCreationTokens: v.pipe(v.number(), v.minValue(0)),
-  cacheCreation1hTokens: v.pipe(v.number(), v.minValue(0)),
-  cacheReadTokens: v.pipe(v.number(), v.minValue(0)),
+  inputTokens: tokenCount(),
+  outputTokens: tokenCount(),
+  cacheCreationTokens: tokenCount(),
+  cacheCreation1hTokens: tokenCount(),
+  cacheReadTokens: tokenCount(),
 });
 
 /**
@@ -44,8 +53,12 @@ const TokenMetricsSchema = v.object({
  * be reconstructed by summing `byModel`.
  */
 const FileAggregateSchema = v.object({
-  mtimeMs: v.number(),
-  size: v.number(),
+  // Finite, not `persistedTimestamp()`: `mtimeMs` is fractional. Neither is
+  // compared as an age, only for equality with a live stat, so a non-finite
+  // value was only ever a miss; rejecting it keeps one rule for every number
+  // this file holds (COR-006).
+  mtimeMs: finiteNumber(),
+  size: finiteNumber(),
   byModel: v.array(v.tuple([v.string(), TokenMetricsSchema])),
   totals: TokenMetricsSchema,
 });

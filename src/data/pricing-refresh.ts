@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import * as v from "valibot";
 import { getCacheDir, ensureDir } from "../utils/paths.js";
 import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
+import { ageSince, persistedTimestamp } from "../utils/schemas.js";
 
 /**
  * How long to wait after an attempt before spawning another refresher.
@@ -32,16 +33,22 @@ function stampPath(): string {
  * the backoff window, and the stamp is only rewritten *after* the check — so
  * the file causing the wrong answer gated its own repair and pricing froze
  * permanently, silently (#133).
+ *
+ * `finite()` closed that for `1e400` only: any finite stamp in the future
+ * (`9e15`, a clock set backwards) gave the same negative age, and latched the
+ * backoff until the clock caught up. Hence `persistedTimestamp()` plus
+ * `ageSince` below (COR-006).
  */
-const StampSchema = v.object({ timestamp: v.pipe(v.number(), v.finite()) });
+const StampSchema = v.object({ timestamp: persistedTimestamp() });
 
 function attemptedRecently(): boolean {
-  // No stamp, an unreadable one, or one that fails the schema: treat as never
-  // attempted. Failing open here only costs one spawn, and the stamp write
-  // below re-arms the guard.
+  // No stamp, an unreadable one, one that fails the schema, or one in the
+  // future: treat as never attempted. Failing open here only costs one spawn,
+  // and the stamp write below re-arms the guard from the current clock.
   const stamp = readJsonValidated(stampPath(), StampSchema);
   if (stamp === null) return false;
-  return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
+  const age = ageSince(stamp.timestamp);
+  return age !== null && age < REFRESH_BACKOFF_MS;
 }
 
 /**

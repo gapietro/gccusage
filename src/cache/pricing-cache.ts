@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
+import { ageSince, persistedTimestamp } from "../utils/schemas.js";
 import { sanitisePricingTable } from "../data/pricing-validation.js";
 import type { PricingTable } from "../types/pricing.js";
 
@@ -34,7 +35,7 @@ export const PRICING_CACHE_VERSION = 2;
 // carries the tiers) instead of silently shadowing it.
 const PricingCacheSchema = v.object({
   version: v.literal(PRICING_CACHE_VERSION),
-  timestamp: v.number(),
+  timestamp: persistedTimestamp(),
   data: v.record(v.string(), v.unknown()),
 });
 
@@ -58,6 +59,15 @@ export function loadPricingCacheEntry(): PricingCacheEntry | null {
   const cache = readJsonValidated(getCachePath(), PricingCacheSchema);
   if (!cache) return null;
 
+  // A future stamp is a miss, not a fresh table. Read as fresh, it reported
+  // `stale: false`, so the render path never spawned the refresher — the only
+  // writer of this file — and prices froze silently: the file causing the
+  // wrong answer gated its own repair, #133's shape (COR-006). A miss
+  // degrades to FALLBACK_PRICING and spawns a refresh, which rewrites the
+  // stamp from the current clock and heals the file.
+  const ageMs = ageSince(cache.timestamp);
+  if (ageMs === null) return null;
+
   // Bounds only, never the snapshot anchor: the anchor is about trusting the
   // feed, these entries already passed it at write time, and re-running it
   // would silently invalidate a legitimately cached price the day someone
@@ -65,7 +75,7 @@ export function loadPricingCacheEntry(): PricingCacheEntry | null {
   const data = sanitisePricingTable(cache.data);
   if (Object.keys(data).length === 0) return null;
 
-  return { data, ageMs: Date.now() - cache.timestamp };
+  return { data, ageMs };
 }
 
 export function loadPricingCache(ttlMs: number): PricingTable | null {

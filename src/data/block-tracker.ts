@@ -5,19 +5,16 @@ import { loadBlockCache, saveBlockCache } from "../cache/block-cache.js";
 export function detectBlock(sessionStartTime: number | null): BlockMetrics | null {
   const now = Date.now();
 
-  // Try loading cached block start
-  const cached = loadBlockCache();
+  // A cached block comes back only while it is running, with an elapsed time
+  // already judged against the clock — never re-derived here (COR-006).
+  const cached = loadBlockCache(now);
   if (cached) {
-    const elapsed = now - cached.blockStartTime;
-    if (elapsed < BLOCK_DURATION_MS) {
-      return {
-        blockStartTime: cached.blockStartTime,
-        elapsedMs: elapsed,
-        remainingMs: BLOCK_DURATION_MS - elapsed,
-        blockDurationMs: BLOCK_DURATION_MS,
-      };
-    }
-    // Block expired, check if we need to start a new one
+    return {
+      blockStartTime: cached.blockStartTime,
+      elapsedMs: cached.elapsedMs,
+      remainingMs: BLOCK_DURATION_MS - cached.elapsedMs,
+      blockDurationMs: BLOCK_DURATION_MS,
+    };
   }
 
   // Use session start as block start if available

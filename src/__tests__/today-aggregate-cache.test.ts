@@ -285,6 +285,55 @@ describe("getTodayAggregate", () => {
     expect(result.totals.inputTokens).toBe(100);
   });
 
+  // COR-006: #145 guarded the WRITE side (`aggregateFinite`), so this cache
+  // never emits a non-finite count itself, but the read side was
+  // `v.pipe(v.number(), v.minValue(0))` — and `Infinity >= 0`. A count of
+  // `1e400` in the file (`JSON.parse` overflows it) was a cache hit, keyed on
+  // the live file's real mtime and size, and every total built on it was
+  // Infinity. Raw-text substitution, because `JSON.stringify(Infinity)` is
+  // `null`, which the schema already rejected (#133).
+  it("rejects a cached count of 1e400 and re-parses instead of returning Infinity", () => {
+    const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+
+    getTodayAggregate(NOW);
+    const primed = fs.readFileSync(cacheFile, "utf-8");
+    const poisoned = primed.replaceAll('"inputTokens":100', '"inputTokens":1e400');
+    expect(poisoned).not.toBe(primed); // the substitution found its target
+    fs.writeFileSync(cacheFile, poisoned);
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const result = getTodayAggregate(NOW);
+
+    expect(parsedPaths()).toContain(filePath);
+    expect(result.totals.inputTokens).toBe(100);
+    expect(result.byModel.get("opus")!.inputTokens).toBe(100);
+  });
+
+  // COR-006, the bookkeeping fields. Unlike the count above this was never a
+  // wrong answer: an Infinity `mtimeMs` or `size` cannot equal a real stat,
+  // so before the fix it was already a per-file miss. `finite()` makes it a
+  // schema failure like any other corrupt value, which discards the whole
+  // document — what this test pins, by showing the untouched file re-parsed.
+  it.each(["mtimeMs", "size"])("rejects the whole cache document when a %s is 1e400", (field) => {
+    const a = write("a", [line("opus", 100, EARLIER_TODAY)]);
+    const b = write("b", [line("opus", 200, EARLIER_TODAY)]);
+    const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
+
+    getTodayAggregate(NOW);
+    const primed = fs.readFileSync(cacheFile, "utf-8");
+    // First occurrence only: one file's entry is poisoned, the other is clean.
+    const poisoned = primed.replace(new RegExp(`"${field}":[0-9.e+]+`), `"${field}":1e400`);
+    expect(poisoned).not.toBe(primed);
+    fs.writeFileSync(cacheFile, poisoned);
+    vi.mocked(parseJsonlFile).mockClear();
+
+    const result = getTodayAggregate(NOW);
+
+    expect(parsedPaths()).toEqual(expect.arrayContaining([a, b]));
+    expect(result.totals.inputTokens).toBe(300);
+  });
+
   it("re-parses a transcript whose cached aggregate predates the TTL split (#118)", () => {
     const filePath = write("a", [line("opus", 100, EARLIER_TODAY)]);
     const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
