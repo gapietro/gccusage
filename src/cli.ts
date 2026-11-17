@@ -274,10 +274,15 @@ function resolveWriteTarget(settingsPath: string): string {
  * secrets, and the atomic writer's temp file would otherwise take the umask
  * default: 0600 came back as 0644 (SEC-003). Preserved rather than forced to
  * 0600, because a user who chose a mode for their own file chose it.
+ *
+ * Less group and other write. The writer applies the mode with an explicit
+ * chmod, which bypasses the umask, so a 0666 file would come back 0666 —
+ * setup re-emitting a file anyone on the machine can rewrite, and through
+ * its `hooks` and `statusLine`, run commands as the user (review of #154).
  */
 function existingModeOr(target: string): number {
   try {
-    return statSync(target).mode & 0o777;
+    return statSync(target).mode & 0o777 & ~0o022;
   } catch {
     return PRIVATE_FILE_MODE;
   }

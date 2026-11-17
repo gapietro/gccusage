@@ -396,6 +396,18 @@ describe("gccusage setup", () => {
       expect(mode(settingsPath())).toBe(0o640);
     });
 
+    it("drops group and other write bits instead of re-emitting a world-writable file", async () => {
+      // Preserving is applied with an explicit chmod, which bypasses the
+      // umask — so a 0666 file would otherwise come back 0666, and setup
+      // would re-certify a file anyone can rewrite (review of #154).
+      fs.writeFileSync(settingsPath(), "{}\n");
+      fs.chmodSync(settingsPath(), 0o666);
+
+      await runCli(["setup"]);
+
+      expect(mode(settingsPath())).toBe(0o644);
+    });
+
     it("creates a new settings.json as 0600", async () => {
       await runCli(["setup"]);
 
