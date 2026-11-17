@@ -69,14 +69,15 @@ export function findJsonlFiles(dir: string): string[] {
 // each agent has an `agent-<id>.meta.json` beside it.
 const SUBAGENT_TRANSCRIPT = /^agent-.*\.jsonl$/;
 
-function subagentTranscriptsIn(dir: string): string[] {
+/** The agent transcripts in `dir`, or null when `dir` cannot be listed. */
+function subagentTranscriptsIn(dir: string): string[] | null {
   try {
     return fs
       .readdirSync(dir)
       .filter((f) => SUBAGENT_TRANSCRIPT.test(f))
       .map((f) => path.join(dir, f));
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -109,6 +110,11 @@ function subagentTranscriptsIn(dir: string): string[] {
 function findSubagentJsonlFiles(sessionDir: string): string[] {
   const subagentsDir = path.join(sessionDir, "subagents");
   const files = subagentTranscriptsIn(subagentsDir);
+  // Most session dirs have no `subagents/` (ENOENT), and then `workflows/`
+  // under it cannot exist either. Stopping here halves the failed readdirs
+  // per session dir on every render. Any other failure (ENOTDIR, EACCES) is
+  // treated alike: a child of a dir that cannot be listed is not looked for.
+  if (files === null) return [];
 
   const workflowsDir = path.join(subagentsDir, "workflows");
   let runs: string[];
@@ -119,7 +125,7 @@ function findSubagentJsonlFiles(sessionDir: string): string[] {
   }
   for (const run of runs) {
     // A non-directory entry just fails its readdir with ENOTDIR.
-    files.push(...subagentTranscriptsIn(path.join(workflowsDir, run)));
+    files.push(...(subagentTranscriptsIn(path.join(workflowsDir, run)) ?? []));
   }
   return files;
 }
