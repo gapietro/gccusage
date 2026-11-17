@@ -1213,3 +1213,77 @@ describe("a widget returning a non-string colour (#141)", () => {
     expect(visible).toContain("Sonnet");
   });
 });
+
+// REL-007. A widget whose render throws used to propagate out of
+// renderStatusline; main().catch() swallowed it and the WHOLE bar was erased —
+// one bad segment cost every other one. The thrower sits mid-line on purpose:
+// with it last, an early `return`/`break` out of the loop would also pass.
+describe("a widget whose render throws (REL-007)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  async function makeVimModeThrow(): Promise<void> {
+    const { vimModeWidget } = await import("../widgets/vim-mode.js");
+    vi.spyOn(vimModeWidget, "render").mockImplementation(() => {
+      throw new RangeError("Invalid count value: -1");
+    });
+  }
+
+  it.each([
+    ["full layout, powerline", 200, true],
+    ["compact layout, powerline", 60, true],
+    ["full layout, plain", 200, false],
+    ["compact layout, plain", 60, false],
+  ])("drops only its own segment (%s)", async (_name, terminalWidth, powerlineEnabled) => {
+    await makeVimModeThrow();
+
+    const bar = renderStatusline(
+      makeContext({ terminalWidth }),
+      makeSettings({
+        powerline: { enabled: powerlineEnabled, theme: "default", separator: "▶", separatorThin: "│" },
+        lines: [
+          {
+            widgets: [{ type: "model" }, { type: "vim-mode" }, { type: "custom-text", text: "after" }],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    const visible = stripAnsi(bar);
+    expect(visible).toContain("Sonnet");
+    expect(visible).toContain("after");
+  });
+
+  it("reports the failure on stderr under GCCUSAGE_DEBUG, naming the widget", async () => {
+    await makeVimModeThrow();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "1");
+
+    renderStatusline(
+      makeContext({ terminalWidth: 200 }),
+      makeSettings({ lines: [{ widgets: [{ type: "vim-mode" }], flex: "left" }] }),
+    );
+
+    // Containment must not make the failure invisible: before it, the stack
+    // reached stderr through main().catch() under this same gate (OPS-006).
+    const logged = errSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(logged).toContain("vim-mode");
+    expect(logged).toContain("Invalid count value: -1");
+  });
+
+  it("stays silent on stderr without GCCUSAGE_DEBUG", async () => {
+    await makeVimModeThrow();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "");
+
+    renderStatusline(
+      makeContext({ terminalWidth: 200 }),
+      makeSettings({ lines: [{ widgets: [{ type: "model" }, { type: "vim-mode" }], flex: "left" }] }),
+    );
+
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+});

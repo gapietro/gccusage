@@ -31,15 +31,46 @@ function collectWidgets(
 ): WidgetResult[] {
   const results: WidgetResult[] = [];
   for (const config of configs) {
-    const widget = getWidget(config.type);
-    if (!widget) continue;
-    const output = widget.render(context, config);
-    if (!output) continue;
-    const sanitized = sanitizeOutput(output);
+    const sanitized = renderWidget(config, context);
+    if (!sanitized) continue;
     if (isSeparatorOutput(sanitized)) continue;
     results.push({ output: sanitized, priority: config.priority ?? 99 });
   }
   return results;
+}
+
+/**
+ * One widget's sanitised output, or null when it has nothing to show — or when
+ * it threw. The single place both layouts call a widget from.
+ *
+ * Containment is per widget. A throw used to propagate out of
+ * `renderStatusline`, where `main().catch()` swallowed it and the WHOLE bar
+ * was erased: `"-".repeat(-1)` in context-percent on an over-100% payload cost
+ * the model, the cost and everything else on both lines (REL-007). This is the
+ * general form of #141's colour guard, which closed one way a widget could take
+ * the bar down; this closes the rest. `sanitizeOutput` sits inside the guard
+ * because it is the first thing to touch what the widget returned, and a
+ * malformed return is the same failure as a throw.
+ *
+ * Logged under `GCCUSAGE_DEBUG`, the gate `main()` uses, because before this
+ * the error reached stderr through that handler. Containing it must not also
+ * make it undiagnosable.
+ */
+function renderWidget(config: WidgetConfig, context: RenderContext): WidgetOutput | null {
+  const widget = getWidget(config.type);
+  if (!widget) return null;
+  try {
+    const output = widget.render(context, config);
+    return output ? sanitizeOutput(output) : null;
+  } catch (err) {
+    if (process.env["GCCUSAGE_DEBUG"]) {
+      console.error(
+        `gccusage: widget "${config.type}" failed —`,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
+    }
+    return null;
+  }
 }
 
 function renderLine(
@@ -147,13 +178,8 @@ function renderFull(context: RenderContext, settings: Settings): string {
     const outputs: WidgetOutput[] = [];
 
     for (const widgetConfig of lineConfig.widgets) {
-      const widget = getWidget(widgetConfig.type);
-      if (!widget) continue;
-
-      const output = widget.render(context, widgetConfig);
-      if (!output) continue;
-
-      outputs.push(sanitizeOutput(output));
+      const output = renderWidget(widgetConfig, context);
+      if (output) outputs.push(output);
     }
 
     const cleaned = cleanSeparators(outputs);
