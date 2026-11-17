@@ -6,6 +6,7 @@ import { buildRenderContext } from "../data/pipeline.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import type { RenderContext } from "../types/render-context.js";
+import { noPasswd } from "./helpers/no-passwd.js";
 
 /**
  * COR-007 follow-up (PR #156 review): reading subagent transcripts made every
@@ -38,6 +39,8 @@ vi.mock("../data/pricing-fetcher.js", () => ({
 }));
 
 // Pass-through spy: real parsing, every path read recorded.
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal));
 vi.mock("../data/jsonl-reader.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/jsonl-reader.js")>();
   return { ...actual, parseJsonlFile: vi.fn(actual.parseJsonlFile) };
@@ -350,5 +353,28 @@ describe("the session start time (PR #156 review)", () => {
     writeFile(path.join(dir, SESSION, "subagents", "agent-z.jsonl"), [assistant("z", 1, START)]);
 
     expect((await build()).sessionStartTime).toBe(START.getTime());
+  });
+});
+
+
+// Merge of #154 into this cache: with no home directory (SEC-004) there is
+// no cache dir and no transcripts dir. The render must still work, and this
+// cache must write nothing anywhere, least of all somewhere shared.
+describe("session aggregate cache with no home directory (SEC-004)", () => {
+  it("renders without reading or writing a cache", async () => {
+    const savedXdg = process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    delete process.env["XDG_CACHE_HOME"];
+    noPasswd.on = true;
+    try {
+      const context = await buildRenderContext({ session_id: "no-home" }, DEFAULT_SETTINGS);
+      expect(context.metrics.totals.inputTokens).toBe(0);
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    } finally {
+      noPasswd.on = false;
+      process.env["HOME"] = tmpDir;
+      if (savedXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+      else process.env["XDG_CACHE_HOME"] = savedXdg;
+    }
   });
 });

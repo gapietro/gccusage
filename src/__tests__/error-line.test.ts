@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { formatConfigError, formatStdinTimeout } from "../config/error-line.js";
+import * as path from "node:path";
+import { getHomeDir } from "../utils/paths.js";
+import {
+  formatConfigError,
+  formatStdinError,
+  formatStdinReadError,
+  formatStdinTimeout,
+} from "../config/error-line.js";
 
 const CONFIG = "/home/u/.config/gccusage/settings.json";
 const MESSAGE = "lines.0.widgets.2.bg: must be a color name or #rgb/#rrggbb hex (got \"196\")";
@@ -30,6 +37,15 @@ describe("formatConfigError", () => {
     expect(formatConfigError(MESSAGE, CONFIG)).toContain("~/.config/gccusage/settings.json");
   });
 
+  it("does not collapse a sibling directory that merely shares $HOME's prefix", () => {
+    // A bare startsWith turned /home/u2/x into "~2/x" (review of #154).
+    process.env["HOME"] = "/home/u";
+    const sibling = "/home/u2/.config/gccusage/settings.json";
+    const line = formatConfigError(MESSAGE, sibling);
+    expect(line).toContain(sibling);
+    expect(line).not.toContain("~2");
+  });
+
   it("leaves a path outside $HOME alone", () => {
     process.env["HOME"] = "/home/other";
     expect(formatConfigError(MESSAGE, CONFIG)).toContain(CONFIG);
@@ -43,6 +59,24 @@ describe("formatConfigError", () => {
   it("survives HOME being unset", () => {
     delete process.env["HOME"];
     expect(formatConfigError(MESSAGE, CONFIG)).toContain(CONFIG);
+  });
+
+  // SEC-004. The path shown is getConfigPath(), which resolves home through
+  // getHomeDir() — the passwd entry when HOME is unset or empty. Shortening
+  // against raw $HOME instead left that path unshortened, and in the old
+  // `HOME || "~"` world the two disagreed about where home even was.
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])("collapses the resolved home directory when HOME is %s", (_label, home) => {
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+    const resolvedHome = getHomeDir()!;
+    const configPath = path.join(resolvedHome, ".config", "gccusage", "settings.json");
+
+    expect(formatConfigError(MESSAGE, configPath)).toContain(
+      `~${path.sep}.config${path.sep}gccusage${path.sep}settings.json`,
+    );
   });
 });
 
@@ -68,5 +102,29 @@ describe("formatStdinTimeout", () => {
     // utils/format.ts's formatDuration floors to whole seconds and turns 200
     // into "0s", which is why this has its own formatter.
     expect(formatStdinTimeout(200)).not.toContain("0s");
+  });
+});
+
+// TEST-003: these two were never executed. index-entry.test.ts mocks them to
+// observe the call, and nothing else imported them, so a formatter that threw
+// or emitted a newline would have brought REL-004's bar erasure back with the
+// suite green. The prefix is asserted through the reset, not just `⚠ gccusage`:
+// the config line's `⚠ gccusage config` starts with that too.
+describe.each([
+  ["formatStdinError", formatStdinError, "stdin is not valid JSON"],
+  ["formatStdinReadError", formatStdinReadError, "read EIO"],
+])("%s", (_name, format, message) => {
+  it("is a non-empty single line with no trailing newline", () => {
+    const line = format(message);
+    expect(line.length).toBeGreaterThan(0);
+    expect(line).not.toContain("\n");
+  });
+
+  it("opens with the same bold-red marker as the other error lines", () => {
+    expect(format(message).startsWith("\x1b[1;31m⚠ gccusage\x1b[0m")).toBe(true);
+  });
+
+  it("includes the message verbatim", () => {
+    expect(format(message)).toContain(message);
   });
 });

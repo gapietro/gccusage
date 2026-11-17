@@ -1,0 +1,19 @@
+# OPS-010: nothing tracked dependency advisories, and the dev-chain count went
+# from 9 to 19 between two audits. Weekly, grouped, so it is a review task and
+# not a stream of PRs. The bundle is committed (dist/index.js), so every npm
+# update must rebuild it: bundle-drift fails any PR that doesn't.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      runtime-dependencies:
+        dependency-type: production
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { loadSettings } from "../config/loader.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
+import { noPasswd } from "./helpers/no-passwd.js";
 
 vi.mock("node:fs");
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 describe("loadSettings", () => {
   beforeEach(() => {
@@ -269,4 +275,77 @@ describe("loadSettings with prototype-member keys in a section (#143)", () => {
       expect(Object.hasOwn(settings.powerline!, key)).toBe(false);
     },
   );
+});
+
+// SEC-004. With HOME unset the config dir was `path.join("~", ".config", …)` —
+// a RELATIVE path, resolved against whatever directory Claude Code was
+// launched in. A repo committing `~/.config/gccusage/settings.json` then had
+// its config loaded and its `custom-command` run on every render. A relative
+// XDG_CONFIG_HOME did the same.
+describe("where loadSettings looks for the config (SEC-004)", () => {
+  beforeEach(() => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function lookedAt(): string {
+    loadSettings();
+    const calls = vi.mocked(fs.existsSync).mock.calls;
+    return String(calls[calls.length - 1]![0]);
+  }
+
+  it.each([
+    ["HOME is unset", undefined],
+    ["HOME is empty", ""],
+  ])("never looks under the working directory when %s", (_label, home) => {
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+
+    const configPath = lookedAt();
+    expect(path.isAbsolute(configPath)).toBe(true);
+    expect(configPath.split(path.sep)).not.toContain("~");
+  });
+
+  it("ignores a relative XDG_CONFIG_HOME", () => {
+    vi.stubEnv("HOME", "/home/u");
+    vi.stubEnv("XDG_CONFIG_HOME", ".config");
+
+    expect(lookedAt()).toBe(path.join("/home/u", ".config", "gccusage", "settings.json"));
+  });
+});
+
+// SEC-004, review of #154. With no home at all the config dir used to be
+// os.tmpdir(), the shared /tmp on Linux: another local user's
+// `/tmp/.config/gccusage/settings.json` loaded, and its custom-command ran as
+// the victim. Now there is simply no config file to look for.
+describe("loadSettings with no home directory (SEC-004)", () => {
+  afterEach(() => {
+    noPasswd.on = false;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["HOME is empty", ""],
+    ["HOME is unset", undefined],
+  ])("loads no config file when %s and there is no passwd entry", (_label, home) => {
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+    noPasswd.on = true;
+    // Whatever path is probed "exists" and holds a planted command.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ lines: [{ widgets: [{ type: "custom-command", command: "planted" }] }] }),
+    );
+
+    const { settings, error } = loadSettings();
+
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+    expect(error).toBeUndefined();
+    expect(fs.readFileSync).not.toHaveBeenCalled();
+  });
 });

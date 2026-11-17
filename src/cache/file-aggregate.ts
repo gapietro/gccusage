@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { finiteNumber } from "../utils/schemas.js";
 import type { JsonlEntry } from "../data/jsonl-reader.js";
 import { aggregateTokens, countHumanTurns, getFirstTimestamp } from "../data/token-aggregator.js";
 import type { AggregatedMetrics, TokenCounts, TokenMetrics } from "../types/token-metrics.js";
@@ -14,8 +15,8 @@ import type { AggregatedMetrics, TokenCounts, TokenMetrics } from "../types/toke
 // Every count is finite as well as non-negative. `JSON.parse` turns `1e400`
 // in a corrupt or hand-edited cache file into `Infinity`, which `v.number()`
 // accepts, and one infinite count makes every cost derived from it
-// non-finite (#145, COR-006). TODO: switch to `finiteNumber` from
-// `src/utils/schemas.ts` once #155 lands.
+// non-finite (#145, COR-006). `finiteNumber()` is the one shared rule for
+// that, in `src/utils/schemas.ts`.
 //
 // A negative count already passed plain v.number() before #103; the tier
 // split SUBTRACTS `premium` from these base counts to get the standard
@@ -26,7 +27,7 @@ import type { AggregatedMetrics, TokenCounts, TokenMetrics } from "../types/toke
 // would require a v.custom check that dredges up the wider "which
 // decomposition is canonical" question this cache boundary should not have
 // to answer.
-const count = v.pipe(v.number(), v.finite(), v.minValue(0));
+const count = v.pipe(finiteNumber(), v.minValue(0));
 
 const TokenCountsSchema = v.object({
   inputTokens: count,
@@ -62,12 +63,12 @@ const TokenMetricsSchema = v.object({
  * rather than read as "no start, no turns".
  */
 export const FileAggregateSchema = v.object({
-  mtimeMs: v.pipe(v.number(), v.finite()),
-  size: v.pipe(v.number(), v.finite(), v.minValue(0)),
+  mtimeMs: finiteNumber(),
+  size: v.pipe(finiteNumber(), v.minValue(0)),
   byModel: v.array(v.tuple([v.string(), TokenMetricsSchema])),
   totals: TokenMetricsSchema,
-  firstTimestamp: v.nullable(v.pipe(v.number(), v.finite())),
-  humanTurns: v.pipe(v.number(), v.finite(), v.integer(), v.minValue(0)),
+  firstTimestamp: v.nullable(finiteNumber()),
+  humanTurns: v.pipe(finiteNumber(), v.integer(), v.minValue(0)),
 });
 
 export type FileAggregate = v.InferOutput<typeof FileAggregateSchema>;

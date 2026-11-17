@@ -34,8 +34,10 @@ const SessionAggregateCacheSchema = v.object({
 // A session's cache untouched this long is another session's leftover.
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
-function cacheDir(): string {
-  return path.join(getCacheDir(), "session-aggregates");
+/** Null when there is no cache dir (SEC-004): every file is re-parsed. */
+function cacheDir(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "session-aggregates");
 }
 
 /**
@@ -43,8 +45,9 @@ function cacheDir(): string {
  * file would make two live sessions evict each other's aggregates on every
  * write, which is the full re-parse this cache exists to avoid.
  */
-function cachePath(sessionId: string): string {
-  return path.join(cacheDir(), `${shardKey(sessionId)}.json`);
+function cachePath(sessionId: string): string | null {
+  const dir = cacheDir();
+  return dir === null ? null : path.join(dir, `${shardKey(sessionId)}.json`);
 }
 
 /**
@@ -53,14 +56,16 @@ function cachePath(sessionId: string): string {
  * per render. Judged on the file's mtime, which every write updates.
  */
 function sweepStale(now: number): void {
+  const dir = cacheDir();
+  if (dir === null) return;
   let names: string[];
   try {
-    names = fs.readdirSync(cacheDir());
+    names = fs.readdirSync(dir);
   } catch {
     return;
   }
   for (const name of names) {
-    const filePath = path.join(cacheDir(), name);
+    const filePath = path.join(dir, name);
     try {
       if (now - fs.statSync(filePath).mtimeMs > STALE_MS) fs.unlinkSync(filePath);
     } catch {
@@ -98,18 +103,19 @@ export function getSessionAggregate(sessionId: string | undefined): SessionAggre
   const mainPaths = new Set(transcripts.main);
   const files = statAll([...transcripts.main, ...transcripts.subagents]);
 
+  const target = sessionId && files.length > 0 ? cachePath(sessionId) : null;
   let previous: Record<string, FileAggregate> = {};
-  if (sessionId && files.length > 0) {
-    const cached = readJsonValidated(cachePath(sessionId), SessionAggregateCacheSchema);
+  if (target !== null) {
+    const cached = readJsonValidated(target, SessionAggregateCacheSchema);
     if (cached) previous = cached.files;
     else sweepStale(Date.now());
   }
 
   const next = refreshFileAggregates(files, previous, parseJsonlFile);
 
-  if (sessionId && files.length > 0 && next.changed) {
+  if (target !== null && next.changed) {
     try {
-      writeJsonAtomic(cachePath(sessionId), { files: persistableAggregates(next.files) });
+      writeJsonAtomic(target, { files: persistableAggregates(next.files) });
     } catch {
       // The next render re-parses; a cache that cannot be written costs
       // speed, never correctness.

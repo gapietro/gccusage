@@ -11,8 +11,17 @@ const BAR_WIDTH = 10;
 const THRESHOLD_WARN = 0.7;
 const THRESHOLD_DANGER = 0.9;
 
+/**
+ * The ratio is clamped to [0, 1] for the bar only. Claude Code's percentages
+ * are not bounded to 0..100 — an exact-token payload can report 105% used, or
+ * 106% remaining — and from 1.05 up (or -0.06 down) the rounded fill leaves
+ * `BAR_WIDTH - filled` negative, where `String.repeat` throws a RangeError
+ * that erased the whole bar (REL-007). The percentage text beside the bar is
+ * left unclamped: an over-full window is what was reported, and worth seeing.
+ */
 function buildBar(ratio: number): string {
-  const filled = Math.round(ratio * BAR_WIDTH);
+  const clamped = Math.min(1, Math.max(0, ratio));
+  const filled = Math.round(clamped * BAR_WIDTH);
   const empty = BAR_WIDTH - filled;
   return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
