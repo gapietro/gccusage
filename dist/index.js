@@ -1868,27 +1868,95 @@ function findJsonlFiles(dir) {
 		return [];
 	}
 }
+const SUBAGENT_TRANSCRIPT = /^agent-.*\.jsonl$/;
+function subagentTranscriptsIn(dir) {
+	try {
+		return fs$5.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path$9.join(dir, f));
+	} catch {
+		return [];
+	}
+}
+/**
+* The subagent transcripts of one session, given the session's directory
+* (`<project>/<sessionId>/`). COR-007: Claude Code writes a subagent's usage
+* to its own transcript there, never to the parent `<sessionId>.jsonl`, so a
+* walk of top-level transcripts alone misses it: 14.6% of tokens over the
+* audit's 7-day window on the developer's machine.
+*
+* Two fixed locations, no recursion:
+* - `subagents/agent-<id>.jsonl` — Task-tool agents;
+* - `subagents/workflows/<run>/agent-<id>.jsonl` — agents a workflow spawned.
+*   On the developer's machine these were 193 of 326 subagent transcripts
+*   and 0.63B of 2.23B subagent tokens, so a flat read of `subagents/` alone
+*   would leave much of COR-007 in place.
+* A missing or unreadable directory at either level yields nothing for that
+* level and never throws, so it cannot cost the caller the main transcript.
+*
+* Message ids are deduplicated per file only (`parseJsonlContent`), and that
+* is deliberate. Of 8,098 Task-agent message ids, 1 also appears in a parent
+* transcript (~0.01%; 1 of 1,688 in the audit's sample), and none of 4,516
+* workflow-agent ids appears anywhere else. Today's figure is aggregated and
+* cached PER FILE (`today-aggregate-cache.ts`), so cross-file dedup there would
+* mean persisting every file's message ids and invalidating across files.
+* Doing it for the session total alone would make the session and Today
+* disagree about the same responses. The cost of not doing it is an
+* over-count bounded by that overlap, against a ~15% under-count fixed.
+*/
+function findSubagentJsonlFiles(sessionDir) {
+	const subagentsDir = path$9.join(sessionDir, "subagents");
+	const files = subagentTranscriptsIn(subagentsDir);
+	const workflowsDir = path$9.join(subagentsDir, "workflows");
+	let runs;
+	try {
+		runs = fs$5.readdirSync(workflowsDir);
+	} catch {
+		return files;
+	}
+	for (const run of runs) files.push(...subagentTranscriptsIn(path$9.join(workflowsDir, run)));
+	return files;
+}
+/**
+* Every transcript of one session: `<project>/<sessionId>.jsonl`, then its
+* subagent transcripts (COR-007). The main files come first because
+* `getFirstTimestamp` takes the first timestamped entry, and a session starts
+* in its main transcript.
+*/
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
 	if (!fs$5.existsSync(projectsDir)) return [];
-	const files = [];
+	const joinable = SAFE_SESSION_ID.test(sessionId);
+	const mainFiles = [];
+	const subagentFiles = [];
 	try {
 		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$9.join(projectsDir, projectDir);
 			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
+			mainFiles.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
+			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path$9.join(fullPath, sessionId)));
 		}
 	} catch {}
-	return files;
+	return [...mainFiles, ...subagentFiles];
 }
 /**
 * Today's transcripts with the `mtimeMs` and `size` from the stat this walk
 * already performs. `today-aggregate-cache.ts` keys its reuse decision on that
 * pair, and re-statting to get it would double the syscalls the cache exists
 * to avoid.
+*
+* Includes each session's subagent transcripts (COR-007). The session
+* directories are found from the one `readdir` per project this walk already
+* does, via its entry types, so the added cost is one failed `readdir` per
+* session directory without subagents, and a stat per agent file, which the
+* cache needs anyway. Every subagent file is filtered on its own mtime, not
+* its parent's: a session left open over midnight writes today's usage to a
+* subagent while the parent's last line is yesterday's.
+*
+* The today-aggregate cache needs no change for these files: it keys on the
+* path, so a subagent file is just another key, and one missing from a cache
+* written before this walk saw them is a miss that gets parsed and added.
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
@@ -1897,18 +1965,31 @@ function findTodayJsonlFileStats() {
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
+	const addIfToday = (f) => {
+		try {
+			const fstat = fs$5.statSync(f);
+			if (fstat.mtimeMs >= todayMs) files.push({
+				path: f,
+				mtimeMs: fstat.mtimeMs,
+				size: fstat.size
+			});
+		} catch {}
+	};
 	try {
 		for (const projectDir of fs$5.readdirSync(projectsDir)) {
 			const fullPath = path$9.join(projectsDir, projectDir);
 			const stat = fs$5.statSync(fullPath);
 			if (!stat.isDirectory()) continue;
-			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$5.statSync(f);
-				if (fstat.mtimeMs >= todayMs) files.push({
-					path: f,
-					mtimeMs: fstat.mtimeMs,
-					size: fstat.size
-				});
+			let entries;
+			try {
+				entries = fs$5.readdirSync(fullPath, { withFileTypes: true });
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				const entryPath = path$9.join(fullPath, entry.name);
+				if (entry.name.endsWith(".jsonl")) addIfToday(entryPath);
+				else if (entry.isDirectory()) for (const f of findSubagentJsonlFiles(entryPath)) addIfToday(f);
 			}
 		}
 	} catch {}
@@ -3184,15 +3265,28 @@ function findPricing(model, table) {
 	}
 	return best === null ? null : table[best];
 }
-function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionModel) {
+/**
+* The calculated session cost per unit of elapsed time: the SAME per-model
+* figure the session total shows, divided by how long the session has run.
+*
+* COR-008: this used to price the session's token totals at the CURRENT
+* model's rate (the stdin model). A session of 400k opus and 1.6M haiku input
+* tokens over an hour read $10.00/hr with opus selected and $2.00/hr with
+* haiku, beside a per-model session total of $3.60. Taking `CostByModel`
+* rather than raw totals makes the rate agree with that total by
+* construction, whatever `/model` says now.
+*
+* Uncertainty is the caller's to flag, from the same `unpriced` and
+* `approximated` lists that mark the session total: the rate divides a lower
+* bound, so it is one too.
+*/
+function calculateBurnRate(session, sessionStartTime) {
 	if (!sessionStartTime) return null;
 	const elapsedMs = Date.now() - sessionStartTime;
 	if (elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
-	if (!sessionModel) return null;
-	const modelPricing = findPricing(sessionModel, pricing);
-	if (!modelPricing) return null;
-	const sessionCost = calculateCost(sessionMetrics, modelPricing);
+	if (session.costs.size === 0 && session.unpriced.length > 0) return null;
+	const sessionCost = calculateTotalCost(session.costs);
 	const costPerMinute = sessionCost / elapsedMinutes;
 	return {
 		costPerHour: costPerMinute * 60,
@@ -4467,14 +4561,16 @@ async function buildRenderContext(stdin, settings) {
 	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd);
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
-	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
-	const burnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) ?? jsonlBurnRate : jsonlBurnRate;
+	const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
+	const stdinBurnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) : null;
+	const burnRate = stdinBurnRate ?? jsonlBurnRate;
+	const burnRateUncertain = burnRate !== null && stdinBurnRate === null && (session.unpriced.length > 0 || session.approximated.length > 0);
 	return {
 		stdin,
 		metrics,
 		block,
 		burnRate,
+		burnRateUncertain,
 		pricing,
 		sessionCostUsd,
 		todayCostUsd,
@@ -4693,7 +4789,9 @@ const blockTimerWidget = { render(context, config) {
 const burnRateWidget = { render(context, config) {
 	if (!context.burnRate) return null;
 	const label = config.label ?? "";
-	const rate = formatCostPerHour(context.burnRate.costPerHour);
+	const costPerHour = context.burnRate.costPerHour;
+	const marked = context.burnRateUncertain && Number.isFinite(costPerHour);
+	const rate = formatCostPerHour(costPerHour) + (marked ? "?" : "");
 	const text = label ? `${label} ${rate}` : rate;
 	return {
 		text,
