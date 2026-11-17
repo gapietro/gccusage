@@ -130,19 +130,26 @@ function findSubagentJsonlFiles(sessionDir: string): string[] {
   return files;
 }
 
+export interface SessionTranscripts {
+  /** `<project>/<sessionId>.jsonl`: where the session and its prompts live. */
+  main: string[];
+  /** Its subagents' transcripts (COR-007). */
+  subagents: string[];
+}
+
 /**
- * Every transcript of one session: `<project>/<sessionId>.jsonl`, then its
- * subagent transcripts (COR-007). The main files come first because
- * `getFirstTimestamp` takes the first timestamped entry, and a session starts
- * in its main transcript.
+ * Every transcript of one session, split by kind. Callers that need to know
+ * where the session started, or what the user typed, read `main`; nothing
+ * depends on the order of either list.
  */
-export function findSessionJsonlFiles(sessionId?: string): string[] {
+export function findSessionTranscripts(sessionId?: string): SessionTranscripts {
+  const none: SessionTranscripts = { main: [], subagents: [] };
   // Fail closed: without a session id we would otherwise scan every
   // transcript across every project.
-  if (!sessionId) return [];
+  if (!sessionId) return none;
 
   const projectsDir = getProjectsDir();
-  if (!fs.existsSync(projectsDir)) return [];
+  if (!fs.existsSync(projectsDir)) return none;
 
   // The id arrives from stdin. It used to be compared only against basenames;
   // the subagent lookup joins it into a path, so an id that is not a plain
@@ -164,7 +171,13 @@ export function findSessionJsonlFiles(sessionId?: string): string[] {
   } catch {
     // ignore
   }
-  return [...mainFiles, ...subagentFiles];
+  return { main: mainFiles, subagents: subagentFiles };
+}
+
+/** Every transcript of one session, main and subagent alike (COR-007). */
+export function findSessionJsonlFiles(sessionId?: string): string[] {
+  const { main, subagents } = findSessionTranscripts(sessionId);
+  return [...main, ...subagents];
 }
 
 export interface TodayJsonlFile {

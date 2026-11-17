@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findSessionJsonlFiles, findTodayJsonlFileStats } from "../utils/paths.js";
+import {
+  findSessionJsonlFiles,
+  findSessionTranscripts,
+  findTodayJsonlFileStats,
+} from "../utils/paths.js";
 import { buildRenderContext } from "../data/pipeline.js";
 import { getTodayAggregate } from "../cache/today-aggregate-cache.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
@@ -155,17 +159,17 @@ function settingsWith(costSource: Settings["costSource"]): Settings {
 }
 
 describe("findSessionJsonlFiles reads subagent transcripts (COR-007)", () => {
-  it("returns the main transcript, then every Task and workflow agent transcript", () => {
+  it("returns the main transcript and every Task and workflow agent transcript", () => {
     const layout = writeSessionWithSubagents();
 
-    const files = findSessionJsonlFiles(SESSION);
-
-    // Main first: getFirstTimestamp takes the first timestamped entry, and the
-    // session started in the main transcript.
-    expect(files[0]).toBe(layout.main);
-    expect([...files].sort()).toEqual(
+    expect([...findSessionJsonlFiles(SESSION)].sort()).toEqual(
       [layout.main, ...layout.agents, layout.workflowAgent].sort(),
     );
+    // Split by kind: the start time is taken from `main`, so no caller
+    // depends on list order (PR #156 review).
+    const split = findSessionTranscripts(SESSION);
+    expect(split.main).toEqual([layout.main]);
+    expect([...split.subagents].sort()).toEqual([...layout.agents, layout.workflowAgent].sort());
   });
 
   it("ignores meta files, journals, tool results and deeper nesting", () => {

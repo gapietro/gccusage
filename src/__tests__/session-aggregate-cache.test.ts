@@ -259,3 +259,38 @@ describe("the session aggregate cache (COR-007)", () => {
     expect(fs.existsSync(cacheDir())).toBe(false);
   });
 });
+
+describe("the session start time (PR #156 review)", () => {
+  const EARLIER = new Date(START.getTime() - 30 * 60_000);
+
+  it("is the main transcript's, even when an agent line is older", async () => {
+    // Clock skew, or an agent file left behind by an earlier run under the
+    // same id: either way the session started where its main transcript did.
+    writeSession();
+    const dir = path.join(tmpDir, ".claude", "projects", "-proj");
+    writeFile(path.join(dir, SESSION, "subagents", "agent-old.jsonl"), [
+      assistant("old", 1, EARLIER),
+    ]);
+
+    expect((await build()).sessionStartTime).toBe(START.getTime());
+  });
+
+  it("is the earliest of several main transcripts, whatever order they are listed in", async () => {
+    const newer = path.join(tmpDir, ".claude", "projects", "-a", `${SESSION}.jsonl`);
+    const older = path.join(tmpDir, ".claude", "projects", "-z", `${SESSION}.jsonl`);
+    writeFile(newer, [assistant("n", 1, START)]);
+    writeFile(older, [assistant("o", 1, EARLIER)]);
+
+    expect((await build()).sessionStartTime).toBe(EARLIER.getTime());
+  });
+
+  it("falls back to the subagent transcripts when the main one has no timestamp", async () => {
+    const dir = path.join(tmpDir, ".claude", "projects", "-proj");
+    writeFile(path.join(dir, `${SESSION}.jsonl`), [JSON.stringify({ type: "summary" })]);
+    // The earlier agent is named to sort, and so likely list, last.
+    writeFile(path.join(dir, SESSION, "subagents", "agent-a.jsonl"), [assistant("a", 1, LATER)]);
+    writeFile(path.join(dir, SESSION, "subagents", "agent-z.jsonl"), [assistant("z", 1, START)]);
+
+    expect((await build()).sessionStartTime).toBe(START.getTime());
+  });
+});

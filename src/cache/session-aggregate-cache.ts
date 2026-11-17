@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as v from "valibot";
-import { findSessionJsonlFiles, getCacheDir, shardKey } from "../utils/paths.js";
+import { findSessionTranscripts, getCacheDir, shardKey } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
 import type { AggregatedMetrics } from "../types/token-metrics.js";
@@ -94,7 +94,9 @@ function statAll(paths: string[]): FileStat[] {
  * re-parsed every time (PR #156 review).
  */
 export function getSessionAggregate(sessionId: string | undefined): SessionAggregate {
-  const files = statAll(findSessionJsonlFiles(sessionId));
+  const transcripts = findSessionTranscripts(sessionId);
+  const mainPaths = new Set(transcripts.main);
+  const files = statAll([...transcripts.main, ...transcripts.subagents]);
 
   let previous: Record<string, FileAggregate> = {};
   if (sessionId && files.length > 0) {
@@ -114,20 +116,27 @@ export function getSessionAggregate(sessionId: string | undefined): SessionAggre
     }
   }
 
-  // In listing order, which puts the main transcript first: a session starts
-  // there, and `getFirstTimestamp` took the first timestamped entry.
-  const ordered = files.map((f) => next.files[f.path]!);
-  let sessionStartTime: number | null = null;
-  for (const aggregate of ordered) {
-    if (aggregate.firstTimestamp !== null) {
-      sessionStartTime = aggregate.firstTimestamp;
-      break;
-    }
-  }
+  const all = files.map((f) => next.files[f.path]!);
+  const main = files.filter((f) => mainPaths.has(f.path)).map((f) => next.files[f.path]!);
 
   return {
-    metrics: sumAggregates(ordered),
-    sessionStartTime,
-    turnCount: ordered.reduce((sum, a) => sum + a.humanTurns, 0),
+    metrics: sumAggregates(all),
+    // The session started where its main transcript did. Taken as a minimum,
+    // not from whichever file is listed first, so it does not depend on
+    // readdir order, and an agent line timestamped earlier (clock skew, a
+    // leftover file) cannot move it. Only a session whose main transcript has
+    // no timestamp at all, or is missing, falls back to its subagents'.
+    sessionStartTime: earliestStart(main) ?? earliestStart(all),
+    turnCount: all.reduce((sum, a) => sum + a.humanTurns, 0),
   };
+}
+
+function earliestStart(aggregates: FileAggregate[]): number | null {
+  let earliest: number | null = null;
+  for (const { firstTimestamp } of aggregates) {
+    if (firstTimestamp !== null && (earliest === null || firstTimestamp < earliest)) {
+      earliest = firstTimestamp;
+    }
+  }
+  return earliest;
 }
