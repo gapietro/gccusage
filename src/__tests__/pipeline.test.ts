@@ -8,6 +8,7 @@ import type { Settings } from "../config/schema.js";
 import type { StatusJson } from "../types/status-json.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
 import { noPasswd } from "./helpers/no-passwd.js";
+import { localDateKey } from "../utils/local-date.js";
 
 vi.mock("node:os", async (importOriginal) =>
   (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
@@ -67,14 +68,6 @@ function shardPath(sessionId: string): string {
 
 function readShard(sessionId: string): unknown {
   return JSON.parse(fs.readFileSync(shardPath(sessionId), "utf-8"));
-}
-
-// The tracker keys its file on the local date, not UTC.
-function localToday(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 function writeTranscript(sessionId: string): void {
@@ -232,7 +225,7 @@ describe("buildRenderContext today cost", () => {
     fs.mkdirSync(shardDir(), { recursive: true });
     const seeded = {
       sessionId: "session-b",
-      date: localToday(),
+      date: localDateKey(new Date()),
       costUsd: 4.0,
       baselineUsd: 0,
       source: "stdin",
