@@ -8,6 +8,7 @@ import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+import { allowContainedWidgetErrors } from "./helpers/contained-widget-errors.js";
 
 // Rendered in-process, so git widgets would run git in the checkout this suite
 // runs from (#148). None of these tests asserts on git.
@@ -1225,6 +1226,9 @@ describe("a widget whose render throws (REL-007)", () => {
   });
 
   async function makeVimModeThrow(): Promise<void> {
+    // These tests exercise containment, so the suite-wide "no contained
+    // throws" check (setup/contained-widget-errors.ts) is waived for them.
+    allowContainedWidgetErrors();
     const { vimModeWidget } = await import("../widgets/vim-mode.js");
     vi.spyOn(vimModeWidget, "render").mockImplementation(() => {
       throw new RangeError("Invalid count value: -1");

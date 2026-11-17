@@ -8,6 +8,7 @@ import { applyFlex, type FlexMode } from "./flex.js";
 import { truncateAnsi } from "./truncation.js";
 import { sanitizeAnsi, visibleLength } from "../utils/terminal.js";
 import { shrinkOutputs } from "./shrink.js";
+import { reportContainedWidgetError } from "./contained-error-hook.js";
 
 interface WidgetResult {
   output: WidgetOutput;
@@ -69,6 +70,8 @@ function renderWidget(config: WidgetConfig, context: RenderContext): WidgetOutpu
         err instanceof Error ? (err.stack ?? err.message) : String(err),
       );
     }
+    // A no-op outside the test suite; see contained-error-hook.ts.
+    reportContainedWidgetError(config.type, err);
     return null;
   }
 }
