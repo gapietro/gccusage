@@ -156,4 +156,20 @@ describe("block cache timestamp (COR-006)", () => {
       expect(block!.remainingMs).toBeLessThanOrEqual(BLOCK_DURATION_MS - SESSION_AGE);
     },
   );
+
+  it("returns no block for a session start in the future, and never saves one", () => {
+    // The session-start fallback computed `now - sessionStartTime` raw, and a
+    // negative elapsed always passed `elapsed < BLOCK_DURATION_MS`: the block
+    // came back with elapsedMs -1h and remainingMs 6h, longer than the whole
+    // window. It was also SAVED, so every render had `loadBlockCache` reject
+    // and unlink the file and this path write it back (PR #155 review).
+    const blockFile = path.join(tmpDir, "gccusage", "blocks", "current.json");
+    const futureStart = Date.now() + 60 * 60 * 1000;
+
+    expect(detectBlock(futureStart)).toBeNull();
+    expect(fs.existsSync(blockFile)).toBe(false);
+
+    expect(detectBlock(futureStart)).toBeNull();
+    expect(fs.existsSync(blockFile)).toBe(false);
+  });
 });
