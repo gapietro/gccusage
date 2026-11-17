@@ -108,19 +108,22 @@ describe("calculateBurnRate (#143)", () => {
 });
 
 describe("a __proto__ key in pricing JSON (#143 item 3)", () => {
-  // `JSON.parse` keeps `"__proto__"` as an own key; assigning it onto the
-  // plain object `sanitisePricingTable` builds replaces that object's
-  // prototype instead of adding an entry. Local to the one object — nothing
-  // global is polluted — and with own-key lookups nothing inherited from the
-  // swapped prototype is reachable as a price.
+  // `JSON.parse` keeps `"__proto__"` as an own key. Assigned onto the plain
+  // object `sanitisePricingTable` used to build, it replaced that object's
+  // prototype instead of adding an entry: local to the one object, and with
+  // own-key lookups nothing inherited was reachable as a price. Since SEC-005
+  // the table has no prototype and the key is dropped (see
+  // pricing-table-prototype.test.ts); the read-side tests below still hold.
   const cached = JSON.parse(
     JSON.stringify({ "claude-opus-4-6": RATES }).replace("{", `{"__proto__":${JSON.stringify(RATES)},`),
   ) as Record<string, unknown>;
 
   it("builds the fixture it claims to (control)", () => {
     expect(Object.hasOwn(cached, "__proto__")).toBe(true);
+    // Was `not.toBe(Object.prototype)`, which recorded the prototype swap;
+    // SEC-005 makes the stronger claim: there is no prototype to swap.
     const table = sanitisePricingTable(cached);
-    expect(Object.getPrototypeOf(table)).not.toBe(Object.prototype);
+    expect(Object.getPrototypeOf(table)).toBeNull();
   });
 
   it("does not pollute Object.prototype", () => {

@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { finiteNumber } from "../utils/schemas.js";
 
 /**
  * Every field in this payload is optional AND independently recoverable.
@@ -26,13 +27,10 @@ function lenientWithDefault<const S extends v.GenericSchema<unknown, number>>(
   return v.fallback(v.optional(schema, value), value);
 }
 
-/**
- * `v.finite()`, never bare `v.number()` — for EVERY number in this payload.
- *
- * JSON has no `Infinity` literal, which made "JSON cannot encode it, so
- * `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
- * numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
- * both `v.number()` and `typeof x === "number"` accept it.
+/*
+ * `finiteNumber()` (utils/schemas.ts), never bare `v.number()` — for EVERY
+ * number in this payload. It lived here until COR-006 moved it out so the
+ * cache schemas share it; why bare `v.number()` is wrong is documented there.
  *
  * Applied at the boundary rather than in each formatter on purpose. #131
  * closed this for cost by guarding `formatDollars` and `formatCostPerHour`,
@@ -44,9 +42,6 @@ function lenientWithDefault<const S extends v.GenericSchema<unknown, number>>(
  * `lenientWithDefault`, so a rejected number falls back to undefined or its
  * default and the bar still draws, per the per-field posture of #83.
  */
-function finiteNumber() {
-  return v.pipe(v.number(), v.finite());
-}
 
 const ModelSchema = v.union([
   v.string(),

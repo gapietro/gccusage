@@ -852,6 +852,21 @@ describe("session duration widgets (#61)", () => {
     });
     expect(out?.text).toBe("1hr 0m");
   });
+
+  // COR-006, from the PR #155 review: a transcript whose first timestamp is
+  // in the future (a clock set backwards) gave a negative elapsed, rendered
+  // as a nonsense duration. Shown as "?", the same unknown-duration marker
+  // block-timer renders through `formatDuration`, rather than declining: the
+  // session exists, only its length is untrustworthy.
+  it.each([
+    ["1 hour in the future", () => Date.now() + 3_600_000],
+    ["9e15", () => 9e15],
+  ])("renders an unknown duration for a session start %s, not a negative one", (_label, start) => {
+    const out = sessionClockWidget.render(makeContext({ sessionStartTime: start() }), {
+      type: "session-clock",
+    });
+    expect(out?.text).toBe("Session: ?");
+  });
 });
 
 // #46. Every pre-existing band test drove these widgets with a FRACTIONAL
