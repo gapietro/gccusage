@@ -139,31 +139,50 @@ describe("calculateBurnRate", () => {
 
   // 30 minutes of session, $3.00 of input => $6.00/hr.
   const halfHourAgo = () => Date.now() - 30 * 60_000;
+  const session = (byModel: [string, TokenMetrics][]) =>
+    calculateCostByModel(new Map(byModel), pricing);
 
   it("reports the cost rate for a priced model", () => {
-    const rate = calculateBurnRate(metrics, halfHourAgo(), pricing, "claude-sonnet-4-20250514");
+    const rate = calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), halfHourAgo());
     expect(rate).not.toBeNull();
     expect(rate!.costPerHour).toBeCloseTo(6.0, 2);
     expect(rate!.costPerMinute).toBeCloseTo(0.1, 4);
   });
 
-  it("returns null when the model has no pricing entry", () => {
-    // A confident "$0.00/hr" beside real token usage is worse than no
-    // segment at all.
-    expect(calculateBurnRate(metrics, halfHourAgo(), pricing, "some-unpriced-model")).toBeNull();
+  // COR-008 replaced the old (metrics, start, pricing, currentModel)
+  // signature. "Returns null when the current model has no pricing entry"
+  // and "when no model is known" pinned a contract keyed on the CURRENT
+  // model, which no longer enters into the rate. What they protected — no
+  // confident "$0.00/hr" beside real, unpriceable usage — is pinned here
+  // against the transcript's models instead.
+  it("returns null when tokens were used but no model could be priced", () => {
+    expect(calculateBurnRate(session([["some-unpriced-model", metrics]]), halfHourAgo())).toBeNull();
   });
 
-  it("returns null when no model is known", () => {
-    expect(calculateBurnRate(metrics, halfHourAgo(), pricing)).toBeNull();
+  it("rates only the priced part of a partly priced session", () => {
+    // The caller flags this uncertain, as it does the session total.
+    const rate = calculateBurnRate(
+      session([
+        ["claude-sonnet-4-20250514", metrics],
+        ["some-unpriced-model", metrics],
+      ]),
+      halfHourAgo(),
+    );
+    expect(rate!.costPerHour).toBeCloseTo(6.0, 2);
+  });
+
+  it("reports $0/hr for a session with no usage at all", () => {
+    // Nothing unpriced, so zero is the true figure, not a gap.
+    expect(calculateBurnRate(session([]), halfHourAgo())!.costPerHour).toBe(0);
   });
 
   it("returns null without a session start time", () => {
-    expect(calculateBurnRate(metrics, null, pricing, "claude-sonnet-4-20250514")).toBeNull();
+    expect(calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), null)).toBeNull();
   });
 
   it("returns null before 10s of data has accumulated", () => {
     expect(
-      calculateBurnRate(metrics, Date.now() - 1000, pricing, "claude-sonnet-4-20250514"),
+      calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), Date.now() - 1000),
     ).toBeNull();
   });
 });

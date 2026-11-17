@@ -40,6 +40,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     },
     block: null,
     burnRate: null,
+    burnRateUncertain: false,
     pricing: {},
     sessionCostUsd: 0,
     todayCostUsd: 0,
@@ -164,6 +165,28 @@ describe("contextPercentWidget", () => {
     });
     const result = contextPercentWidget.render(ctx, { type: "context-percent" });
     expect(result!.text).toBe("[===-------] 25%");
+  });
+
+  // REL-007. Tested on the widget, not through the renderer: the renderer now
+  // contains a throwing widget, so a reverted clamp would only cost this
+  // segment there and an end-to-end assertion could pass on the wrong bar.
+  it("renders a full bar, not a RangeError, when usage is over 100%", () => {
+    // 1.05 * 10 rounds to 11 filled, and "-".repeat(-1) threw.
+    const ctx = makeContext({
+      stdin: { context_window: { used_percentage: 105, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, { type: "context-percent" });
+    // The bar is clamped; the percentage is not — 105% is what was reported.
+    expect(result!.text).toBe("[==========] 105% (200.0k)");
+  });
+
+  it("renders an empty bar, not a RangeError, when remaining is over 100%", () => {
+    // ratio -0.06 rounds to -1 filled, and "=".repeat(-1) threw.
+    const ctx = makeContext({
+      stdin: { context_window: { remaining_percentage: 106, context_window_size: 200_000 } },
+    });
+    const result = contextPercentWidget.render(ctx, { type: "context-percent" });
+    expect(result!.text.startsWith("[----------] ")).toBe(true);
   });
 
   it("turns amber at Claude Code's warn level, not at 70%", () => {
@@ -722,11 +745,18 @@ describe("cwdWidget", () => {
     expect(cwdWidget.render(ctx("/opt/src"), { type: "cwd" })?.text).toBe("/opt/src");
   });
 
+  it("does not abbreviate a sibling that merely shares home's prefix", () => {
+    // A bare startsWith turned /Users/x2/src into "~2/src" (review of #154).
+    process.env["HOME"] = "/Users/x";
+    expect(cwdWidget.render(ctx("/Users/x2/src"), { type: "cwd" })?.text).toBe("/Users/x2/src");
+    expect(cwdWidget.render(ctx("/Users/x"), { type: "cwd" })?.text).toBe("~");
+  });
+
   it("still abbreviates the resolved home when HOME is unset (#69)", () => {
     // Same distinguishing assertion as projectWidget's: reading
     // process.env.HOME directly leaves the path unabbreviated here.
     delete process.env["HOME"];
-    const out = cwdWidget.render(ctx(path.join(getHomeDir(), "projects")), { type: "cwd" });
+    const out = cwdWidget.render(ctx(path.join(getHomeDir()!, "projects")), { type: "cwd" });
     expect(out?.text).toBe("~/projects");
   });
 
@@ -822,6 +852,21 @@ describe("session duration widgets (#61)", () => {
       label: "",
     });
     expect(out?.text).toBe("1hr 0m");
+  });
+
+  // COR-006, from the PR #155 review: a transcript whose first timestamp is
+  // in the future (a clock set backwards) gave a negative elapsed, rendered
+  // as a nonsense duration. Shown as "?", the same unknown-duration marker
+  // block-timer renders through `formatDuration`, rather than declining: the
+  // session exists, only its length is untrustworthy.
+  it.each([
+    ["1 hour in the future", () => Date.now() + 3_600_000],
+    ["9e15", () => 9e15],
+  ])("renders an unknown duration for a session start %s, not a negative one", (_label, start) => {
+    const out = sessionClockWidget.render(makeContext({ sessionStartTime: start() }), {
+      type: "session-clock",
+    });
+    expect(out?.text).toBe("Session: ?");
   });
 });
 

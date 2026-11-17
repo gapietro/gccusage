@@ -7,6 +7,11 @@ import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import type { Settings } from "../config/schema.js";
 import type { StatusJson } from "../types/status-json.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
+import { noPasswd } from "./helpers/no-passwd.js";
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 // Pricing normally comes from the network; pin it so calculated costs are
 // exact. Everything else (transcripts, the daily cost store) runs for real
@@ -513,6 +518,32 @@ describe("non-finite calculated session cost (#145)", () => {
     expect(context.sessionCostUsd).toBe(4.2);
     expect(context.todayCostUncertain).toBe(false);
     expect(context.todayCostUsd).toBeCloseTo(4.2);
+  });
+});
+
+// SEC-004, review of #154. With no cache dir there is no daily store, so the
+// tracker can only report this session's spend — which is not "today", and
+// must not be shown as if it were.
+describe("no daily store (SEC-004)", () => {
+  it("marks Today: uncertain and reports this session's spend", async () => {
+    // HOME and XDG_CACHE_HOME are restored by the file's afterEach.
+    const originalTmpdir = process.env["TMPDIR"];
+    delete process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = tmpDir;
+    noPasswd.on = true;
+    try {
+      const context = await buildRenderContext(
+        { session_id: "session-a", cost: { total_cost_usd: 4.2 } },
+        settingsWith("auto"),
+      );
+      expect(context.todayCostUsd).toBe(4.2);
+      expect(context.todayCostUncertain).toBe(true);
+    } finally {
+      noPasswd.on = false;
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+    }
   });
 });
 

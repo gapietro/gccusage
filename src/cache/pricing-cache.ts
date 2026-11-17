@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
+import { ageSince, persistedTimestamp } from "../utils/schemas.js";
 import { sanitisePricingTable } from "../data/pricing-validation.js";
 import type { PricingTable } from "../types/pricing.js";
 
@@ -32,19 +33,31 @@ export const PRICING_CACHE_VERSION = 2;
 // value: a missing or stale version is rejected here rather than merely
 // ignored, so a pre-upgrade cache degrades to FALLBACK_PRICING (which now
 // carries the tiers) instead of silently shadowing it.
+//
+// `v.record` silently drops the keys `__proto__`, `prototype` and
+// `constructor`; `parseLitellmPricing` drops the same three, so a fetched
+// table and its round-trip through this file agree (SEC-005).
 const PricingCacheSchema = v.object({
   version: v.literal(PRICING_CACHE_VERSION),
-  timestamp: v.number(),
+  timestamp: persistedTimestamp(),
   data: v.record(v.string(), v.unknown()),
 });
 
-function getCachePath(): string {
-  return path.join(getCacheDir(), "pricing.json");
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
+function getCachePath(): string | null {
+  const dir = getCacheDir();
+  return dir === null ? null : path.join(dir, "pricing.json");
 }
 
 export interface PricingCacheEntry {
   data: PricingTable;
-  ageMs: number;
+  /**
+   * `null` when the stamp is in the future and the table's age is unknown
+   * (`ageSince`). The prices are still usable — they passed the same
+   * sanitising as any read — so a caller must treat the table as stale, never
+   * as fresh, and never discard it for that reason alone (COR-006).
+   */
+  ageMs: number | null;
 }
 
 /**
@@ -55,8 +68,20 @@ export interface PricingCacheEntry {
  * the table is too old to price from at all.
  */
 export function loadPricingCacheEntry(): PricingCacheEntry | null {
-  const cache = readJsonValidated(getCachePath(), PricingCacheSchema);
+  const cachePath = getCachePath();
+  if (cachePath === null) return null;
+  const cache = readJsonValidated(cachePath, PricingCacheSchema);
   if (!cache) return null;
+
+  // A future stamp makes the age unknown, reported as `ageMs: null` — never
+  // as fresh. Read as fresh, it reported `stale: false`, so the render path
+  // never spawned the refresher — the only writer of this file — and prices
+  // froze silently: the file causing the wrong answer gated its own repair,
+  // #133's shape (COR-006). Not a miss either: only the stamp is suspect, and
+  // dropping to FALLBACK_PRICING until the refresh landed mis-priced silently
+  // (models missing from the snapshot, a fuzzy match at +25%, unmarked; PR
+  // #155 review). The refresh rewrites the stamp from the current clock.
+  const ageMs = ageSince(cache.timestamp);
 
   // Bounds only, never the snapshot anchor: the anchor is about trusting the
   // feed, these entries already passed it at write time, and re-running it
@@ -65,17 +90,23 @@ export function loadPricingCacheEntry(): PricingCacheEntry | null {
   const data = sanitisePricingTable(cache.data);
   if (Object.keys(data).length === 0) return null;
 
-  return { data, ageMs: Date.now() - cache.timestamp };
+  return { data, ageMs };
 }
 
+/**
+ * The cache only while it is known to be fresh. An unknown age is not fresh,
+ * so `fetchPricing` refetches at once — the CLI's equivalent of the render
+ * path's `stale: true`.
+ */
 export function loadPricingCache(ttlMs: number): PricingTable | null {
   const entry = loadPricingCacheEntry();
-  if (!entry) return null;
+  if (!entry || entry.ageMs === null) return null;
   return entry.ageMs < ttlMs ? entry.data : null;
 }
 
 export function savePricingCache(data: PricingTable): void {
   const cachePath = getCachePath();
+  if (cachePath === null) return;
   try {
     const cache: PricingCacheFile = { version: PRICING_CACHE_VERSION, timestamp: Date.now(), data };
     writeJsonAtomic(cachePath, cache);

@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { trackDailyCost, recordDailyCost } from "../data/daily-cost-tracker.js";
+import { vi } from "vitest";
+import { trackDailyCost, recordDailyCost, hasDailyStore } from "../data/daily-cost-tracker.js";
+import { noPasswd } from "./helpers/no-passwd.js";
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 let tmpDir: string;
 let originalXdg: string | undefined;
@@ -698,5 +704,91 @@ describe("a calculated total that falls (repricing)", () => {
     const now = new Date(2026, 6, 29, 10, 0, 0);
     recordDailyCost({ sessionId: "s", costUsd: 5, source: "stdin" }, now);
     expect(recordDailyCost({ sessionId: "s", costUsd: 0.5, source: "stdin" }, now).totalUsd).toBeCloseTo(5.5);
+  });
+});
+
+// SEC-004, review of #154. No home and no XDG_CACHE_HOME means no cache dir,
+// so no store. The shard write is uncaught (REL-005), so it must not run at
+// all — and the old tmpdir fallback put the store in the shared tmpdir.
+describe("trackDailyCost with no cache dir (SEC-004)", () => {
+  let originalHome: string | undefined;
+  let originalTmpdir: string | undefined;
+
+  beforeEach(() => {
+    originalHome = process.env["HOME"];
+    originalTmpdir = process.env["TMPDIR"];
+    delete process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = tmpDir;
+    noPasswd.on = true;
+  });
+
+  afterEach(() => {
+    noPasswd.on = false;
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+    if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = originalTmpdir;
+  });
+
+  it("reports this session's own spend, writes nothing, and says there is no store", () => {
+    expect(hasDailyStore()).toBe(false);
+    expect(trackDailyCost("session-a", 2.5, "stdin")).toBe(2.5);
+    expect(trackDailyCost("session-a", Infinity, "stdin")).toBe(0);
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+  });
+});
+
+// Merge of #154/#155 into the per-process store.
+describe("recordDailyCost with no store (SEC-004)", () => {
+  it("returns this session's spend, marked uncertain, and writes nothing", () => {
+    const savedHome = process.env["HOME"];
+    const savedXdg = process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    delete process.env["XDG_CACHE_HOME"];
+    noPasswd.on = true;
+    try {
+      expect(hasDailyStore()).toBe(false);
+      const r = recordDailyCost({ sessionId: "nh", costUsd: 2.5, source: "stdin", processStart: 1 }, new Date(2026, 6, 29, 10));
+      expect(r).toEqual({ totalUsd: 2.5, uncertain: true });
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    } finally {
+      noPasswd.on = false;
+      if (savedHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = savedHome;
+      if (savedXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+      else process.env["XDG_CACHE_HOME"] = savedXdg;
+    }
+  });
+});
+
+describe("pruning a shard stamped in the future (COR-006)", () => {
+  function plant(name: string, updatedAt: number): string {
+    fs.mkdirSync(shardDir(), { recursive: true });
+    const file = path.join(shardDir(), `${name}.json`);
+    fs.writeFileSync(file, JSON.stringify({ sessionId: name, date: "2026-07-29", costUsd: 1, baselineUsd: 0, source: "stdin", updatedAt }));
+    return file;
+  }
+
+  it("keeps a shard a little in the future: a clock stepped back must not delete live spend", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const file = plant("ahead", now.getTime() + 60 * MIN);
+    const r = recordDailyCost({ sessionId: "other", costUsd: 0, source: "stdin" }, now);
+    expect(fs.existsSync(file)).toBe(true);
+    expect(r.totalUsd).toBeCloseTo(1);
+  });
+
+  it("prunes a shard stamped absurdly far in the future", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const file = plant("garbage", 9e15);
+    recordDailyCost({ sessionId: "other", costUsd: 0, source: "stdin" }, now);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("still prunes a shard untouched for 48 h", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    const file = plant("old", now.getTime() - 49 * 60 * MIN);
+    recordDailyCost({ sessionId: "other", costUsd: 0, source: "stdin" }, now);
+    expect(fs.existsSync(file)).toBe(false);
   });
 });

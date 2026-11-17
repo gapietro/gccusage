@@ -27,7 +27,8 @@ export const projectWidget: Widget = {
 
     // Via getHomeDir() rather than process.env.HOME (#69) so an unset or
     // empty HOME still collapses to ~, the same resolution the rest of the
-    // codebase uses; it always returns an absolute path.
+    // codebase uses. Null when there is no home (SEC-004), which matches no
+    // directory.
     const home = getHomeDir();
     // path.basename("/") is "", the only case that can be empty here.
     const name = dir === home ? "~" : path.basename(dir) || "/";

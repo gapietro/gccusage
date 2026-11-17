@@ -4,6 +4,7 @@ import * as v from "valibot";
 import { getCacheDir, shardKey } from "../utils/paths.js";
 import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
 import { localDateKey } from "../utils/local-date.js";
+import { ageSince, finiteNumber, persistedTimestamp } from "../utils/schemas.js";
 
 export type CostSource = "stdin" | "calculated";
 
@@ -36,8 +37,8 @@ const ShardSchema = v.object({
   // an infinite `costUsd` would flow into `Math.max(0, costUsd -
   // baselineUsd)` below and corrupt that arithmetic, not just the string a
   // formatter later produces from it.
-  costUsd: v.pipe(v.number(), v.finite()), // latest cumulative session cost
-  baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0), // cumulative cost at the start of `date`
+  costUsd: finiteNumber(), // latest cumulative session cost
+  baselineUsd: v.fallback(finiteNumber(), 0), // cumulative cost at the start of `date`
   // Absent in legacy files, and an unrecognised value is treated the same way.
   source: v.fallback(v.optional(CostSourceSchema), undefined),
   // A second, independent failure from the same parse: `now - Infinity` is
@@ -50,12 +51,12 @@ const ShardSchema = v.object({
   // constraint the deleted `TurnDataSchema` used for its own timestamp. The
   // fallback to 0 makes a rejected value read as infinitely stale instead, so
   // it is pruned on the next sweep (#130).
-  updatedAt: v.fallback(v.pipe(v.number(), v.safeInteger()), 0),
+  updatedAt: v.fallback(persistedTimestamp(), 0),
   // The Claude Code process this entry belongs to (COR-005), as its start
   // time: `now - cost.total_duration_ms`. Absent for a payload without a
   // duration and for every shard written before this field existed; those
   // stay one entry per session, exactly as before.
-  processStart: v.fallback(v.optional(v.pipe(v.number(), v.safeInteger())), undefined),
+  processStart: v.fallback(v.optional(persistedTimestamp()), undefined),
   // The cost was a lower bound (unpriced or approximated models), or this
   // session's latest cost could not be recorded and `costUsd` is stale
   // (COR-009). Stored so every session's Today: carries the marker, not only
@@ -72,30 +73,67 @@ const LegacyStoreSchema = v.object({
 
 const LegacyEntrySchema = v.object({
   sessionId: v.string(),
-  costUsd: v.pipe(v.number(), v.finite()),
-  baselineUsd: v.fallback(v.pipe(v.number(), v.finite()), 0),
+  costUsd: finiteNumber(),
+  baselineUsd: v.fallback(finiteNumber(), 0),
   source: v.fallback(v.optional(CostSourceSchema), undefined),
-  updatedAt: v.fallback(v.optional(v.pipe(v.number(), v.safeInteger())), undefined),
+  updatedAt: v.fallback(v.optional(persistedTimestamp()), undefined),
 });
 
 const STALE_SESSION_MS = 48 * 3600 * 1000;
 
-function getShardDir(): string {
-  return path.join(getCacheDir(), "daily");
+/**
+ * Whether a shard is old enough to prune. Pruning deletes data, so a stamp in
+ * the future (COR-006) is not simply "stale" the way it is for a cache: a
+ * clock stepped back by more than `ageSince`'s skew allowance would then
+ * delete every live session's spend. A future stamp within the stale window
+ * is kept (it still counts only on its own `date`); one further out than
+ * that is no clock correction, just garbage, and is pruned.
+ */
+function isStale(updatedAt: number, now: Date): boolean {
+  const age = ageSince(updatedAt, now.getTime());
+  if (age === null) return updatedAt - now.getTime() > STALE_SESSION_MS;
+  return age >= STALE_SESSION_MS;
 }
 
-function getLegacyPath(): string {
-  return path.join(getCacheDir(), "daily-costs.json");
+/** Where the store lives, resolved once per call from the cache dir. */
+interface StorePaths {
+  shardDir: string;
+  legacyPath: string;
 }
 
 /**
- * One file per session, so a render only ever writes its own session's data.
- * Concurrent sessions therefore cannot clobber each other's entries — there
- * is no shared read-modify-write left to lose an update.
+ * Null when there is no cache dir (SEC-004: no home and no absolute
+ * XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
  */
-function shardPath(sessionId: string, processStart?: number): string {
+function getStorePaths(): StorePaths | null {
+  const cacheDir = getCacheDir();
+  if (cacheDir === null) return null;
+  return {
+    shardDir: path.join(cacheDir, "daily"),
+    legacyPath: path.join(cacheDir, "daily-costs.json"),
+  };
+}
+
+/**
+ * Whether `trackDailyCost` has a store to total across. Without one it can
+ * see only the session in front of it, so its figure is this session's
+ * spend rather than today's — and the pipeline marks it uncertain. Exported
+ * so that decision has one owner, here, rather than the pipeline re-deriving
+ * it from `getCacheDir()`.
+ */
+export function hasDailyStore(): boolean {
+  return getStorePaths() !== null;
+}
+
+/**
+ * One file per session, or per Claude Code process for stdin costs
+ * (COR-005), so a render only ever writes its own entry's file. Concurrent
+ * sessions and processes therefore cannot clobber each other's entries —
+ * there is no shared read-modify-write left to lose an update.
+ */
+function shardPath(store: StorePaths, sessionId: string, processStart?: number): string {
   const suffix = processStart === undefined ? "" : `.p${processStart}`;
-  return path.join(getShardDir(), `${shardKey(sessionId)}${suffix}.json`);
+  return path.join(store.shardDir, `${shardKey(sessionId)}${suffix}.json`);
 }
 
 /**
@@ -125,8 +163,8 @@ const RESTORED_FIRST_RENDER_MS = 120_000;
  * processes migrating at the same time write identical shards, so it is safe
  * to run unsynchronised.
  */
-function migrateLegacyStore(now: Date): void {
-  const legacyPath = getLegacyPath();
+function migrateLegacyStore(store: StorePaths, now: Date): void {
+  const legacyPath = store.legacyPath;
   if (!fs.existsSync(legacyPath)) return; // The common case.
 
   // Unlike the four `readJsonValidated` call sites, this caller cannot treat
@@ -163,7 +201,7 @@ function migrateLegacyStore(now: Date): void {
       if (!parsed.success) continue;
       const s = parsed.output;
 
-      const target = shardPath(s.sessionId);
+      const target = shardPath(store, s.sessionId);
       // A shard already written by the new code is newer than the legacy file.
       if (fs.existsSync(target)) continue;
 
@@ -198,12 +236,12 @@ function migrateLegacyStore(now: Date): void {
  * entries from an earlier day are returned as they are, and re-baseline
  * lazily when their own session next writes.
  */
-function readEntries(now: Date): SessionCostEntry[] {
-  migrateLegacyStore(now);
+function readEntries(store: StorePaths, now: Date): SessionCostEntry[] {
+  migrateLegacyStore(store, now);
 
   let files: string[];
   try {
-    files = fs.readdirSync(getShardDir());
+    files = fs.readdirSync(store.shardDir);
   } catch {
     return []; // No store yet.
   }
@@ -211,12 +249,12 @@ function readEntries(now: Date): SessionCostEntry[] {
   const entries: SessionCostEntry[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const fullPath = path.join(getShardDir(), file);
+    const fullPath = path.join(store.shardDir, file);
 
     const entry = readJsonValidated(fullPath, ShardSchema);
     if (!entry) continue; // Unreadable shard: one session's data, not the whole day.
 
-    if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
+    if (isStale(entry.updatedAt, now)) {
       try {
         fs.unlinkSync(fullPath);
       } catch {
@@ -417,8 +455,15 @@ function findEntry(
  * update and marks Today uncertain; this render's own figure is still exact.
  */
 export function recordDailyCost(input: DailyCostInput, now: Date = new Date()): DailyCostResult {
+  const store = getStorePaths();
+  // No store (SEC-004: no home and no absolute XDG_CACHE_HOME): this
+  // session's own spend is the best figure there is, and it is not today's
+  // total, so it is marked uncertain. Nothing is read or written.
+  if (store === null) {
+    return { totalUsd: Number.isFinite(input.costUsd) ? input.costUsd : 0, uncertain: true };
+  }
   const today = localDateKey(now);
-  const entries = readEntries(now);
+  const entries = readEntries(store, now);
   let notRecorded = false;
 
   const { sessionId } = input;
@@ -437,13 +482,13 @@ export function recordDailyCost(input: DailyCostInput, now: Date = new Date()): 
     if (next && Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
       if (index === -1) entries.push(next);
       else entries[index] = next;
-      notRecorded = !tryWrite(next);
+      notRecorded = !tryWrite(store, next);
     } else {
       notRecorded = true;
       if (prev && !prev.uncertain) {
         const stale = { ...prev, uncertain: true };
         entries[index] = stale;
-        tryWrite(stale);
+        tryWrite(store, stale);
       } else if (!prev) {
         // Nothing stored yet: record the session as present but unknown, so
         // other sessions' bars mark Today rather than silently omit it.
@@ -458,7 +503,7 @@ export function recordDailyCost(input: DailyCostInput, now: Date = new Date()): 
           uncertain: true,
         };
         entries.push(placeholder);
-        tryWrite(placeholder);
+        tryWrite(store, placeholder);
       }
     }
   }
@@ -473,9 +518,9 @@ export function recordDailyCost(input: DailyCostInput, now: Date = new Date()): 
   return { totalUsd, uncertain };
 }
 
-function tryWrite(entry: SessionCostEntry): boolean {
+function tryWrite(store: StorePaths, entry: SessionCostEntry): boolean {
   try {
-    writeJsonAtomic(shardPath(entry.sessionId, entry.processStart), entry);
+    writeJsonAtomic(shardPath(store, entry.sessionId, entry.processStart), entry);
     return true;
   } catch {
     return false;
