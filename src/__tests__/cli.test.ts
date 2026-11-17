@@ -452,6 +452,30 @@ describe("gccusage setup", () => {
       expect(fs.readdirSync(dotfiles)).toEqual(["claude-settings.json"]);
     });
 
+    it("refuses a symlink into a read-only directory before writing anything", async () => {
+      // The nix home-manager shape: settings.json links into a read-only
+      // store. Writing through it failed with a bare EACCES on the temp file —
+      // after the .bak had already been written (review of #154).
+      const store = path.join(tmpDir, "store");
+      fs.mkdirSync(store);
+      const target = path.join(store, "settings.json");
+      fs.writeFileSync(target, '{"model":"opus"}\n');
+      fs.chmodSync(target, 0o444);
+      fs.chmodSync(store, 0o555);
+      fs.symlinkSync(target, settingsPath());
+      try {
+        await expect(runCli(["setup"])).rejects.toThrow(/is a symlink to .*settings\.json/);
+        await expect(runCli(["setup"])).rejects.toThrow("Add the statusLine entry there yourself");
+
+        expect(fs.existsSync(backupPath())).toBe(false);
+        expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+        expect(read(target)).toBe('{"model":"opus"}\n');
+      } finally {
+        // Or the afterEach rmSync cannot empty the directory.
+        fs.chmodSync(store, 0o755);
+      }
+    });
+
     it("writes through a dangling symlink, creating its target", async () => {
       const dotfiles = path.join(tmpDir, "dotfiles");
       fs.mkdirSync(dotfiles);

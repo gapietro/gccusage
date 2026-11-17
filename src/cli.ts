@@ -10,6 +10,8 @@ import {
   lstatSync,
   readlinkSync,
   statSync,
+  accessSync,
+  constants,
 } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -269,6 +271,36 @@ function resolveWriteTarget(settingsPath: string): string {
 }
 
 /**
+ * Refuse, with a message that says what to do, when settings.json is a
+ * symlink into a directory setup cannot write.
+ *
+ * The atomic writer creates its temp file beside the target, so it needs
+ * the target's DIRECTORY writable, not just the file. nix home-manager links
+ * settings.json into the read-only store: the write failed with a bare
+ * EACCES naming a temp file the user never heard of, and only after the
+ * .bak was written, contradicting "a refused file leaves no .bak" (review
+ * of #154). Replacing the link instead would silently detach a managed
+ * file. The file is theirs to edit through whatever manages it.
+ *
+ * Other errors (ENOENT for a missing directory, say) are left to surface
+ * from the write itself.
+ */
+function assertRedirectedTargetWritable(settingsPath: string, target: string): void {
+  try {
+    accessSync(dirname(target), constants.W_OK);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EACCES" && code !== "EROFS" && code !== "EPERM") throw err;
+    throw new Error(
+      `${settingsPath} is a symlink to ${target}, and ${dirname(target)} is not writable ` +
+        `(${code}) — is it managed by home-manager or a dotfiles tool? ` +
+        "Nothing was changed. Add the statusLine entry there yourself, through that tool.",
+      { cause: err },
+    );
+  }
+}
+
+/**
  * The permission bits `target` already has, so a rewrite does not change them,
  * or 0600 for a file setup is creating. settings.json often carries `env`
  * secrets, and the atomic writer's temp file would otherwise take the umask
@@ -306,9 +338,12 @@ function runSetup(): void {
   const settingsPath = resolve(home, ".claude", "settings.json");
 
   // Validate before writing anything at all: a refused file leaves no .bak
-  // and no partial write.
+  // and no partial write. That includes the write target — resolved and, if
+  // a symlink redirected it, checked writable here, before the .bak.
   const existing = readExistingSettings(settingsPath);
   const settings = existing?.settings ?? {};
+  const target = resolveWriteTarget(settingsPath);
+  if (target !== settingsPath) assertRedirectedTargetWritable(settingsPath, target);
 
   // The backup is for the success path — the common case, and the one that
   // previously got none (#89). Always 0600: it holds the same `env` secrets
@@ -320,7 +355,6 @@ function runSetup(): void {
   settings["statusLine"] = { type: "command", command };
 
   // Indented with a trailing newline: this is a file the user reads and edits.
-  const target = resolveWriteTarget(settingsPath);
   writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 
   removeLegacyTurnStore();
