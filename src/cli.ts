@@ -391,7 +391,12 @@ function runSetup(): void {
   const existing = readExistingSettings(settingsPath);
   const settings = existing?.settings ?? {};
   const target = resolveWriteTarget(settingsPath);
-  if (target !== settingsPath) assertRedirectedTargetWritable(settingsPath, target);
+  // A redirect means settings.json ITSELF is a link. `target !== settingsPath`
+  // is not the test: realpath also differs whenever any ancestor is a link
+  // (macOS /var, Fedora Atomic /home -> /var/home, a linked ~/.claude), and
+  // a regular file there is not "a symlink to" anything.
+  const redirected = isSymlink(settingsPath);
+  if (redirected) assertRedirectedTargetWritable(settingsPath, target);
 
   // The backup is for the success path — the common case, and the one that
   // previously got none (#89). Always 0600: it holds the same `env` secrets
@@ -413,7 +418,7 @@ function runSetup(): void {
   console.log("gccusage setup complete!\n");
   // Name the file actually written when a symlink redirected it, so a
   // dotfiles user can see which copy changed (review of #154).
-  console.log(`  Settings: ${settingsPath}${target === settingsPath ? "" : ` -> ${target}`}`);
+  console.log(`  Settings: ${settingsPath}${redirected ? ` -> ${target}` : ""}`);
   console.log(`  Command:  ${command}`);
   if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
   console.log();

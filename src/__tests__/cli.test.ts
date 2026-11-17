@@ -487,6 +487,27 @@ describe("gccusage setup", () => {
       expect(logged).toContain(`Settings: ${settingsPath()}\n`);
     });
 
+    it("does not treat a symlinked ancestor as a redirect when settings.json is a regular file", async () => {
+      // realpath differs from the logical path whenever ANY ancestor is a
+      // link — macOS /var, Fedora Atomic /home -> /var/home, FreeBSD
+      // /home -> /usr/home, a linked ~/.claude. Only a link at settings.json
+      // itself is a redirect. Built explicitly so it holds on Linux CI too.
+      const realHome = path.join(tmpDir, "real-home");
+      const linkHome = path.join(tmpDir, "link-home");
+      fs.mkdirSync(path.join(realHome, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(realHome, ".claude", "settings.json"), "{}\n");
+      fs.symlinkSync(realHome, linkHome);
+      process.env["HOME"] = linkHome;
+      const logical = path.join(linkHome, ".claude", "settings.json");
+
+      await runCli(["setup"]);
+
+      const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).toContain(`Settings: ${logical}\n`);
+      expect(logged).not.toContain("->");
+      expect(JSON.parse(read(logical)).statusLine.type).toBe("command");
+    });
+
     it("refuses a symlink into a read-only directory before writing anything", async () => {
       // The nix home-manager shape: settings.json links into a read-only
       // store. Writing through it failed with a bare EACCES on the temp file —
