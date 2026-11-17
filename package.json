@@ -44,9 +44,9 @@
   },
   "author": "gapietro",
   "dependencies": {
-    "chalk": "^5.4.1",
-    "get-east-asian-width": "^1.6.0",
-    "valibot": "^1.0.0"
+    "chalk": "^6.0.1",
+    "get-east-asian-width": "^1.7.0",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
