@@ -13,7 +13,7 @@ import {
   accessSync,
   constants,
 } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic, sweepStaleTempFiles } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
@@ -251,23 +251,67 @@ const PRIVATE_FILE_MODE = 0o600;
  * the logical path: it is the one the user knows, and a backup beside the
  * real target could land inside their dotfiles repo.
  *
- * A dangling link (its target does not exist yet) is followed one level, so
- * setup creates the file the link names rather than replacing the link.
+ * A dangling link (its target does not exist yet) is followed, so setup
+ * creates the file the link names rather than replacing the link. Each hop
+ * resolves the link's text against its directory's REAL path, as the kernel
+ * does: `..` in a relative link means the parent of where the link really
+ * lives, so lexical resolution from a symlinked `~/.claude` wrote somewhere
+ * the link never pointed (review of #154). The final directory must already
+ * exist — a link into an unmounted volume is refused rather than recreated
+ * as a shadow directory chain — and a loop is refused rather than "repaired"
+ * by replacing one of its links with a file.
  */
 function resolveWriteTarget(settingsPath: string): string {
   try {
     return realpathSync(settingsPath);
-  } catch {
-    // Missing or dangling; only the latter is a link worth following.
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ELOOP") throw symlinkLoopError(settingsPath, err);
+    if (code !== "ENOENT") throw err;
+    // Missing, or a dangling link: followed below.
   }
+
+  let current = settingsPath;
+  for (let hops = 0; isSymlink(current); hops++) {
+    if (hops >= MAX_SYMLINK_HOPS) throw symlinkLoopError(settingsPath);
+    current = resolve(realDirOf(settingsPath, current), readlinkSync(current));
+  }
+  if (current === settingsPath) return settingsPath; // No link: a new file.
+  return resolve(realDirOf(settingsPath, current), basename(current));
+}
+
+/** The same bound the kernel applies (Linux MAXSYMLINKS). */
+const MAX_SYMLINK_HOPS = 40;
+
+function isSymlink(p: string): boolean {
   try {
-    if (lstatSync(settingsPath).isSymbolicLink()) {
-      return resolve(dirname(settingsPath), readlinkSync(settingsPath));
-    }
+    return lstatSync(p).isSymbolicLink();
   } catch {
-    // No file at all: write a new one at the logical path.
+    return false;
   }
-  return settingsPath;
+}
+
+/** `dirname(p)` with symlinks resolved; refuses when it does not exist. */
+function realDirOf(settingsPath: string, p: string): string {
+  try {
+    return realpathSync(dirname(p));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    throw new Error(
+      `${settingsPath} is a symlink to ${p}, whose directory does not exist ` +
+        "(an unmounted volume, or a moved dotfiles repo?). Nothing was changed. " +
+        "Restore the link's target, or remove the link, and re-run `gccusage setup`.",
+      { cause: err },
+    );
+  }
+}
+
+function symlinkLoopError(settingsPath: string, cause?: unknown): Error {
+  return new Error(
+    `${settingsPath} is part of a symlink loop. Nothing was changed. ` +
+      "Point it at a real file and re-run `gccusage setup`.",
+    { cause },
+  );
 }
 
 /**

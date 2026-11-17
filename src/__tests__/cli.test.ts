@@ -476,6 +476,53 @@ describe("gccusage setup", () => {
       }
     });
 
+    it("resolves a dangling relative link against the real directory, not lexically", async () => {
+      // ~/.claude is itself a link into dotfiles, and settings.json is a
+      // dangling `../shared/settings.json`. The kernel resolves `..` from the
+      // link's REAL directory (dotfiles/claude), so the file it names is
+      // dotfiles/shared/settings.json. Lexical resolution from ~/.claude
+      // wrote ~/shared/settings.json and left the link dangling (review of
+      // #154).
+      fs.rmSync(path.join(tmpDir, ".claude"), { recursive: true });
+      const claudeDir = path.join(tmpDir, "dotfiles", "claude");
+      const shared = path.join(tmpDir, "dotfiles", "shared");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.mkdirSync(shared);
+      fs.symlinkSync(claudeDir, path.join(tmpDir, ".claude"));
+      fs.symlinkSync(path.join("..", "shared", "settings.json"), path.join(claudeDir, "settings.json"));
+
+      await runCli(["setup"]);
+
+      expect(JSON.parse(read(path.join(shared, "settings.json"))).statusLine.type).toBe("command");
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(settingsPath()), "the link now resolves").toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "shared"))).toBe(false);
+    });
+
+    it("refuses a dangling link into a directory that does not exist", async () => {
+      // An unmounted volume. Following the link created a shadow directory
+      // chain where the volume should be (review of #154).
+      const missing = path.join(tmpDir, "Volumes", "dotfiles", "claude", "settings.json");
+      fs.symlinkSync(missing, settingsPath());
+
+      await expect(runCli(["setup"])).rejects.toThrow(/does not exist/);
+
+      expect(fs.existsSync(path.join(tmpDir, "Volumes"))).toBe(false);
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(backupPath())).toBe(false);
+    });
+
+    it("refuses a symlink loop instead of replacing one of its links", async () => {
+      const other = path.join(tmpDir, ".claude", "b.json");
+      fs.symlinkSync(other, settingsPath());
+      fs.symlinkSync(settingsPath(), other);
+
+      await expect(runCli(["setup"])).rejects.toThrow(/symlink loop/);
+
+      expect(fs.lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(other).isSymbolicLink()).toBe(true);
+    });
+
     it("writes through a dangling symlink, creating its target", async () => {
       const dotfiles = path.join(tmpDir, "dotfiles");
       fs.mkdirSync(dotfiles);
