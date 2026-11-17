@@ -118,18 +118,28 @@ export async function buildRenderContext(
   // `costSource` setting and the stdin-missing fallback, so reuse it rather
   // than re-deriving the decision. Mixing sources is what produced the
   // today-spend inflation in PR #34.
-  const modelId = typeof stdin.model === "string"
-    ? stdin.model
-    : stdin.model?.id;
-  const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
-  const burnRate =
-    sessionCostSource === "stdin" ? (getStdinBurnRate(stdin) ?? jsonlBurnRate) : jsonlBurnRate;
+  //
+  // The calculated rate divides the per-model session cost, the same figure
+  // as the calculated session total, so it no longer depends on the stdin
+  // model (COR-008).
+  const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
+  const stdinBurnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) : null;
+  const burnRate = stdinBurnRate ?? jsonlBurnRate;
+  // Flags the producer actually used, not the session's cost source: when the
+  // total is stdin's but stdin reports no duration, or under 10s of it, the
+  // rate falls back to the calculated one, while `sessionCostUncertain` is
+  // false because the TOTAL is stdin's. The stdin rate is never uncertain.
+  const burnRateUncertain =
+    burnRate !== null &&
+    stdinBurnRate === null &&
+    (session.unpriced.length > 0 || session.approximated.length > 0);
 
   return {
     stdin,
     metrics,
     block,
     burnRate,
+    burnRateUncertain,
     pricing,
     sessionCostUsd,
     todayCostUsd,

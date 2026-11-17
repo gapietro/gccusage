@@ -175,13 +175,18 @@ describe.skipIf(!distExists)("prototype-key model ids through the real bundle (#
     expect(render({ model: OPUS })).toContain("/hr");
   });
 
-  it.each(PROTOTYPE_KEYS)("drops the burn-rate segment for stdin model id %j", (id) => {
+  it.each(PROTOTYPE_KEYS)("rates the transcript, not stdin model id %j", (id) => {
     writeSettings(COST_LAYOUT);
     writeTranscript(["claude-opus-4-6"]);
     const out = render({ model: { id, display_name: "X" } });
-    // calculateBurnRate's contract for an unpriced model: no segment rather
-    // than a figure it cannot back. Pre-fix this rendered "$?/hr".
-    expect(out).not.toContain("/hr");
+    // Pre-#143 this rendered "$?/hr": the stdin id was looked up as pricing.
+    // #143 then dropped the segment for an unpriced stdin id. Since COR-008
+    // the stdin id no longer reaches the rate at all: it divides the
+    // per-model session cost, so it is the opus transcript's rate — $0.03
+    // over the five minutes `writeTranscript` backdates — exactly as in the
+    // control above.
+    expect(out).not.toContain("$?/hr");
+    expect(out).toMatch(/\$0\.3[56]\/hr/);
     expect(out).toContain("$0.03");
   });
 });

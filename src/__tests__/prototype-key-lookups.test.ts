@@ -96,14 +96,32 @@ describe("calculateCostByModel (#143)", () => {
 });
 
 describe("calculateBurnRate (#143)", () => {
-  it.each(PROTOTYPE_KEYS)("drops the rate for stdin model id %j rather than rendering NaN", (key) => {
-    const rate = calculateBurnRate(
-      metrics(1_000_000, 0),
-      Date.now() - 30 * 60_000,
-      { "claude-opus-4-6": RATES },
-      key,
-    );
-    expect(rate).toBeNull();
+  // Before COR-008 this looked up the STDIN model id and priced the session at
+  // its rate, so a prototype-key id was a lookup to guard; the pinned
+  // contract was "no segment rather than NaN". The rate now divides the
+  // per-model session cost, and the stdin id no longer reaches it. The model
+  // ids that still do are the transcript's, through calculateCostByModel.
+  it.each(PROTOTYPE_KEYS)(
+    "rates only the priced part when transcript model %j is a prototype key, never NaN",
+    (key) => {
+      const session = calculateCostByModel(
+        new Map([
+          ["claude-opus-4-6", metrics(1_000_000, 0)],
+          [key, metrics(1_000_000, 0)],
+        ]),
+        { "claude-opus-4-6": RATES },
+      );
+      const rate = calculateBurnRate(session, Date.now() - 30 * 60_000);
+      // $5.00 of opus over half an hour; the key's tokens are unpriced.
+      expect(rate!.costPerHour).toBeCloseTo(10, 2);
+    },
+  );
+
+  it.each(PROTOTYPE_KEYS)("drops the rate when prototype key %j is the only model", (key) => {
+    const session = calculateCostByModel(new Map([[key, metrics(1_000_000, 0)]]), {
+      "claude-opus-4-6": RATES,
+    });
+    expect(calculateBurnRate(session, Date.now() - 30 * 60_000)).toBeNull();
   });
 });
 
