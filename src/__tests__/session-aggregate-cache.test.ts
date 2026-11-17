@@ -260,6 +260,35 @@ describe("the session aggregate cache (COR-007)", () => {
   });
 });
 
+describe("the turn count with subagent transcripts (PR #156 review)", () => {
+  it("ignores a subagent's coordinator prompt", async () => {
+    // The `type: "user"` lines in real agent transcripts carry
+    // `origin.kind` "coordinator" or "task-notification", never "human".
+    writeSession();
+    const dir = path.join(tmpDir, ".claude", "projects", "-proj");
+    writeFile(path.join(dir, SESSION, "subagents", "agent-c.jsonl"), [
+      user("coordinator", LATER),
+      assistant("c", 1, LATER),
+    ]);
+
+    expect((await build()).turnCount).toBe(2);
+  });
+
+  it("counts only the main transcript, whatever a subagent's lines say", async () => {
+    // A prompt the user typed into this session is only ever in its main
+    // transcript; a subagent's are written by the harness. Counting per kind
+    // of line would let a future origin value leak in.
+    writeSession();
+    const dir = path.join(tmpDir, ".claude", "projects", "-proj");
+    writeFile(path.join(dir, SESSION, "subagents", "agent-h.jsonl"), [
+      user("human", LATER),
+      assistant("h", 1, LATER),
+    ]);
+
+    expect((await build()).turnCount).toBe(2);
+  });
+});
+
 describe("the session start time (PR #156 review)", () => {
   const EARLIER = new Date(START.getTime() - 30 * 60_000);
 

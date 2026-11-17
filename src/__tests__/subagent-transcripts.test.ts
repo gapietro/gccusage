@@ -165,7 +165,7 @@ describe("findSessionJsonlFiles reads subagent transcripts (COR-007)", () => {
     expect([...findSessionJsonlFiles(SESSION)].sort()).toEqual(
       [layout.main, ...layout.agents, layout.workflowAgent].sort(),
     );
-    // Split by kind: the start time is taken from `main`, so no caller
+    // Split by kind: the start time and turn count come from `main`, so no caller
     // depends on list order (PR #156 review).
     const split = findSessionTranscripts(SESSION);
     expect(split.main).toEqual([layout.main]);

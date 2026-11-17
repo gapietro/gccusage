@@ -23,7 +23,7 @@ export interface SessionAggregate {
   metrics: AggregatedMetrics;
   /** The session's first timestamp, or null when no file carries one. */
   sessionStartTime: number | null;
-  /** Prompts the user typed (`countHumanTurns`). */
+  /** Prompts the user typed (`countHumanTurns`), from the main transcript only. */
   turnCount: number;
 }
 
@@ -127,7 +127,11 @@ export function getSessionAggregate(sessionId: string | undefined): SessionAggre
     // leftover file) cannot move it. Only a session whose main transcript has
     // no timestamp at all, or is missing, falls back to its subagents'.
     sessionStartTime: earliestStart(main) ?? earliestStart(all),
-    turnCount: all.reduce((sum, a) => sum + a.humanTurns, 0),
+    // Prompts the user typed into this session are only in its main
+    // transcript. A subagent's `type: "user"` lines are the harness's
+    // ("coordinator", "task-notification"), so they are not counted however
+    // their `origin.kind` reads.
+    turnCount: main.reduce((sum, a) => sum + a.humanTurns, 0),
   };
 }
 
