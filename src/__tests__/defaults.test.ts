@@ -159,6 +159,7 @@ describe("DEFAULT_SETTINGS rendered adjacency", () => {
       },
       block: null,
       burnRate: point.burn ? { costPerHour: 1, costPerMinute: 0.02 } : null,
+      burnRateUncertain: false,
       pricing: {},
       sessionCostUsd: point.session,
       todayCostUsd: point.today,

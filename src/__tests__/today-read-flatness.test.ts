@@ -88,6 +88,17 @@ function writeCorpus(fileCount: number, linesPerFile: number, sessionLines = 100
   return paths;
 }
 
+/** One more response on a live transcript. */
+function liveLine(): string {
+  return (
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date().toISOString(),
+      message: { id: "msg-live", model: "test-model", usage: { input_tokens: 1, output_tokens: 0 } },
+    }) + "\n"
+  );
+}
+
 /** Total bytes of every transcript this render actually read and parsed. */
 function bytesParsed(): number {
   return vi
@@ -125,11 +136,20 @@ describe("cache-miss cost is flat in the day's transcript volume (#94)", () => {
       fs.rmSync(path.join(tmpDir, "cache"), { recursive: true, force: true });
       const paths = writeCorpus(8, linesPerFile);
       await buildRenderContext(stdin, settingsWith("calculated"));
+      // The session is live: its transcript grows between the two renders.
+      // Since the session aggregate is cached per file (COR-007), an unchanged
+      // session transcript is no longer re-parsed either, so without this the
+      // warm render would read nothing at all and the flatness comparison
+      // below would compare zero with zero.
+      fs.appendFileSync(paths[0]!, liveLine());
+      const future = new Date(Date.now() + 2000);
+      fs.utimesSync(paths[0]!, future, future);
       vi.mocked(parseJsonlFile).mockClear();
       const warm = await buildRenderContext(stdin, settingsWith("calculated"));
 
-      // Exactly the session's own transcript, nothing else.
-      expect(vi.mocked(parseJsonlFile).mock.calls.map((c) => c[0])).toEqual([paths[0]]);
+      // Exactly the session's own transcript, nothing else: once for the
+      // session aggregate and once for today's, both of which key on it.
+      expect(vi.mocked(parseJsonlFile).mock.calls.map((c) => c[0])).toEqual([paths[0], paths[0]]);
       // Proves calculated mode actually engaged and priced the transcript,
       // not just that the (possibly broken) gate read zero files and still
       // produced a flat — but meaningless — byte count.

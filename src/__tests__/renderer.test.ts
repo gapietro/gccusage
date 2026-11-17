@@ -32,6 +32,7 @@ function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
     },
     block: null,
     burnRate: null,
+    burnRateUncertain: false,
     pricing: {},
     sessionCostUsd: 2.45,
     todayCostUsd: 18.72,

@@ -422,6 +422,10 @@ describe("getTodayAggregate", () => {
             size: stat.size,
             byModel: [["opus", { ...postSplitCounts, premium: postSplitCounts }]],
             totals: { ...postSplitCounts, premium: postSplitCounts },
+            // Required since the session aggregate began sharing this
+            // schema (COR-007); a cache without them is discarded.
+            firstTimestamp: null,
+            humanTurns: 0,
           },
         },
       }),

@@ -36,6 +36,7 @@ export function contextFromFixture(fx: RealPayloadFixture, homeDir: string): Ren
     },
     block: fx.derived.block,
     burnRate: fx.derived.burnRate,
+    burnRateUncertain: false,
     pricing: {},
     sessionCostUsd: fx.derived.sessionCostUsd,
     todayCostUsd: fx.derived.todayCostUsd,

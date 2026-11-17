@@ -2,73 +2,19 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir, findTodayJsonlFileStats } from "../utils/paths.js";
 import { readJsonValidated, writeJsonAtomic } from "../utils/atomic-json.js";
-import { finiteNumber } from "../utils/schemas.js";
 import { parseJsonlFile, filterTodayEntries } from "../data/jsonl-reader.js";
-import { aggregateTokens } from "../data/token-aggregator.js";
-import type { TokenCounts, TokenMetrics } from "../types/token-metrics.js";
-
-// A negative count already passed plain v.number() before #103; the tier
-// split now SUBTRACTS `premium` from these base counts to get the standard
-// bucket (see cost-calculator.ts), so a negative here — from a corrupt or
-// hand-edited today-aggregates.json — turns "wrong but bounded" into an
-// arbitrarily wrong, possibly negative, cost. Rejecting on read is not a
-// full fix (it does not enforce premium <= base), but it closes off the
-// unbounded case cleanly, and enforcing the cross-field invariant here would
-// require a v.custom check that dredges up the wider "which decomposition is
-// canonical" question this cache boundary should not have to answer.
-//
-// Finite as well as non-negative: `Infinity >= 0`. #145 stopped this cache
-// WRITING a non-finite count (`aggregateFinite` below), but a `1e400` in the
-// file still parsed to `Infinity` and was served as a hit (COR-006).
-function tokenCount() {
-  return v.pipe(finiteNumber(), v.minValue(0));
-}
-
-const TokenCountsSchema = v.object({
-  inputTokens: tokenCount(),
-  outputTokens: tokenCount(),
-  cacheCreationTokens: tokenCount(),
-  cacheCreation1hTokens: tokenCount(),
-  cacheReadTokens: tokenCount(),
-});
-
-/**
- * `premium` is REQUIRED, so a cache file written before the tier split fails
- * validation and is discarded rather than read as "no premium tokens" — a
- * wrong total for the rest of the day is worse than one re-parse (#103).
- *
- * `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
- * TTL split fails validation and is discarded rather than read as "no 1-hour
- * tokens" — which would under-cost the rest of the day (#118).
- */
-const TokenMetricsSchema = v.object({
-  ...TokenCountsSchema.entries,
-  premium: TokenCountsSchema,
-});
-
-/**
- * `byModel` is entries rather than an object because a Map does not survive
- * JSON; `totals` is stored alongside it because entries carrying usage but no
- * `model` count toward the totals and toward no bucket, so the totals cannot
- * be reconstructed by summing `byModel`.
- */
-const FileAggregateSchema = v.object({
-  // Finite, not `persistedTimestamp()`: `mtimeMs` is fractional. Neither is
-  // compared as an age, only for equality with a live stat, so a non-finite
-  // value was only ever a miss; rejecting it keeps one rule for every number
-  // this file holds (COR-006).
-  mtimeMs: finiteNumber(),
-  size: finiteNumber(),
-  byModel: v.array(v.tuple([v.string(), TokenMetricsSchema])),
-  totals: TokenMetricsSchema,
-});
+import type { TokenMetrics } from "../types/token-metrics.js";
+import {
+  FileAggregateSchema,
+  persistableAggregates,
+  refreshFileAggregates,
+  sumAggregates,
+} from "./file-aggregate.js";
 
 const TodayAggregateCacheSchema = v.object({
   date: v.string(),
   files: v.record(v.string(), FileAggregateSchema),
 });
-
-type FileAggregate = v.InferOutput<typeof FileAggregateSchema>;
 
 export interface TodayAggregate {
   byModel: Map<string, TokenMetrics>;
@@ -89,84 +35,12 @@ function localDateKey(now: Date): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function emptyCounts(): TokenCounts {
-  return {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheCreationTokens: 0,
-    cacheCreation1hTokens: 0,
-    cacheReadTokens: 0,
-  };
-}
-
-function emptyMetrics(): TokenMetrics {
-  return { ...emptyCounts(), premium: emptyCounts() };
-}
-
-function addCountsInto(target: TokenCounts, source: TokenCounts): void {
-  target.inputTokens += source.inputTokens;
-  target.outputTokens += source.outputTokens;
-  target.cacheCreationTokens += source.cacheCreationTokens;
-  target.cacheCreation1hTokens += source.cacheCreation1hTokens;
-  target.cacheReadTokens += source.cacheReadTokens;
-}
-
-function addInto(target: TokenMetrics, source: TokenMetrics): void {
-  addCountsInto(target, source);
-  if (source.premium) {
-    target.premium ??= emptyCounts();
-    addCountsInto(target.premium, source.premium);
-  }
-}
-
-/**
- * `TokenMetrics.premium` stays optional in memory (other call sites build
- * `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
- * always populates it, so this is just bridging the wider in-memory type to the
- * stricter persisted one — not a silent default for genuinely-missing data.
- */
-function countsFinite(c: TokenCounts): boolean {
-  return (
-    Number.isFinite(c.inputTokens) &&
-    Number.isFinite(c.outputTokens) &&
-    Number.isFinite(c.cacheCreationTokens) &&
-    Number.isFinite(c.cacheCreation1hTokens) &&
-    Number.isFinite(c.cacheReadTokens)
-  );
-}
-
-/**
- * Whether a per-file aggregate survives a round-trip through the cache file.
- * Ingestion rejects non-finite counts, but finite ones can still sum past
- * Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails
- * `TodayAggregateCacheSchema` and discards every file's cached aggregate, so
- * one such file would force the whole day to be re-parsed on every render.
- */
-function aggregateFinite(a: FileAggregate): boolean {
-  const metricsFinite = (m: TokenMetrics) =>
-    countsFinite(m) && (m.premium === undefined || countsFinite(m.premium));
-  return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
-}
-
-function withRequiredPremium(metrics: TokenMetrics): TokenMetrics & { premium: TokenCounts } {
-  return { ...metrics, premium: metrics.premium ?? emptyCounts() };
-}
-
 /**
  * Today's token usage across every transcript, aggregated per file and cached.
- *
- * A cached per-file aggregate is reused only when the file's `mtimeMs` AND
- * `size` both still match, so the returned figure is always assembled from
- * entries that were verified against the live files during this call. Two
- * statuslines racing on the write can therefore cost one extra re-parse on a
- * later render, but neither can serve a wrong total — the same no-lock posture
- * as the daily cost store.
- *
- * Whole files are re-parsed when they change, rather than resuming from a byte
- * offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
- * straddling an offset boundary would need that map carried across renders.
- * The only file that changes mid-day is the active transcript, and re-parsing
- * it whole is still flat with respect to the day's total volume (#94).
+ * Reuse and re-parse follow `refreshFileAggregates`: a file is re-parsed only
+ * when its `mtimeMs` or `size` changed. The only file that changes mid-day is
+ * the active transcript, so re-parsing it whole is still flat with respect to
+ * the day's total volume (#94).
  */
 export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
   const files = findTodayJsonlFileStats();
@@ -177,58 +51,19 @@ export function getTodayAggregate(now: Date = new Date()): TodayAggregate {
   // A different date discards everything: that is the midnight reset.
   const previous = cached && cached.date === date ? cached.files : {};
 
-  const next: Record<string, FileAggregate> = {};
-  // A file that dropped out of today's window leaves the counts unequal; one
-  // swapped for another is caught by the added file missing from `previous`.
-  let changed = Object.keys(previous).length !== files.length;
+  const next = refreshFileAggregates(files, previous, (filePath) =>
+    filterTodayEntries(parseJsonlFile(filePath), now),
+  );
 
-  for (const file of files) {
-    const hit = previous[file.path];
-    if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
-      next[file.path] = hit;
-      continue;
-    }
-
-    const entries = filterTodayEntries(parseJsonlFile(file.path), now);
-    const aggregate = aggregateTokens(entries);
-    next[file.path] = {
-      mtimeMs: file.mtimeMs,
-      size: file.size,
-      byModel: [...aggregate.byModel].map(
-        ([model, metrics]) => [model, withRequiredPremium(metrics)] as const,
-      ),
-      totals: withRequiredPremium(aggregate.totals),
-    };
-    changed = true;
-  }
-
-  if (changed && target !== null) {
+  if (next.changed && target !== null) {
     try {
-      // An overflowing file is used for this render but not cached; it is
-      // re-parsed next time while every other file is still a cache hit.
-      const persistable = Object.fromEntries(
-        Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)),
-      );
-      writeJsonAtomic(target, { date, files: persistable });
+      writeJsonAtomic(target, { date, files: persistableAggregates(next.files) });
     } catch {
       // The next render recomputes; a cache that cannot be written costs
       // speed, never correctness.
     }
   }
 
-  const byModel = new Map<string, TokenMetrics>();
-  const totals = emptyMetrics();
-  for (const aggregate of Object.values(next)) {
-    addInto(totals, aggregate.totals);
-    for (const [model, metrics] of aggregate.byModel) {
-      let bucket = byModel.get(model);
-      if (!bucket) {
-        bucket = emptyMetrics();
-        byModel.set(model, bucket);
-      }
-      addInto(bucket, metrics);
-    }
-  }
-
+  const { byModel, totals } = sumAggregates(Object.values(next.files));
   return { byModel, totals, fileCount: files.length };
 }
