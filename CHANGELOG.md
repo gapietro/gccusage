@@ -49,6 +49,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `effort` widget: the session's reasoning-effort level, read from Claude
   Code's statusline payload, on a per-level colour. In the default layout
   directly after `model`; hidden for models without effort support (#139).
+- `GCCUSAGE_DEBUG=1` prints, on stderr, whatever error made the statusline
+  render nothing, so a bar that has disappeared can be diagnosed. Off by
+  default (OPS-006).
 
 ### Changed
 
@@ -65,6 +68,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   NORMAL colour. The renderer now also drops any non-string segment colour
   rather than failing the render, so one bad widget costs its colour, not the
   bar (#141).
+- A stdin stream that fails mid-read now renders `⚠ gccusage  could not read
+  stdin — <error>` instead of an empty bar (REL-004).
+
+### Resolved known limitations
+
+- CI now runs on every pull request and push to `main` and is required to
+  merge; the 1.0.0 note that it had never run no longer applies.
+- The render path has a debug flag (`GCCUSAGE_DEBUG`, above), and a stdin
+  failure renders a diagnostic instead of nothing.
 
 ## [1.0.0] — 2026-08-05
 

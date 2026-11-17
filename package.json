@@ -10,7 +10,6 @@
   "scripts": {
     "build": "tsdown",
     "postbuild": "node -e \"const fs=require('fs');const f='dist/index.js';const c=fs.readFileSync(f,'utf8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env node\\n'+c)\"",
-    "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "dev": "bun run src/index.ts",
     "lint": "oxlint --report-unused-disable-directives-severity=error",
@@ -20,7 +19,6 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "schema": "UPDATE_CONFIG_SCHEMA=1 vitest run src/__tests__/config-schema.test.ts",
     "pricing": "UPDATE_FALLBACK_PRICING=1 vitest run src/__tests__/fallback-pricing.test.ts",
-    "badge": "node scripts/build-badge.ts",
     "harness:concurrency": "node scripts/concurrency-harness.ts",
     "coverage": "vitest run --coverage"
   },
