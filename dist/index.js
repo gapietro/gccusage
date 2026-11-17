@@ -6,7 +6,7 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -18,7 +18,7 @@ import * as path$3 from "node:path";
 import * as path$2 from "node:path";
 import * as path$1 from "node:path";
 import * as path from "node:path";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import process$1 from "node:process";
 import * as os$1 from "node:os";
 import os from "node:os";
@@ -1693,20 +1693,57 @@ const DEFAULT_SETTINGS = {
 
 //#endregion
 //#region src/utils/paths.ts
+/**
+* The user's home directory as an absolute path, or null when there is no
+* trustworthy answer.
+*
+* os.homedir() honours HOME on POSIX and USERPROFILE on Windows, but returns
+* an empty string when HOME is set-but-empty, and throws when HOME is unset
+* and there is no passwd entry. The passwd entry is the fallback for both.
+*
+* Past that there is deliberately nothing. This used to fall back to
+* `os.tmpdir()`, which on Linux is the shared, world-writable `/tmp`: any
+* local user could plant `/tmp/.config/gccusage/settings.json` and have its
+* `custom-command` run as the victim on every render, and the cache, setup's
+* settings.json and the transcript scan all followed it there (SEC-004,
+* review of #154). `os.tmpdir()` also honours a relative TMPDIR. Every caller
+* treats null as "no such directory": no config, no cache, no transcripts.
+*/
 function getHomeDir() {
-	const home = os$1.homedir();
-	if (path$10.isAbsolute(home)) return home;
+	try {
+		const home = os$1.homedir();
+		if (path$10.isAbsolute(home)) return home;
+	} catch {}
 	try {
 		const fromPasswd = os$1.userInfo().homedir;
 		if (path$10.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
-	return os$1.tmpdir();
+	return null;
 }
+/**
+* `p` with the home directory collapsed to `~`, for display.
+*
+* Only on a path-segment boundary: a bare `startsWith(home)` turned
+* `/home/u2/x` into `~2/x` when home was `/home/u` (review of #154). With no
+* home, or a home of "/" (which would prefix-match every absolute path),
+* nothing is collapsed. The one owner for the error line and the cwd widget.
+*/
+function collapseHome(p) {
+	const home = getHomeDir();
+	if (home === null || home === "/") return p;
+	if (p === home) return "~";
+	const prefix = home.endsWith(path$10.sep) ? home : home + path$10.sep;
+	return p.startsWith(prefix) ? `~${path$10.sep}${p.slice(prefix.length)}` : p;
+}
+/** `~/.claude`, where Claude Code keeps its data, or null with no home. */
 function getClaudeDataDir() {
-	return path$10.join(getHomeDir(), ".claude");
+	const home = getHomeDir();
+	return home === null ? null : path$10.join(home, ".claude");
 }
+/** Claude Code's transcript tree, or null with no home: then none are read. */
 function getProjectsDir() {
-	return path$10.join(getClaudeDataDir(), "projects");
+	const dataDir = getClaudeDataDir();
+	return dataDir === null ? null : path$10.join(dataDir, "projects");
 }
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function shardKey(sessionId) {
@@ -1723,12 +1760,42 @@ function shardKey(sessionId) {
 */
 function xdgBaseDir(name) {
 	const value = process.env[name];
-	return value && path$10.isAbsolute(value) ? value : void 0;
+	if (!value) return void 0;
+	if (path$10.isAbsolute(value)) return value;
+	reportIgnoredXdg(name, value);
+	return void 0;
 }
+/** `NAME=value` pairs already reported, so each is logged once per process. */
+const reportedXdg = new Set();
+/**
+* Ignoring a relative value moves the cache or config somewhere the user did
+* not ask for, silently. Say so under GCCUSAGE_DEBUG (review of #154) — once
+* per value, since getCacheDir runs many times per render.
+*/
+function reportIgnoredXdg(name, value) {
+	if (!process.env["GCCUSAGE_DEBUG"]) return;
+	const key = `${name}=${value}`;
+	if (reportedXdg.has(key)) return;
+	reportedXdg.add(key);
+	console.error(`gccusage: ignoring relative ${name}=${JSON.stringify(value)} — the XDG spec requires an absolute path`);
+}
+/**
+* The cache directory, or null when there is neither an absolute
+* XDG_CACHE_HOME nor a home directory — and then nothing is cached.
+*
+* Disabled rather than relocated. The alternative was a private
+* `<tmpdir>/gccusage-<uid>`, but that dir has to be verified (created 0700,
+* not a symlink, owned by us, no group/other bits) and a failed verification
+* still needs this same disabled path — so it would add a second code path,
+* with its own races, on top of the one it cannot avoid. Every cache here is
+* an optimisation: with none, the bar still renders, it just recomputes, and
+* the daily store reports this session's spend marked uncertain.
+*/
 function getCacheDir() {
 	const xdg = xdgBaseDir("XDG_CACHE_HOME");
 	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(getHomeDir(), ".cache", "gccusage");
+	const home = getHomeDir();
+	return home === null ? null : path$10.join(home, ".cache", "gccusage");
 }
 /**
 * Lives here, beside `getCacheDir`, so both are built on `getHomeDir()`. It
@@ -1736,11 +1803,15 @@ function getCacheDir() {
 * empty HOME is the relative path `~/.config/gccusage`. That resolves against
 * the cwd, so a repo committing that path had its config, and its
 * `custom-command`, loaded and run (SEC-004, reproduced via clone).
+*
+* Null when there is neither an absolute XDG_CONFIG_HOME nor a home: then
+* there is no config file and the defaults apply. Never a shared directory.
 */
 function getConfigDir() {
 	const xdg = xdgBaseDir("XDG_CONFIG_HOME");
 	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(getHomeDir(), ".config", "gccusage");
+	const home = getHomeDir();
+	return home === null ? null : path$10.join(home, ".config", "gccusage");
 }
 /**
 * Create `dir`, and any missing parents, as 0700 (SEC-003). The cache holds
@@ -1757,6 +1828,73 @@ function ensureDir(dir) {
 		mode: 448
 	});
 }
+/**
+* Strip group and other permission bits from an EXISTING cache tree: the
+* cache dir, its direct subdirectories (`daily/`, `blocks/`), and the files
+* at those two levels (SEC-003, review of #154).
+*
+* `ensureDir` only narrows directories it creates, and cache files only
+* become 0600 when rewritten, so an install from before SEC-003 kept a 0755
+* `~/.cache/gccusage`, a 0755 `daily/`, and 0644 shards for sessions that
+* never write again. This is the one-time fix-up for that.
+*
+* Bits are only ever removed (`mode & ~0o077`), never set, so this cannot
+* widen anything. Each entry is lstat'ed and skipped if it is a symlink or
+* is not owned by this uid: the tree is ours, but a link inside it could
+* point anywhere, and someone else's file is not ours to change. Skipped
+* entirely where there is no uid (Windows).
+*
+* Not run on the render path. Its callers are the detached refresh child
+* and `setup`. It needs no "done" marker: once the tree is narrowed, every
+* pass is a stat walk over a few dozen entries that changes nothing, at
+* the refresh cadence. A marker would be more state to get wrong, for a
+* saving no one would notice.
+*/
+function narrowCacheModes(cacheDir) {
+	if (typeof process.getuid !== "function") return;
+	const uid = process.getuid();
+	if (!narrowOwned(cacheDir, uid, true)) return;
+	let names;
+	try {
+		names = fs$6.readdirSync(cacheDir);
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const entry = path$10.join(cacheDir, name);
+		if (!narrowOwned(entry, uid, true)) continue;
+		let inner;
+		try {
+			inner = fs$6.readdirSync(entry);
+		} catch {
+			continue;
+		}
+		for (const innerName of inner) narrowOwned(path$10.join(entry, innerName), uid, false);
+	}
+}
+/**
+* Narrow one entry if it is ours and not a link. Returns true only for a
+* directory the caller may walk into. With `dirsToo` false, a directory is
+* left as found — the walk's depth limit.
+*/
+function narrowOwned(p, uid, dirsToo) {
+	let st;
+	try {
+		st = fs$6.lstatSync(p);
+	} catch {
+		return false;
+	}
+	if (st.isSymbolicLink() || st.uid !== uid) return false;
+	const isDir = st.isDirectory();
+	if (!st.isFile() && !isDir) return false;
+	if (isDir && !dirsToo) return false;
+	const current = st.mode & 511;
+	const narrowed = current & -64;
+	if (narrowed !== current) try {
+		fs$6.chmodSync(p, narrowed);
+	} catch {}
+	return isDir;
+}
 function findJsonlFiles(dir) {
 	if (!fs$6.existsSync(dir)) return [];
 	try {
@@ -1768,7 +1906,7 @@ function findJsonlFiles(dir) {
 function findSessionJsonlFiles(sessionId) {
 	if (!sessionId) return [];
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (projectsDir === null || !fs$6.existsSync(projectsDir)) return [];
 	const files = [];
 	try {
 		for (const projectDir of fs$6.readdirSync(projectsDir)) {
@@ -1789,7 +1927,7 @@ function findSessionJsonlFiles(sessionId) {
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
-	if (!fs$6.existsSync(projectsDir)) return [];
+	if (projectsDir === null || !fs$6.existsSync(projectsDir)) return [];
 	const todayStart = new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
@@ -1814,8 +1952,14 @@ function findTodayJsonlFileStats() {
 
 //#endregion
 //#region src/config/loader.ts
+/**
+* Null when there is no config directory to look in (SEC-004: no home and no
+* absolute XDG_CONFIG_HOME). That means "no config file", never "look
+* somewhere shared".
+*/
 function getConfigPath() {
-	return path$9.join(getConfigDir(), "settings.json");
+	const dir = getConfigDir();
+	return dir === null ? null : path$9.join(dir, "settings.json");
 }
 /**
 * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
@@ -1862,7 +2006,7 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$5.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (configPath === null || !fs$5.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
 		parsed = JSON.parse(fs$5.readFileSync(configPath, "utf-8"));
@@ -1892,12 +2036,10 @@ const RESET$2 = "\x1B[0m";
 * `getHomeDir()`, not raw `$HOME`: the path being shortened came from
 * `getConfigPath()`, which resolves home that way, so with HOME unset or
 * empty the two must agree on where home is or the path is never shortened
-* (SEC-004).
+* (SEC-004). `collapseHome` also matches only on a segment boundary.
 */
 function shortenPath(filePath) {
-	const home = getHomeDir();
-	if (home === "/" || !filePath.startsWith(home)) return filePath;
-	return `~${filePath.slice(home.length)}`;
+	return collapseHome(filePath);
 }
 /**
 * One line, no trailing newline — matching what `runStatusline` returns, since
@@ -2218,22 +2360,44 @@ function writeFileAtomic(filePath, contents, mode) {
 	ensureDir(dir);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 	try {
-		if (mode === void 0) fs$3.writeFileSync(tmpPath, contents, "utf-8");
-		else {
-			fs$3.writeFileSync(tmpPath, contents, {
-				encoding: "utf-8",
-				mode
-			});
-			try {
-				fs$3.chmodSync(tmpPath, mode);
-			} catch {}
-		}
+		createExclusive(tmpPath, contents, mode);
+		if (mode !== void 0) try {
+			fs$3.chmodSync(tmpPath, mode);
+		} catch {}
 		fs$3.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
 			fs$3.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
+	}
+}
+/**
+* Write `contents` to a file at `tmpPath` that this call creates, never one
+* that was already there.
+*
+* The temp name is predictable (`<target>.<pid>.<n>.tmp`). With flag "w" a
+* symlink planted at that name was followed, so the write — and the chmod
+* after it — landed on whatever the link pointed at, and a leftover regular
+* file from a reused pid kept its own, possibly wider, mode (SEC-003, review
+* of #154). "wx" (O_CREAT|O_EXCL) refuses to open anything that exists,
+* symlinks included. On EEXIST the squatter is unlinked — which removes a
+* link, never its target — and the create is retried once. A second EEXIST
+* means someone is racing us for the name, and the write fails rather than
+* loop.
+*/
+function createExclusive(tmpPath, contents, mode) {
+	const options = {
+		encoding: "utf-8",
+		flag: "wx",
+		...mode === void 0 ? {} : { mode }
+	};
+	try {
+		fs$3.writeFileSync(tmpPath, contents, options);
+	} catch (err) {
+		if (err.code !== "EEXIST") throw err;
+		fs$3.unlinkSync(tmpPath);
+		fs$3.writeFileSync(tmpPath, contents, options);
 	}
 }
 /**
@@ -2269,6 +2433,14 @@ const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1e3;
 * Symlinks are skipped, not followed: the cache directory is ours, but a link
 * inside it could point anywhere. Best-effort throughout — a sweep that cannot
 * finish just leaves the files for the next one.
+*
+* Known and accepted gap: a `setup` killed between open and rename leaves its
+* `settings.json.<pid>.<n>.tmp` (or `.bak` temp) in `~/.claude`, or beside a
+* symlink's target, and nothing sweeps those. `~/.claude` is Claude Code's
+* directory, not ours, and `setup` is a rare, interactive command whose user
+* is watching it — unlike the per-render cache writes this sweep exists for.
+* Walking someone else's directory, or a dotfiles repo, to delete files by
+* name pattern is a worse risk than an occasional stray temp file there.
 */
 function sweepStaleTempFiles(dir) {
 	sweepDir(dir, Date.now(), 1);
@@ -2336,11 +2508,14 @@ function readJsonValidated(filePath, schema) {
 //#endregion
 //#region src/cache/block-cache.ts
 const BlockCacheSchema = object({ blockStartTime: number() });
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getBlockCachePath() {
-	return path$7.join(getCacheDir(), "blocks", "current.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$7.join(dir, "blocks", "current.json");
 }
 function loadBlockCache() {
 	const cachePath$1 = getBlockCachePath();
+	if (cachePath$1 === null) return null;
 	const data = readJsonValidated(cachePath$1, BlockCacheSchema);
 	if (!data) return null;
 	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
@@ -2353,6 +2528,7 @@ function loadBlockCache() {
 }
 function saveBlockCache(data) {
 	const cachePath$1 = getBlockCachePath();
+	if (cachePath$1 === null) return;
 	try {
 		writeJsonAtomic(cachePath$1, data);
 	} catch {}
@@ -2774,8 +2950,10 @@ const PricingCacheSchema = object({
 	timestamp: number(),
 	data: record(string(), unknown())
 });
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getCachePath$1() {
-	return path$6.join(getCacheDir(), "pricing.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$6.join(dir, "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -2785,7 +2963,9 @@ function getCachePath$1() {
 * the table is too old to price from at all.
 */
 function loadPricingCacheEntry() {
-	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
+	const cachePath$1 = getCachePath$1();
+	if (cachePath$1 === null) return null;
+	const cache = readJsonValidated(cachePath$1, PricingCacheSchema);
 	if (!cache) return null;
 	const data = sanitisePricingTable(cache.data);
 	if (Object.keys(data).length === 0) return null;
@@ -2801,6 +2981,7 @@ function loadPricingCache(ttlMs) {
 }
 function savePricingCache(data) {
 	const cachePath$1 = getCachePath$1();
+	if (cachePath$1 === null) return;
 	try {
 		const cache = {
 			version: PRICING_CACHE_VERSION,
@@ -3002,8 +3183,8 @@ const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 * again (#122).
 */
 const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
-function stampPath() {
-	return path$5.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
+function stampPath(cacheDir) {
+	return path$5.join(cacheDir, PRICING_REFRESH_STAMP_FILE);
 }
 /**
 * `v.finite()`, not bare `v.number()`: `JSON.parse('{"timestamp":1e400}')`
@@ -3014,8 +3195,8 @@ function stampPath() {
 * permanently, silently (#133).
 */
 const StampSchema = object({ timestamp: pipe(number(), finite()) });
-function attemptedRecently() {
-	const stamp = readJsonValidated(stampPath(), StampSchema);
+function attemptedRecently(cacheDir) {
+	const stamp = readJsonValidated(stampPath(cacheDir), StampSchema);
 	if (stamp === null) return false;
 	return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
 }
@@ -3033,10 +3214,12 @@ function attemptedRecently() {
 */
 function maybeSpawnPricingRefresh(stale) {
 	if (!stale) return;
+	const cacheDir = getCacheDir();
+	if (cacheDir === null) return;
 	try {
-		if (attemptedRecently()) return;
-		ensureDir(getCacheDir());
-		writeJsonAtomic(stampPath(), { timestamp: Date.now() });
+		if (attemptedRecently(cacheDir)) return;
+		ensureDir(cacheDir);
+		writeJsonAtomic(stampPath(cacheDir), { timestamp: Date.now() });
 		const entry = fileURLToPath(import.meta.url);
 		const child = spawn(process.execPath, [entry, "refresh-pricing"], {
 			detached: true,
@@ -3087,8 +3270,10 @@ const TodayAggregateCacheSchema = object({
 	date: string(),
 	files: record(string(), FileAggregateSchema)
 });
+/** Null when there is no cache dir (SEC-004): every file is re-parsed. */
 function cachePath() {
-	return path$4.join(getCacheDir(), "today-aggregates.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$4.join(dir, "today-aggregates.json");
 }
 /** Local date, matching how `filterTodayEntries` picks its midnight. */
 function localDateKey(now) {
@@ -3170,7 +3355,8 @@ function withRequiredPremium(metrics) {
 function getTodayAggregate(now = new Date()) {
 	const files = findTodayJsonlFileStats();
 	const date = localDateKey(now);
-	const cached = readJsonValidated(cachePath(), TodayAggregateCacheSchema);
+	const target = cachePath();
+	const cached = target === null ? null : readJsonValidated(target, TodayAggregateCacheSchema);
 	const previous = cached && cached.date === date ? cached.files : {};
 	const next = {};
 	let changed = Object.keys(previous).length !== files.length;
@@ -3190,9 +3376,9 @@ function getTodayAggregate(now = new Date()) {
 		};
 		changed = true;
 	}
-	if (changed) try {
+	if (changed && target !== null) try {
 		const persistable = Object.fromEntries(Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)));
-		writeJsonAtomic(cachePath(), {
+		writeJsonAtomic(target, {
 			date,
 			files: persistable
 		});
@@ -4388,19 +4574,35 @@ const LegacyEntrySchema = object({
 	updatedAt: fallback(optional(pipe(number(), safeInteger())), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
-function getShardDir() {
-	return path$3.join(getCacheDir(), "daily");
+/**
+* Null when there is no cache dir (SEC-004: no home and no absolute
+* XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
+*/
+function getStorePaths() {
+	const cacheDir = getCacheDir();
+	if (cacheDir === null) return null;
+	return {
+		shardDir: path$3.join(cacheDir, "daily"),
+		legacyPath: path$3.join(cacheDir, "daily-costs.json")
+	};
 }
-function getLegacyPath() {
-	return path$3.join(getCacheDir(), "daily-costs.json");
+/**
+* Whether `trackDailyCost` has a store to total across. Without one it can
+* see only the session in front of it, so its figure is this session's
+* spend rather than today's — and the pipeline marks it uncertain. Exported
+* so that decision has one owner, here, rather than the pipeline re-deriving
+* it from `getCacheDir()`.
+*/
+function hasDailyStore() {
+	return getStorePaths() !== null;
 }
 /**
 * One file per session, so a render only ever writes its own session's data.
 * Concurrent sessions therefore cannot clobber each other's entries — there
 * is no shared read-modify-write left to lose an update.
 */
-function shardPath(sessionId) {
-	return path$3.join(getShardDir(), `${shardKey(sessionId)}.json`);
+function shardPath(store, sessionId) {
+	return path$3.join(store.shardDir, `${shardKey(sessionId)}.json`);
 }
 function dateStr(d) {
 	const y = d.getFullYear();
@@ -4414,8 +4616,8 @@ function dateStr(d) {
 * processes migrating at the same time write identical shards, so it is safe
 * to run unsynchronised.
 */
-function migrateLegacyStore(now) {
-	const legacyPath = getLegacyPath();
+function migrateLegacyStore(store, now) {
+	const legacyPath = store.legacyPath;
 	if (!fs$1.existsSync(legacyPath)) return;
 	let raw;
 	try {
@@ -4437,7 +4639,7 @@ function migrateLegacyStore(now) {
 			const parsed = safeParse(LegacyEntrySchema, sessionRaw);
 			if (!parsed.success) continue;
 			const s = parsed.output;
-			const target = shardPath(s.sessionId);
+			const target = shardPath(store, s.sessionId);
 			if (fs$1.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
@@ -4461,18 +4663,18 @@ function migrateLegacyStore(now) {
 * entries from an earlier day are returned as they are, and re-baseline
 * lazily when their own session next writes.
 */
-function readEntries(now) {
-	migrateLegacyStore(now);
+function readEntries(store, now) {
+	migrateLegacyStore(store, now);
 	let files;
 	try {
-		files = fs$1.readdirSync(getShardDir());
+		files = fs$1.readdirSync(store.shardDir);
 	} catch {
 		return [];
 	}
 	const entries = [];
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
-		const fullPath = path$3.join(getShardDir(), file);
+		const fullPath = path$3.join(store.shardDir, file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
 		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
@@ -4525,8 +4727,10 @@ function nextEntry(prev, sessionId, costUsd, source, today, now) {
 * today's figure uncertain in that case.
 */
 function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
+	const store = getStorePaths();
+	if (store === null) return Number.isFinite(costUsd) ? costUsd : 0;
 	const today = dateStr(now);
-	const entries = readEntries(now);
+	const entries = readEntries(store, now);
 	if (sessionId && Number.isFinite(costUsd)) {
 		const index = entries.findIndex((e) => e.sessionId === sessionId);
 		const prev = index === -1 ? void 0 : entries[index];
@@ -4534,7 +4738,7 @@ function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
 		if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
 			if (index === -1) entries.push(next);
 			else entries[index] = next;
-			writeJsonAtomic(shardPath(sessionId), next);
+			writeJsonAtomic(shardPath(store, sessionId), next);
 		}
 	}
 	let total = 0;
@@ -4581,7 +4785,7 @@ async function buildRenderContext(stdin, settings) {
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
 	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
-	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd);
+	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd) || !hasDailyStore();
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
 	const block = detectBlock(sessionStartTime);
 	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
@@ -5153,10 +5357,9 @@ const sessionClockWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/cwd.ts
 const cwdWidget = { render(context, config) {
-	let cwd = context.stdin.cwd;
-	if (!cwd) return null;
-	const home = getHomeDir();
-	if (cwd.startsWith(home)) cwd = "~" + cwd.slice(home.length);
+	const raw = context.stdin.cwd;
+	if (!raw) return null;
+	const cwd = collapseHome(raw);
 	const label = config.label ?? "";
 	const text = label ? `${label} ${cwd}` : cwd;
 	return {
@@ -5961,6 +6164,33 @@ function shrinkOutputs(outputs, overflow) {
 }
 
 //#endregion
+//#region src/render/contained-error-hook.ts
+/**
+* A test seam for widget throws the renderer contains (REL-007, review of #154).
+*
+* Containing a throw is right for users — one bad segment must not erase the
+* bar — but it also makes the throw invisible to a test that only asserts a
+* segment is ABSENT: "renders no burn rate" passes just the same whether the
+* widget returned null on purpose or crashed. The test setup file
+* (`src/__tests__/setup/contained-widget-errors.ts`) installs a listener here
+* before every test and fails any test where it fired, unless that test
+* opted in.
+*
+* Keyed on `globalThis` with a registered symbol rather than held in module
+* state, so a test that calls `vi.resetModules()` and re-imports the renderer
+* still reports to the same listener. This module imports nothing, so the
+* setup file can load it without pulling the renderer's dependency graph in
+* ahead of any test file's `vi.mock`.
+*
+* In production nothing is installed and the call is a no-op.
+*/
+const CONTAINED_WIDGET_ERROR_HOOK = Symbol.for("gccusage.containedWidgetError");
+function reportContainedWidgetError(widgetType, error) {
+	const listener = globalThis[CONTAINED_WIDGET_ERROR_HOOK];
+	if (typeof listener === "function") listener(widgetType, error);
+}
+
+//#endregion
 //#region src/render/renderer.ts
 function shouldCompact(settings, terminalWidth) {
 	const compact = settings.compact;
@@ -6009,6 +6239,7 @@ function renderWidget(config, context) {
 		return output ? sanitizeOutput(output) : null;
 	} catch (err) {
 		if (process.env["GCCUSAGE_DEBUG"]) console.error(`gccusage: widget "${config.type}" failed —`, err instanceof Error ? err.stack ?? err.message : String(err));
+		reportContainedWidgetError(config.type, err);
 		return null;
 	}
 }
@@ -6164,11 +6395,15 @@ const CacheEntrySchema = object({
 	timestamp: number(),
 	key: string()
 });
+/** Null when there is no cache dir (SEC-004): every check misses. */
 function getCachePath() {
-	return path$1.join(getCacheDir(), "statusline-cache.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$1.join(dir, "statusline-cache.json");
 }
 function checkCache(ttlMs, key) {
-	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
+	const cachePath$1 = getCachePath();
+	if (cachePath$1 === null) return null;
+	const entry = readJsonValidated(cachePath$1, CacheEntrySchema);
 	if (!entry) return null;
 	if (entry.key !== key) return null;
 	if (Date.now() - entry.timestamp > ttlMs) return null;
@@ -6176,6 +6411,7 @@ function checkCache(ttlMs, key) {
 }
 function writeCache(output, key) {
 	const cachePath$1 = getCachePath();
+	if (cachePath$1 === null) return;
 	try {
 		const entry = {
 			output,
@@ -6368,10 +6604,15 @@ async function runCli(args) {
 		case "-v":
 			console.log(VERSION);
 			break;
-		case "refresh-pricing":
-			sweepStaleTempFiles(getCacheDir());
+		case "refresh-pricing": {
+			const cacheDir = getCacheDir();
+			if (cacheDir !== null) {
+				sweepStaleTempFiles(cacheDir);
+				narrowCacheModes(cacheDir);
+			}
 			await refreshPricing();
 			break;
+		}
 		default:
 			console.error(`Unknown command: ${command}`);
 			printHelp();
@@ -6471,6 +6712,7 @@ function readExistingSettings(settingsPath) {
 */
 function removeLegacyTurnStore() {
 	const cacheDir = getCacheDir();
+	if (cacheDir === null) return;
 	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
 		rmSync(target, {
 			recursive: true,
@@ -6493,17 +6735,76 @@ const PRIVATE_FILE_MODE = 384;
 * the logical path: it is the one the user knows, and a backup beside the
 * real target could land inside their dotfiles repo.
 *
-* A dangling link (its target does not exist yet) is followed one level, so
-* setup creates the file the link names rather than replacing the link.
+* A dangling link (its target does not exist yet) is followed, so setup
+* creates the file the link names rather than replacing the link. Each hop
+* resolves the link's text against its directory's REAL path, as the kernel
+* does: `..` in a relative link means the parent of where the link really
+* lives, so lexical resolution from a symlinked `~/.claude` wrote somewhere
+* the link never pointed (review of #154). The final directory must already
+* exist — a link into an unmounted volume is refused rather than recreated
+* as a shadow directory chain — and a loop is refused rather than "repaired"
+* by replacing one of its links with a file.
 */
 function resolveWriteTarget(settingsPath) {
 	try {
 		return realpathSync(settingsPath);
-	} catch {}
+	} catch (err) {
+		const code = err.code;
+		if (code === "ELOOP") throw symlinkLoopError(settingsPath, err);
+		if (code !== "ENOENT") throw err;
+	}
+	let current = settingsPath;
+	for (let hops = 0; isSymlink(current); hops++) {
+		if (hops >= MAX_SYMLINK_HOPS) throw symlinkLoopError(settingsPath);
+		current = resolve(realDirOf(settingsPath, current), readlinkSync(current));
+	}
+	if (current === settingsPath) return settingsPath;
+	return resolve(realDirOf(settingsPath, current), basename(current));
+}
+/** The same bound the kernel applies (Linux MAXSYMLINKS). */
+const MAX_SYMLINK_HOPS = 40;
+function isSymlink(p) {
 	try {
-		if (lstatSync(settingsPath).isSymbolicLink()) return resolve(dirname(settingsPath), readlinkSync(settingsPath));
-	} catch {}
-	return settingsPath;
+		return lstatSync(p).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+/** `dirname(p)` with symlinks resolved; refuses when it does not exist. */
+function realDirOf(settingsPath, p) {
+	try {
+		return realpathSync(dirname(p));
+	} catch (err) {
+		if (err.code !== "ENOENT") throw err;
+		throw new Error(`${settingsPath} is a symlink to ${p}, whose directory does not exist (an unmounted volume, or a moved dotfiles repo?). Nothing was changed. Restore the link's target, or remove the link, and re-run \`gccusage setup\`.`, { cause: err });
+	}
+}
+function symlinkLoopError(settingsPath, cause) {
+	return new Error(`${settingsPath} is part of a symlink loop. Nothing was changed. Point it at a real file and re-run \`gccusage setup\`.`, { cause });
+}
+/**
+* Refuse, with a message that says what to do, when settings.json is a
+* symlink into a directory setup cannot write.
+*
+* The atomic writer creates its temp file beside the target, so it needs
+* the target's DIRECTORY writable, not just the file. nix home-manager links
+* settings.json into the read-only store: the write failed with a bare
+* EACCES naming a temp file the user never heard of, and only after the
+* .bak was written, contradicting "a refused file leaves no .bak" (review
+* of #154). Replacing the link instead would silently detach a managed
+* file. The file is theirs to edit through whatever manages it.
+*
+* Other errors (ENOENT for a missing directory, say) are left to surface
+* from the write itself.
+*/
+function assertRedirectedTargetWritable(settingsPath, target) {
+	try {
+		accessSync(dirname(target), constants.W_OK);
+	} catch (err) {
+		const code = err.code;
+		if (code !== "EACCES" && code !== "EROFS" && code !== "EPERM") throw err;
+		throw new Error(`${settingsPath} is a symlink to ${target}, and ${dirname(target)} is not writable (${code}) — is it managed by home-manager or a dotfiles tool? Nothing was changed. Add the statusLine entry there yourself, through that tool.`, { cause: err });
+	}
 }
 /**
 * The permission bits `target` already has, so a rewrite does not change them,
@@ -6511,19 +6812,29 @@ function resolveWriteTarget(settingsPath) {
 * secrets, and the atomic writer's temp file would otherwise take the umask
 * default: 0600 came back as 0644 (SEC-003). Preserved rather than forced to
 * 0600, because a user who chose a mode for their own file chose it.
+*
+* Less group and other write. The writer applies the mode with an explicit
+* chmod, which bypasses the umask, so a 0666 file would come back 0666 —
+* setup re-emitting a file anyone on the machine can rewrite, and through
+* its `hooks` and `statusLine`, run commands as the user (review of #154).
 */
 function existingModeOr(target) {
 	try {
-		return statSync(target).mode & 511;
+		return statSync(target).mode & 493;
 	} catch {
 		return PRIVATE_FILE_MODE;
 	}
 }
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
-	const settingsPath = resolve(getHomeDir(), ".claude", "settings.json");
+	const home = getHomeDir();
+	if (home === null) throw new Error("cannot determine home directory: HOME is unset or empty and there is no passwd entry. Set HOME and re-run `gccusage setup`.");
+	const settingsPath = resolve(home, ".claude", "settings.json");
 	const existing = readExistingSettings(settingsPath);
 	const settings = existing?.settings ?? {};
+	const target = resolveWriteTarget(settingsPath);
+	const redirected = isSymlink(settingsPath);
+	if (redirected) assertRedirectedTargetWritable(settingsPath, target);
 	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw, PRIVATE_FILE_MODE);
 	const node = resolveStableNodePath();
 	const command = buildStatusLineCommand(node.path, scriptPath);
@@ -6531,11 +6842,12 @@ function runSetup() {
 		type: "command",
 		command
 	};
-	const target = resolveWriteTarget(settingsPath);
 	writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 	removeLegacyTurnStore();
+	const cacheDir = getCacheDir();
+	if (cacheDir !== null) narrowCacheModes(cacheDir);
 	console.log("gccusage setup complete!\n");
-	console.log(`  Settings: ${settingsPath}`);
+	console.log(`  Settings: ${settingsPath}${redirected ? ` -> ${target}` : ""}`);
 	console.log(`  Command:  ${command}`);
 	if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
 	console.log();
@@ -6575,7 +6887,7 @@ async function main() {
 	}
 	const { settings, error } = loadSettings();
 	if (error) {
-		process.stdout.write(formatConfigError(error, getConfigPath()));
+		process.stdout.write(formatConfigError(error, getConfigPath() ?? "settings.json"));
 		return;
 	}
 	const isTTY = process.stdin.isTTY;
