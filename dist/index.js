@@ -833,6 +833,75 @@ function safeParse(schema, input, config$1) {
 }
 
 //#endregion
+//#region src/utils/schemas.ts
+/**
+* The shared rules for numbers that cross a JSON boundary: stdin and every
+* cache file. They used to be re-derived per schema, and the derivations
+* disagreed — `status-json.ts` had `finite()`, the pricing, statusline and
+* block caches had bare `v.number()`, the refresh stamp `finite()` only, and
+* the daily shard `safeInteger()` (COR-006). One owner, so the next schema
+* imports the rule rather than rediscovering it.
+*/
+/**
+* `v.finite()`, never bare `v.number()`.
+*
+* JSON has no `Infinity` literal, which made "JSON cannot encode it, so
+* `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
+* numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
+* both `v.number()` and `typeof x === "number"` accept it (#133, #137).
+*/
+function finiteNumber() {
+	return pipe(number(), finite());
+}
+/**
+* A millisecond stamp this program wrote with `Date.now()`.
+*
+* `safeInteger()`, which implies finite: `finite()` alone accepts `1e300`, and
+* `now - 1e300` is as never-stale as `now - Infinity` (#130). Every stamp
+* written here is an integer, so a fraction is corruption too.
+*
+* NOT sufficient on its own. `9e15` is a safe integer — and centuries in the
+* future — and so is a stamp written before the clock was set back or a VM
+* snapshot restored. "In the future" depends on when the file is read, which a
+* schema cannot know, so every consumer must take the age through `ageSince`.
+*/
+function persistedTimestamp() {
+	return pipe(number(), safeInteger());
+}
+/**
+* How far in the future a stamp may be and still read as age 0.
+*
+* Every stamp is written and read on the same machine, so there is no
+* cross-host skew to absorb; a negative age can only come from the clock
+* stepping backwards between a write and a read — an NTP correction, which is
+* normally well under a second. One second absorbs that without a pointless
+* miss. It must stay small against the shortest TTL it gates, the statusline
+* cache's 5 s default: a stamp inside the allowance reads as brand new, so it
+* can stretch that TTL by up to the allowance itself.
+*/
+const CLOCK_SKEW_ALLOWANCE_MS = 1e3;
+/**
+* The age of a persisted stamp, or `null` when the stamp cannot be trusted.
+*
+* Every cache measured age as `now - stored` and compared it against a TTL.
+* A stamp in the future made that negative, a negative age is younger than
+* every TTL, and the entry read as fresh until the clock caught up — forever,
+* for `9e15`. For the pricing cache that meant the refresher was never spawned,
+* and the refresher is the only writer of `pricing.json`: the file causing the
+* wrong answer gated its own repair, #133's shape (COR-006).
+*
+* `null` rather than `Infinity`, so the compiler makes each caller decide what
+* an untrusted age means (stale, expired, absent) instead of a comparison
+* happening to come out right. Within the skew allowance the age is clamped to
+* 0, so a caller never sees a remaining time longer than its whole window.
+*/
+function ageSince(timestamp, now = Date.now()) {
+	const age = now - timestamp;
+	if (!Number.isFinite(age) || age < -CLOCK_SKEW_ALLOWANCE_MS) return null;
+	return Math.max(0, age);
+}
+
+//#endregion
 //#region src/types/status-json.ts
 /**
 * Every field in this payload is optional AND independently recoverable.
@@ -854,27 +923,6 @@ function lenient(schema) {
 /** Same, for the fields that carry a numeric default rather than undefined. */
 function lenientWithDefault(schema, value) {
 	return fallback(optional(schema, value), value);
-}
-/**
-* `v.finite()`, never bare `v.number()` — for EVERY number in this payload.
-*
-* JSON has no `Infinity` literal, which made "JSON cannot encode it, so
-* `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
-* numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
-* both `v.number()` and `typeof x === "number"` accept it.
-*
-* Applied at the boundary rather than in each formatter on purpose. #131
-* closed this for cost by guarding `formatDollars` and `formatCostPerHour`,
-* which left `formatTokens` rendering `InfinityM` for a window size and
-* `formatDuration` rendering `Infinityhr NaNm` — the class was being closed
-* one formatter at a time, and every widget added later re-opened it (#137).
-*
-* Costs only the offending field: every use sits inside `lenient` /
-* `lenientWithDefault`, so a rejected number falls back to undefined or its
-* default and the bar still draws, per the per-field posture of #83.
-*/
-function finiteNumber() {
-	return pipe(number(), finite());
 }
 const ModelSchema = union([string(), object({
 	id: lenient(string()),
@@ -1990,7 +2038,7 @@ function parseJsonlContent(content) {
 * non-finite (#145). A negative count is just as impossible and would
 * silently under-count. Either is treated like a missing field.
 */
-function tokenCount(value) {
+function tokenCount$1(value) {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
 function normalizeEntry(raw) {
@@ -2008,15 +2056,15 @@ function normalizeEntry(raw) {
 	if (typeof model === "string") entry.model = model;
 	if (usage && typeof usage === "object") {
 		const cacheCreation = typeof usage["cache_creation"] === "object" && usage["cache_creation"] !== null ? usage["cache_creation"] : void 0;
-		const flatCacheCreation = tokenCount(usage["cache_creation_input_tokens"]);
-		const raw1h = tokenCount(cacheCreation?.["ephemeral_1h_input_tokens"]);
+		const flatCacheCreation = tokenCount$1(usage["cache_creation_input_tokens"]);
+		const raw1h = tokenCount$1(cacheCreation?.["ephemeral_1h_input_tokens"]);
 		const cacheCreation1h = raw1h !== void 0 ? Math.min(raw1h, flatCacheCreation ?? 0) : 0;
 		entry.usage = {
-			input_tokens: tokenCount(usage["input_tokens"]),
-			output_tokens: tokenCount(usage["output_tokens"]),
+			input_tokens: tokenCount$1(usage["input_tokens"]),
+			output_tokens: tokenCount$1(usage["output_tokens"]),
 			cache_creation_input_tokens: flatCacheCreation,
 			cache_creation_1h_input_tokens: cacheCreation1h,
-			cache_read_input_tokens: tokenCount(usage["cache_read_input_tokens"])
+			cache_read_input_tokens: tokenCount$1(usage["cache_read_input_tokens"])
 		};
 	}
 	return entry;
@@ -2221,21 +2269,30 @@ function readJsonValidated(filePath, schema) {
 
 //#endregion
 //#region src/cache/block-cache.ts
-const BlockCacheSchema = object({ blockStartTime: number() });
+const BlockCacheSchema = object({ blockStartTime: persistedTimestamp() });
 function getBlockCachePath() {
 	return path$7.join(getCacheDir(), "blocks", "current.json");
 }
-function loadBlockCache() {
+/**
+* The cached block, if it is still running. The one place a cached start is
+* judged: the elapsed time comes back with it so `detectBlock` never
+* re-derives it as `now - blockStartTime`, a second gate that could disagree.
+*/
+function loadBlockCache(now = Date.now()) {
 	const cachePath$1 = getBlockCachePath();
 	const data = readJsonValidated(cachePath$1, BlockCacheSchema);
 	if (!data) return null;
-	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+	const elapsedMs = ageSince(data.blockStartTime, now);
+	if (elapsedMs === null || elapsedMs >= BLOCK_DURATION_MS) {
 		try {
 			fs$2.unlinkSync(cachePath$1);
 		} catch {}
 		return null;
 	}
-	return data;
+	return {
+		...data,
+		elapsedMs
+	};
 }
 function saveBlockCache(data) {
 	const cachePath$1 = getBlockCachePath();
@@ -2248,16 +2305,13 @@ function saveBlockCache(data) {
 //#region src/data/block-tracker.ts
 function detectBlock(sessionStartTime) {
 	const now = Date.now();
-	const cached = loadBlockCache();
-	if (cached) {
-		const elapsed = now - cached.blockStartTime;
-		if (elapsed < BLOCK_DURATION_MS) return {
-			blockStartTime: cached.blockStartTime,
-			elapsedMs: elapsed,
-			remainingMs: BLOCK_DURATION_MS - elapsed,
-			blockDurationMs: BLOCK_DURATION_MS
-		};
-	}
+	const cached = loadBlockCache(now);
+	if (cached) return {
+		blockStartTime: cached.blockStartTime,
+		elapsedMs: cached.elapsedMs,
+		remainingMs: BLOCK_DURATION_MS - cached.elapsedMs,
+		blockDurationMs: BLOCK_DURATION_MS
+	};
 	if (sessionStartTime !== null) {
 		const elapsed = now - sessionStartTime;
 		if (elapsed < BLOCK_DURATION_MS) {
@@ -2506,6 +2560,45 @@ const MAX_COST_PER_TOKEN = .001;
 * stop believing it. Anthropic has never moved a price by this factor.
 */
 const MAX_SNAPSHOT_DEVIATION = 10;
+/**
+* A pricing table is a dictionary keyed by the LiteLLM feed and by the cache
+* file, so it has no prototype. As a plain `{}`, a feed key such as
+* `claude-x/__proto__` (model id `__proto__`) made `table[id] = pricing`
+* REPLACE the table's prototype rather than add an entry. Every reader uses
+* `Object.hasOwn` (#143), which made that inert, but a guard on reads alone
+* holds only while the next reader remembers it. With no prototype there is
+* nothing for a key to reach: every assignment is an own data property
+* (SEC-005).
+*/
+function createPricingTable() {
+	return Object.create(null);
+}
+/**
+* Tables layered in order, later winning, into a fresh prototype-less table.
+* `Object.assign`, not spread into `{}`: the result is itself a table, keyed
+* by the cache, and is held to the same rule as the tables it merges.
+*/
+function mergePricingTables(...tables) {
+	return Object.assign(createPricingTable(), ...tables);
+}
+/**
+* The names valibot's `v.record` silently drops when the cache is read
+* (`_isValidObjectKey`). Dropped at the feed and on every cache-sourced table
+* too, so a fetched table and its round-trip through `pricing.json` hold the
+* same keys instead of diverging on the second read. No Claude model is named
+* any of these. Keeping `__proto__` would also be unsafe in one place no
+* prototype-less object can help: `npm run pricing` writes the parsed table
+* out as a TypeScript object literal, where a `"__proto__":` key SETS the
+* prototype of FALLBACK_PRICING (SEC-005).
+*/
+const UNSTORABLE_KEYS = new Set([
+	"__proto__",
+	"prototype",
+	"constructor"
+]);
+function isStorablePricingKey(key) {
+	return !UNSTORABLE_KEYS.has(key);
+}
 const COST_KEYS = [
 	"inputCostPerToken",
 	"outputCostPerToken",
@@ -2560,8 +2653,9 @@ function isSaneTier(tier, base) {
 * an `above200k` block while keeping the entry it belonged to.
 */
 function sanitisePricingTable(table) {
-	const out = {};
+	const out = createPricingTable();
 	for (const [key, value] of Object.entries(table)) {
+		if (!isStorablePricingKey(key)) continue;
 		const pricing = sanitiseModelPricing(value);
 		if (pricing) out[key] = pricing;
 	}
@@ -2582,7 +2676,7 @@ function sanitisePricingTable(table) {
 * Models absent from the snapshot are genuinely new and pass on bounds alone.
 */
 function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
-	const out = {};
+	const out = createPricingTable();
 	for (const [key, value] of Object.entries(table)) {
 		const known = Object.hasOwn(snapshot, key) ? snapshot[key] : void 0;
 		if (!known) {
@@ -2657,7 +2751,7 @@ function tierWithinDeviation(fetched, known) {
 const PRICING_CACHE_VERSION = 2;
 const PricingCacheSchema = object({
 	version: literal(PRICING_CACHE_VERSION),
-	timestamp: number(),
+	timestamp: persistedTimestamp(),
 	data: record(string(), unknown())
 });
 function getCachePath$1() {
@@ -2673,11 +2767,13 @@ function getCachePath$1() {
 function loadPricingCacheEntry() {
 	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
 	if (!cache) return null;
+	const ageMs = ageSince(cache.timestamp);
+	if (ageMs === null) return null;
 	const data = sanitisePricingTable(cache.data);
 	if (Object.keys(data).length === 0) return null;
 	return {
 		data,
-		ageMs: Date.now() - cache.timestamp
+		ageMs
 	};
 }
 function loadPricingCache(ttlMs) {
@@ -2728,14 +2824,11 @@ const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1e3;
 function getPricingForRender(ttlMs) {
 	const entry = loadPricingCacheEntry();
 	if (!entry || entry.ageMs >= MAX_STALE_MS) return {
-		pricing: { ...FALLBACK_PRICING },
+		pricing: mergePricingTables(FALLBACK_PRICING),
 		stale: true
 	};
 	return {
-		pricing: {
-			...FALLBACK_PRICING,
-			...entry.data
-		},
+		pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
 		stale: entry.ageMs >= ttlMs
 	};
 }
@@ -2816,7 +2909,7 @@ function parseTier(model) {
 	};
 }
 function parseLitellmPricing(data) {
-	const table = {};
+	const table = createPricingTable();
 	for (const [key, value] of Object.entries(data)) {
 		if (!key.startsWith("claude-") || typeof value !== "object" || !value) continue;
 		const model = value;
@@ -2836,7 +2929,7 @@ function parseLitellmPricing(data) {
 		const sane = sanitiseModelPricing(pricing);
 		if (!sane) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
-		table[modelId] = sane;
+		if (isStorablePricingKey(modelId)) table[modelId] = sane;
 		if (key !== modelId) table[key] = sane;
 	}
 	return table;
@@ -2851,10 +2944,7 @@ function parseLitellmPricing(data) {
 */
 async function fetchPricing(ttlMs) {
 	const cached = loadPricingCache(ttlMs);
-	if (cached) return {
-		...FALLBACK_PRICING,
-		...cached
-	};
+	if (cached) return mergePricingTables(FALLBACK_PRICING, cached);
 	try {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
@@ -2862,14 +2952,11 @@ async function fetchPricing(ttlMs) {
 			const pricing = anchorToSnapshot(parseLitellmPricing(data));
 			if (Object.keys(pricing).length > 0) {
 				savePricingCache(pricing);
-				return {
-					...FALLBACK_PRICING,
-					...pricing
-				};
+				return mergePricingTables(FALLBACK_PRICING, pricing);
 			}
 		}
 	} catch {}
-	return { ...FALLBACK_PRICING };
+	return mergePricingTables(FALLBACK_PRICING);
 }
 
 //#endregion
@@ -2898,12 +2985,18 @@ function stampPath() {
 * the backoff window, and the stamp is only rewritten *after* the check — so
 * the file causing the wrong answer gated its own repair and pricing froze
 * permanently, silently (#133).
+*
+* `finite()` closed that for `1e400` only: any finite stamp in the future
+* (`9e15`, a clock set backwards) gave the same negative age, and latched the
+* backoff until the clock caught up. Hence `persistedTimestamp()` plus
+* `ageSince` below (COR-006).
 */
-const StampSchema = object({ timestamp: pipe(number(), finite()) });
+const StampSchema = object({ timestamp: persistedTimestamp() });
 function attemptedRecently() {
 	const stamp = readJsonValidated(stampPath(), StampSchema);
 	if (stamp === null) return false;
-	return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
+	const age = ageSince(stamp.timestamp);
+	return age !== null && age < REFRESH_BACKOFF_MS;
 }
 /**
 * Refreshes pricing out of band when the cache is stale, so the render path
@@ -2934,12 +3027,15 @@ function maybeSpawnPricingRefresh(stale) {
 
 //#endregion
 //#region src/cache/today-aggregate-cache.ts
+function tokenCount() {
+	return pipe(finiteNumber(), minValue(0));
+}
 const TokenCountsSchema = object({
-	inputTokens: pipe(number(), minValue(0)),
-	outputTokens: pipe(number(), minValue(0)),
-	cacheCreationTokens: pipe(number(), minValue(0)),
-	cacheCreation1hTokens: pipe(number(), minValue(0)),
-	cacheReadTokens: pipe(number(), minValue(0))
+	inputTokens: tokenCount(),
+	outputTokens: tokenCount(),
+	cacheCreationTokens: tokenCount(),
+	cacheCreation1hTokens: tokenCount(),
+	cacheReadTokens: tokenCount()
 });
 /**
 * `premium` is REQUIRED, so a cache file written before the tier split fails
@@ -2961,8 +3057,8 @@ const TokenMetricsSchema = object({
 * be reconstructed by summing `byModel`.
 */
 const FileAggregateSchema = object({
-	mtimeMs: number(),
-	size: number(),
+	mtimeMs: finiteNumber(),
+	size: finiteNumber(),
 	byModel: array(tuple([string(), TokenMetricsSchema])),
 	totals: TokenMetricsSchema
 });
@@ -6013,7 +6109,7 @@ function stringOrUndefined(color) {
 //#region src/cache/cache-manager.ts
 const CacheEntrySchema = object({
 	output: string(),
-	timestamp: number(),
+	timestamp: persistedTimestamp(),
 	key: string()
 });
 function getCachePath() {
@@ -6023,7 +6119,8 @@ function checkCache(ttlMs, key) {
 	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
 	if (!entry) return null;
 	if (entry.key !== key) return null;
-	if (Date.now() - entry.timestamp > ttlMs) return null;
+	const age = ageSince(entry.timestamp);
+	if (age === null || age > ttlMs) return null;
 	return entry.output;
 }
 function writeCache(output, key) {
