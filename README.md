@@ -1,7 +1,7 @@
 # gccusage
 
 <!-- badges:start -->
-![version](https://img.shields.io/badge/version-1.2.0-blue)
+![version](https://img.shields.io/github/package-json/v/gapietro/gccusage?label=version&color=blue)
 [![ci](https://github.com/gapietro/gccusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gapietro/gccusage/actions/workflows/ci.yml)
 <!-- badges:end -->
 
