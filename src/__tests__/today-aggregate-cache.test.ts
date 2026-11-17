@@ -254,12 +254,22 @@ describe("getTodayAggregate", () => {
     getTodayAggregate(NOW);
     const primed = JSON.parse(fs.readFileSync(cacheFile, "utf-8")) as { date: string };
     const stat = fs.statSync(filePath);
+    // `cacheCreation1hTokens` must be present: without it (#118) the entry
+    // fails the schema for that reason alone, and this test passed with
+    // `minValue(0)` deleted — found while sabotage-checking COR-006.
     const negative = {
       inputTokens: -1,
       outputTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       cacheReadTokens: 0,
-      premium: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      premium: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
+        cacheReadTokens: 0,
+      },
     };
     fs.writeFileSync(
       cacheFile,
