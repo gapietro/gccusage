@@ -34,6 +34,12 @@ export async function buildRenderContext(
   stdin: StatusJson,
   settings: Settings,
 ): Promise<RenderContext> {
+  // Taken before any transcript parsing: the daily store estimates this
+  // process's start as `now - cost.total_duration_ms`, and every millisecond
+  // between Claude Code building the payload and this line is error in that
+  // estimate (COR-005). Parsing a large transcript first added seconds.
+  const renderStartedAt = Date.now();
+
   // Read this session's transcript. Today's transcripts are read further down,
   // and only when `costSource` is "calculated" — the sole setting that
   // consumes them (#94).
@@ -99,7 +105,6 @@ export async function buildRenderContext(
   // each session's flag, so a lower-bound figure is marked on every session's
   // bar, and it alone knows whether this render's cost was recorded.
   // Re-deriving that here missed the tracker's second skip path.
-  const now = Date.now();
   const stored =
     today === null
       ? recordDailyCost(
@@ -107,10 +112,10 @@ export async function buildRenderContext(
             sessionId: stdin.session_id,
             costUsd: sessionCostUsd,
             source: sessionCostSource,
-            processStart: processStartOf(stdin, now),
+            processStart: processStartOf(stdin, renderStartedAt),
             uncertain: sessionCostUncertain,
           },
-          new Date(now),
+          new Date(renderStartedAt),
         )
       : null;
   const todayCostUsd = stored ? stored.totalUsd : calculateTotalCost(today!.costs);
@@ -174,9 +179,18 @@ export async function buildRenderContext(
  * cost.total_duration_ms`. Stable for the life of a process (a resumed process
  * continues its restored clock), and different for two processes sharing a
  * session_id, which is what lets the daily store keep them apart (COR-005).
+ *
+ * `undefined` for anything that is not a plausible start: a missing or
+ * negative duration, one longer than the clock itself, or a result that is
+ * not a safe integer — `ShardSchema` reads `processStart` back with
+ * `v.safeInteger()`, so an unsafe one was written, dropped on read, and grew
+ * a new entry on every render.
  */
-function processStartOf(stdin: StatusJson, now: number): number | undefined {
+export function processStartOf(stdin: StatusJson, now: number): number | undefined {
   const duration = stdin.cost?.total_duration_ms;
-  if (duration === undefined || !Number.isFinite(duration) || duration < 0) return undefined;
-  return Math.round(now - duration);
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0 || duration > now) {
+    return undefined;
+  }
+  const start = Math.round(now - duration);
+  return Number.isSafeInteger(start) ? start : undefined;
 }

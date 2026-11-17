@@ -4302,12 +4302,23 @@ function shardPath(sessionId, processStart) {
 }
 /**
 * How far apart two computed starts of one process may be. `now -
-* total_duration_ms` is exact in Claude Code but read here after the spawn and
-* the stdin read, so each render lands a little later than the true start;
-* the stdin deadline caps that at seconds. Two processes of one session
-* started this close together is not a case worth splitting.
+* total_duration_ms` is exact in Claude Code, but `now` is taken here after
+* the spawn and the stdin read (before any transcript parse, see
+* pipeline.ts), so each estimate is late by roughly a second. Two processes of
+* one session started closer than this share an entry; resumes of the same
+* saved state in quick succession can (a tmux restore), so it is kept small.
 */
-const PROCESS_START_TOLERANCE_MS = 3e4;
+const PROCESS_START_TOLERANCE_MS = 1e4;
+/**
+* Claude Code runs the statusline command when its statusline controller
+* starts (2.1.326: `#S()` calls the run method immediately), so a fresh
+* process's first render lands seconds in. A first render further in than
+* this, already carrying spend, is a process whose cost was restored
+* (`--resume`, including `--fork-session`, which hands the parent's cost to a
+* new session_id) or a statusline switched on mid-session. Either way the
+* spend so far is not today's to count when no stored entry accounts for it.
+*/
+const RESTORED_FIRST_RENDER_MS = 12e4;
 /**
 * Split a pre-shard `daily-costs.json` into per-session files, then remove it.
 * Without this, today's total would reset to zero once on upgrade. Two
@@ -4412,8 +4423,10 @@ function nextEntry(prev, input, newBaseline, today, now) {
 		entry.date = today;
 	}
 	const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
-	if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
-	else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
+	if (entry.source !== void 0 && entry.source !== source) {
+		if (prev.uncertain && prev.date === today) entry.uncertain = true;
+		entry.baselineUsd = costUsd - accruedToday;
+	} else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
 	entry.costUsd = costUsd;
 	entry.source = source;
 	entry.updatedAt = now.getTime();
@@ -4423,29 +4436,40 @@ function nextEntry(prev, input, newBaseline, today, now) {
 * The stored entry this render belongs to, and the baseline a new entry
 * should start from.
 *
-* With a `processStart`, each Claude Code process gets its own entry (and its
-* own shard file, so two processes never write the same file — the REL-001
-* single-writer property holds per process). Keyed by session alone, two
-* terminals on one session_id read every alternation between their
-* independent cumulative costs as a restart and folded the other process's
-* whole cost into Today each time (COR-005).
+* With a `processStart` (stdin costs only; see `recordDailyCost`), each Claude
+* Code process gets its own entry, in its own shard file, so two processes
+* never write the same file and the REL-001 single-writer property holds per
+* process. Keyed by session alone, two terminals on one session_id read every
+* alternation between their independent cumulative costs as a restart and
+* folded the other process's whole cost into Today each time (COR-005).
 *
-* A NEW process's baseline is the largest cost stored for this session that
-* does not exceed its first figure, or 0. `--resume` restores the cumulative
-* cost (Claude Code's cost tracker `restore()` loads the cost saved at the
-* previous process's exit), so a resumed process's first figure is at least
-* that process's stored cost, which is already counted in its own entry;
-* baselining at the stored cost rather than at the first figure also keeps
-* a turn that ran before the first render. A concurrently started fresh
-* process reports less than the running one, matches nothing, and counts
-* from 0, as a session's first process always has.
+* Without one, the render updates the session's most recently updated entry
+* of any kind. A calculated cost is the whole session's transcript, so every
+* process reports the same series and must share one entry; and one process
+* whose payload sometimes lacks a duration must not grow a second entry.
+*
+* A NEW process entry's baseline, in order:
+* - the largest cost stored for this session, from the same source, that its
+*   first figure reaches. `--resume` restores the cumulative cost saved at
+*   the previous process's exit, which is already counted in that entry;
+*   baselining at the stored figure, not the first one, keeps a turn that ran
+*   before the first render. Same source only: stdin and calculated figures
+*   are on different scales.
+* - its first figure, when the session's only figures are from the other
+*   source (the same spend, re-scaled; the existing entry keeps what it
+*   counted) or the first render is late enough to be restored with nothing
+*   stored to account for it (`RESTORED_FIRST_RENDER_MS`).
+* - otherwise 0: a fresh process, concurrent or first, counts from zero.
 */
-function findEntry(entries, input) {
-	const { sessionId, processStart, costUsd } = input;
-	let newBaseline = 0;
-	for (const e of entries) if (e.sessionId === sessionId && e.costUsd <= costUsd && e.costUsd > newBaseline) newBaseline = e.costUsd;
+function findEntry(entries, input, now) {
+	const { sessionId, processStart, costUsd, source } = input;
+	const session = [];
+	entries.forEach((e, i) => {
+		if (e.sessionId === sessionId) session.push(i);
+	});
 	if (processStart === void 0) {
-		const index$1 = entries.findIndex((e) => e.sessionId === sessionId && e.processStart === void 0);
+		let index$1 = -1;
+		for (const i of session) if (index$1 === -1 || entries[i].updatedAt > entries[index$1].updatedAt) index$1 = i;
 		return {
 			index: index$1,
 			newBaseline: 0
@@ -4453,16 +4477,35 @@ function findEntry(entries, input) {
 	}
 	let index = -1;
 	let best = Infinity;
-	entries.forEach((e, i) => {
-		if (e.sessionId !== sessionId || e.processStart === void 0) return;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.processStart === void 0) continue;
 		const gap = Math.abs(e.processStart - processStart);
 		if (gap <= PROCESS_START_TOLERANCE_MS && gap < best) {
 			best = gap;
 			index = i;
 		}
-	});
-	return {
+	}
+	if (index !== -1) return {
 		index,
+		newBaseline: 0
+	};
+	let newBaseline = 0;
+	let restoredFrom = false;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.source === source && e.costUsd <= costUsd && e.costUsd >= newBaseline) {
+			newBaseline = e.costUsd;
+			restoredFrom = true;
+		}
+	}
+	if (!restoredFrom) {
+		const otherSourceOnly = session.length > 0 && session.every((i) => entries[i].source !== source);
+		const lateFirstRender = now.getTime() - processStart > RESTORED_FIRST_RENDER_MS;
+		if (otherSourceOnly || lateFirstRender) newBaseline = costUsd;
+	}
+	return {
+		index: -1,
 		newBaseline
 	};
 }
@@ -4493,11 +4536,13 @@ function recordDailyCost(input, now = new Date()) {
 	let notRecorded = false;
 	const { sessionId } = input;
 	if (sessionId) {
+		const processStart = input.source === "stdin" ? input.processStart : void 0;
 		const keyed = {
 			...input,
-			sessionId
+			sessionId,
+			processStart
 		};
-		const { index, newBaseline } = findEntry(entries, keyed);
+		const { index, newBaseline } = findEntry(entries, keyed, now);
 		const prev = index === -1 ? void 0 : entries[index];
 		const next = Number.isFinite(input.costUsd) ? nextEntry(prev, keyed, newBaseline, today, now) : void 0;
 		if (next && Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
@@ -4513,6 +4558,19 @@ function recordDailyCost(input, now = new Date()) {
 				};
 				entries[index] = stale;
 				tryWrite(stale);
+			} else if (!prev) {
+				const placeholder = {
+					sessionId,
+					date: today,
+					costUsd: 0,
+					baselineUsd: 0,
+					source: input.source,
+					updatedAt: now.getTime(),
+					processStart,
+					uncertain: true
+				};
+				entries.push(placeholder);
+				tryWrite(placeholder);
 			}
 		}
 	}
@@ -4552,6 +4610,7 @@ function getStdinBurnRate(stdin) {
 	};
 }
 async function buildRenderContext(stdin, settings) {
+	const renderStartedAt = Date.now();
 	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
 	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
 	const metrics = aggregateTokens(sessionEntries);
@@ -4572,14 +4631,13 @@ async function buildRenderContext(stdin, settings) {
 	}
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
-	const now = Date.now();
 	const stored = today === null ? recordDailyCost({
 		sessionId: stdin.session_id,
 		costUsd: sessionCostUsd,
 		source: sessionCostSource,
-		processStart: processStartOf(stdin, now),
+		processStart: processStartOf(stdin, renderStartedAt),
 		uncertain: sessionCostUncertain
-	}, new Date(now)) : null;
+	}, new Date(renderStartedAt)) : null;
 	const todayCostUsd = stored ? stored.totalUsd : calculateTotalCost(today.costs);
 	const todayCostUncertain = stored ? stored.uncertain : today.unpriced.length > 0 || today.approximated.length > 0;
 	const sessionStartTime = getFirstTimestamp(sessionEntries);
@@ -4616,11 +4674,18 @@ async function buildRenderContext(stdin, settings) {
 * cost.total_duration_ms`. Stable for the life of a process (a resumed process
 * continues its restored clock), and different for two processes sharing a
 * session_id, which is what lets the daily store keep them apart (COR-005).
+*
+* `undefined` for anything that is not a plausible start: a missing or
+* negative duration, one longer than the clock itself, or a result that is
+* not a safe integer — `ShardSchema` reads `processStart` back with
+* `v.safeInteger()`, so an unsafe one was written, dropped on read, and grew
+* a new entry on every render.
 */
 function processStartOf(stdin, now) {
 	const duration = stdin.cost?.total_duration_ms;
-	if (duration === void 0 || !Number.isFinite(duration) || duration < 0) return void 0;
-	return Math.round(now - duration);
+	if (duration === void 0 || !Number.isFinite(duration) || duration < 0 || duration > now) return void 0;
+	const start = Math.round(now - duration);
+	return Number.isSafeInteger(start) ? start : void 0;
 }
 
 //#endregion

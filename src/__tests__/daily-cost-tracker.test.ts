@@ -363,12 +363,20 @@ describe("trackDailyCost with a non-finite session cost (#145)", () => {
     expect(total).toBeCloseTo(2.0);
   });
 
-  it("writes no shard for a new session whose first cost is non-finite", () => {
+  // Since COR-009 a placeholder is stored, so other sessions' bars mark
+  // Today instead of silently omitting this session. #145's requirement is
+  // unchanged: nothing non-finite (no null) reaches disk.
+  it("stores a finite, uncertain placeholder for a new session whose first cost is non-finite", () => {
     const now = new Date(2026, 6, 29, 10, 0, 0);
     trackDailyCost("session-b", 1.5, "calculated", now);
     const total = trackDailyCost("session-a", Infinity, "calculated", now);
 
-    expect(shardBytes("session-a")).toBeNull();
+    const raw = shardBytes("session-a");
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain("null");
+    const parsed = JSON.parse(raw!) as Record<string, unknown>;
+    expect(parsed["costUsd"]).toBe(0);
+    expect(parsed["uncertain"]).toBe(true);
     expect(total).toBeCloseTo(1.5);
   });
 
@@ -417,20 +425,22 @@ describe("per-process entries (COR-005)", () => {
   // terminal) each report their own cumulative cost. Keyed by session alone,
   // every alternation read as a restart and Today absorbed the other
   // process's whole cumulative cost: $16.50 for a true spend of $6.40.
+  // Each process's first render is at its start, as Claude Code renders the
+  // statusline when its controller starts; then the two alternate.
   it("does not inflate Today when two processes alternate on one session", () => {
-    const t0 = new Date(2026, 6, 29, 10, 0, 0).getTime();
-    const startA = t0 - 60 * MIN;
-    const startB = t0 - 5 * MIN;
-    const renders: Array<[number, number]> = [
-      [startA, 5], [startB, 1], [startA, 5.1], [startB, 1.1], [startA, 5.2], [startB, 1.2],
+    const startA = new Date(2026, 6, 29, 9, 0, 0).getTime();
+    const startB = startA + 55 * MIN;
+    const renders: Array<[number, number, number]> = [
+      [startA, 0, startA + 2000],
+      [startB, 0, startB + 2000],
+      [startA, 5, startB + MIN], [startB, 1, startB + MIN + 1000],
+      [startA, 5.1, startB + MIN + 2000], [startB, 1.1, startB + MIN + 3000],
+      [startA, 5.2, startB + MIN + 4000], [startB, 1.2, startB + MIN + 5000],
     ];
     let result = { totalUsd: 0, uncertain: false };
-    renders.forEach(([processStart, cost], i) => {
-      result = recordDailyCost(
-        { sessionId: "dup", costUsd: cost, source: "stdin", processStart },
-        new Date(t0 + i * 1000),
-      );
-    });
+    for (const [processStart, cost, at] of renders) {
+      result = recordDailyCost({ sessionId: "dup", costUsd: cost, source: "stdin", processStart }, new Date(at));
+    }
     expect(result.totalUsd).toBeCloseTo(6.4);
   });
 
@@ -471,7 +481,7 @@ describe("per-process entries (COR-005)", () => {
   it("keeps a session's first process counting from zero", () => {
     const now = new Date(2026, 6, 29, 10, 0, 0);
     const r = recordDailyCost(
-      { sessionId: "first", costUsd: 2.5, source: "stdin", processStart: now.getTime() - 10 * MIN },
+      { sessionId: "first", costUsd: 2.5, source: "stdin", processStart: now.getTime() - 30_000 },
       now,
     );
     expect(r.totalUsd).toBeCloseTo(2.5);
@@ -554,5 +564,120 @@ describe("per-process shard identity (COR-005)", () => {
     const r = recordDailyCost({ sessionId: "m", costUsd: 5.2, source: "stdin", processStart: t0 - 1800 }, new Date(t0 + 3000));
     expect(fs.readdirSync(shardDir()).filter((f) => f.endsWith(".json"))).toHaveLength(1);
     expect(r.totalUsd).toBeCloseTo(5.2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review of the COR-005 fix: scenarios that were right before and must stay
+// right, plus mutants that survived the first round of tests.
+// ---------------------------------------------------------------------------
+
+describe("per-process entries: review follow-ups (COR-005)", () => {
+  const T0 = new Date(2026, 6, 29, 10, 0, 0).getTime();
+  const rec = (input: Parameters<typeof recordDailyCost>[0], at: number) =>
+    recordDailyCost(input, new Date(at));
+
+  // A calculated cost is the whole session's transcript, not one process's,
+  // so two processes report the same series. Keyed per process, each counted
+  // every increment: $5.40 for $5.20.
+  it("keys calculated costs by session, so two processes reporting one series count it once", () => {
+    const a = T0 - 60 * MIN;
+    const b = T0 - 5 * MIN;
+    let r = { totalUsd: 0, uncertain: false };
+    [[a, 5], [b, 5], [a, 5.1], [b, 5.1], [a, 5.2], [b, 5.2]].forEach(([ps, c], i) => {
+      r = rec({ sessionId: "s", costUsd: c!, source: "calculated", processStart: ps }, T0 + i * 1000);
+    });
+    expect(r.totalUsd).toBeCloseTo(5.2);
+  });
+
+  it("does not split one process whose payload sometimes lacks a duration", () => {
+    const ps = T0 - 5000;
+    rec({ sessionId: "s", costUsd: 5, source: "stdin", processStart: ps }, T0);
+    expect(rec({ sessionId: "s", costUsd: 5.1, source: "stdin" }, T0 + 1000).totalUsd).toBeCloseTo(5.1);
+    expect(rec({ sessionId: "s", costUsd: 5.2, source: "stdin", processStart: ps }, T0 + 2000).totalUsd).toBeCloseTo(5.2);
+  });
+
+  it("carries a calculated figure into a later stdin process figure without double counting", () => {
+    rec({ sessionId: "s", costUsd: 5.5, source: "calculated" }, T0);
+    const ps = T0 - 5000; // early first render: only the other-source rule applies
+    expect(rec({ sessionId: "s", costUsd: 5.0, source: "stdin", processStart: ps }, T0 + 1000).totalUsd).toBeCloseTo(5.5);
+    expect(rec({ sessionId: "s", costUsd: 5.3, source: "stdin", processStart: ps }, T0 + 2000).totalUsd).toBeCloseTo(5.8);
+  });
+
+  // The calculated $5.50 and the stdin $6.00 are the same spend on two
+  // scales, so the stdin figure must not baseline against the calculated one.
+  it("does not baseline a stdin process against a calculated figure it exceeds", () => {
+    rec({ sessionId: "s", costUsd: 5.5, source: "calculated" }, T0);
+    const ps = T0 - 5000;
+    expect(rec({ sessionId: "s", costUsd: 6.0, source: "stdin", processStart: ps }, T0 + 1000).totalUsd).toBeCloseTo(5.5);
+    expect(rec({ sessionId: "s", costUsd: 6.3, source: "stdin", processStart: ps }, T0 + 2000).totalUsd).toBeCloseTo(5.8);
+  });
+
+  // `--resume --fork-session` restores the parent's cost under a NEW
+  // session_id, and a resume after the 48 h prune has no entry to baseline
+  // against. Its clock is restored too, so its first render is already
+  // minutes or hours into the process.
+  it("does not count a restored cost as today's spend when there is no entry to baseline against", () => {
+    const ps = T0 - 3 * 60 * MIN; // first render three hours into the process
+    expect(rec({ sessionId: "fork", costUsd: 10, source: "stdin", processStart: ps }, T0).totalUsd).toBeCloseTo(0);
+    expect(rec({ sessionId: "fork", costUsd: 11, source: "stdin", processStart: ps }, T0 + MIN).totalUsd).toBeCloseTo(1);
+  });
+
+  it("still counts a new session's first render from zero", () => {
+    const ps = T0 - 20_000; // 20 s in
+    expect(rec({ sessionId: "new", costUsd: 0.4, source: "stdin", processStart: ps }, T0).totalUsd).toBeCloseTo(0.4);
+  });
+
+  it("keeps two processes started 15 s apart separate", () => {
+    let r = { totalUsd: 0, uncertain: false };
+    [[T0, 3], [T0 + 15_000, 1], [T0, 3.2], [T0 + 15_000, 1.1]].forEach(([ps, c], i) => {
+      r = rec({ sessionId: "s", costUsd: c!, source: "stdin", processStart: ps }, T0 + 60_000 + i * 1000);
+    });
+    expect(r.totalUsd).toBeCloseTo(4.3);
+  });
+
+  it("counts only new spend for a process resumed the next day", () => {
+    const yesterday = new Date(2026, 6, 28, 22, 0, 0).getTime();
+    rec({ sessionId: "s", costUsd: 7, source: "stdin", processStart: yesterday - MIN }, yesterday);
+    // The previous run lasted a minute, so the restored clock puts this first
+    // render 60 s in: too early for the late-render rule, so only yesterday's
+    // stored figure can supply the baseline.
+    const ps = T0 - 60_000;
+    expect(rec({ sessionId: "s", costUsd: 7, source: "stdin", processStart: ps }, T0).totalUsd).toBeCloseTo(0);
+    expect(rec({ sessionId: "s", costUsd: 8, source: "stdin", processStart: ps }, T0 + MIN).totalUsd).toBeCloseTo(1);
+  });
+});
+
+describe("stored uncertainty: review follow-ups (COR-009)", () => {
+  const NOW = new Date(2026, 6, 29, 10, 0, 0);
+
+  it("re-stamps a stale entry without throwing when the shard directory is read-only", () => {
+    recordDailyCost({ sessionId: "a", costUsd: 1, source: "stdin" }, NOW);
+    fs.chmodSync(shardDir(), 0o555);
+    try {
+      const r = recordDailyCost({ sessionId: "a", costUsd: NaN, source: "stdin" }, NOW);
+      expect(r.uncertain).toBe(true);
+      expect(r.totalUsd).toBeCloseTo(1);
+    } finally {
+      fs.chmodSync(shardDir(), 0o755);
+    }
+  });
+
+  it("does not mark today for an uncertain entry from yesterday", () => {
+    recordDailyCost({ sessionId: "a", costUsd: 1, source: "calculated", uncertain: true }, new Date(2026, 6, 28, 22));
+    expect(recordDailyCost({ sessionId: "b", costUsd: 2, source: "stdin" }, NOW).uncertain).toBe(false);
+  });
+
+  it("marks other sessions when a session's first render could not be recorded", () => {
+    recordDailyCost({ sessionId: "a", costUsd: Infinity, source: "calculated" }, NOW);
+    const b = recordDailyCost({ sessionId: "b", costUsd: 2, source: "stdin" }, NOW);
+    expect(b.totalUsd).toBeCloseTo(2);
+    expect(b.uncertain).toBe(true);
+  });
+
+  it("keeps a lower-bound mark across a source switch the same day", () => {
+    recordDailyCost({ sessionId: "a", costUsd: 0.5, source: "calculated", uncertain: true }, NOW);
+    const r = recordDailyCost({ sessionId: "a", costUsd: 0.6, source: "stdin" }, NOW);
+    expect(r.uncertain).toBe(true);
   });
 });

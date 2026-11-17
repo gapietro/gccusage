@@ -79,13 +79,16 @@ const MIN = 60_000;
 
 describe.skipIf(!distExists)("daily store through the real bundle", () => {
   it("keeps Today exact while two processes alternate on one session (COR-005)", () => {
-    // Process A has run for an hour, B for five minutes. Each payload's
-    // duration is what it would be at render time; the costs are each
+    // Each process's first render is at its start (Claude Code renders the
+    // statusline when it starts), so B starts while A has run for a while.
+    // Durations are what each payload would carry at render time; real time
+    // between these renders is a fraction of a second. The costs are each
     // process's own cumulative figure. True spend: 5.2 + 1.2 = 6.40.
     let last = "";
     const renders: Array<[number, number]> = [
-      [60 * MIN, 5], [5 * MIN, 1], [60 * MIN + 1000, 5.1],
-      [5 * MIN + 1000, 1.1], [60 * MIN + 2000, 5.2], [5 * MIN + 2000, 1.2],
+      [60 * MIN, 0], [2000, 0],
+      [60 * MIN, 5], [3000, 1], [60 * MIN + 1000, 5.1],
+      [4000, 1.1], [60 * MIN + 2000, 5.2], [5000, 1.2],
     ];
     for (const [duration, cost] of renders) {
       last = render({
