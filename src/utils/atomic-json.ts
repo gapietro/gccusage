@@ -19,18 +19,91 @@ export function writeFileAtomic(filePath: string, contents: string): void {
   const dir = path.dirname(filePath);
   ensureDir(dir);
 
+  // Must keep matching TEMP_FILE_PATTERN below, or the sweep stops seeing
+  // this writer's orphans.
   const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 
-  fs.writeFileSync(tmpPath, contents, "utf-8");
+  // The write is inside the try, not before it: open(2) creates the temp file
+  // before a single byte lands, so a write failing part-way (ENOSPC, EIO)
+  // used to leave it behind with nothing to remove it (REL-008).
   try {
+    fs.writeFileSync(tmpPath, contents, "utf-8");
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     try {
       fs.unlinkSync(tmpPath);
     } catch {
-      // Nothing more to do; the rename failure is the error that matters.
+      // Nothing more to do; the write or rename failure is the error that
+      // matters, and an ENOENT here just means no temp file was created.
     }
     throw err;
+  }
+}
+
+/**
+ * The exact shape of the temp names `writeFileAtomic` generates —
+ * `<target>.<pid>.<counter>.tmp` — so the sweep cannot touch a user's own
+ * `notes.tmp` or anything else that merely ends in `.tmp`.
+ */
+const TEMP_FILE_PATTERN = /\.\d+\.\d+\.tmp$/;
+
+/**
+ * Old enough that no live write can still own the file. A write is one
+ * `writeFileSync` and one `rename` of a few KB; an hour is many orders of
+ * magnitude past that, so a younger temp file is left alone in case another
+ * process is mid-write to it.
+ */
+export const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Remove orphaned `writeFileAtomic` temp files from `dir` and its immediate
+ * subdirectories (the cache keeps targets in `daily/` and `blocks/` as well as
+ * at the root, and an orphan lands beside its target).
+ *
+ * Moving the write into the try stops a failed write leaking one, but nothing
+ * in-process can clean up after a SIGKILL between open and rename — the real
+ * cache held one from October when REL-008 was found. So this sweeps after the
+ * fact.
+ *
+ * Not called on the render path: it is a directory walk, and renders are the
+ * one place this tool has a latency budget. Its caller is the detached
+ * `refresh-pricing` child, which is already off the render path and already
+ * rate-limited — it runs only when pricing is stale, and at most once per
+ * refresh backoff — so the walk costs nothing a user waits for, and an orphan
+ * lives about a day at worst.
+ *
+ * Symlinks are skipped, not followed: the cache directory is ours, but a link
+ * inside it could point anywhere. Best-effort throughout — a sweep that cannot
+ * finish just leaves the files for the next one.
+ */
+export function sweepStaleTempFiles(dir: string): void {
+  sweepDir(dir, Date.now(), 1);
+}
+
+function sweepDir(dir: string, now: number, depthLeft: number): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+
+  for (const name of names) {
+    const full = path.join(dir, name);
+    try {
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) {
+        if (depthLeft > 0) sweepDir(full, now, depthLeft - 1);
+      } else if (
+        stat.isFile() &&
+        TEMP_FILE_PATTERN.test(name) &&
+        now - stat.mtimeMs > STALE_TEMP_FILE_AGE_MS
+      ) {
+        fs.unlinkSync(full);
+      }
+    } catch {
+      // Vanished or unreadable since readdir; leave it for the next sweep.
+    }
   }
 }
 

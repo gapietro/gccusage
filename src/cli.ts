@@ -6,7 +6,7 @@ import { readFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { writeFileAtomic } from "./utils/atomic-json.js";
+import { writeFileAtomic, sweepStaleTempFiles } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
 import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
 import { getCacheDir } from "./utils/paths.js";
@@ -43,7 +43,12 @@ export async function runCli(args: string[]): Promise<void> {
     // Internal: what the detached refresher child runs. Undocumented in help
     // because it is an implementation detail of the render path, not a
     // command anyone needs to type.
+    //
+    // It also sweeps orphaned temp files from the cache (REL-008): this child
+    // is already off the render path and rate-limited by the pricing TTL and
+    // refresh backoff, which is the cadence a directory walk should run at.
     case "refresh-pricing":
+      sweepStaleTempFiles(getCacheDir());
       await refreshPricing();
       break;
     default:

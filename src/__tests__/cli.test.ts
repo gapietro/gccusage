@@ -62,6 +62,8 @@ vi.mock("../data/pricing-fetcher.js", () => ({
       cacheReadCostPerToken: 0,
     },
   })),
+  // `refresh-pricing` must never reach the network from a test.
+  refreshPricing: vi.fn(async () => false),
 }));
 
 describe("gccusage today", () => {
@@ -320,5 +322,36 @@ describe("gccusage setup", () => {
     }
 
     expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
+  });
+});
+
+describe("gccusage refresh-pricing", () => {
+  let tmpDir: string;
+  let originalXdg: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-refresh-cmd-"));
+    originalXdg = process.env["XDG_CACHE_HOME"];
+    process.env["XDG_CACHE_HOME"] = tmpDir;
+  });
+
+  afterEach(() => {
+    if (originalXdg === undefined) delete process.env["XDG_CACHE_HOME"];
+    else process.env["XDG_CACHE_HOME"] = originalXdg;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // REL-008: the sweep is only as good as its caller. Deleting the call would
+  // leave every sweepStaleTempFiles unit test green and orphans accumulating.
+  it("sweeps orphaned temp files out of the cache directory", async () => {
+    const orphan = path.join(tmpDir, "gccusage", "daily", "abc.json.4242.0.tmp");
+    fs.mkdirSync(path.dirname(orphan), { recursive: true });
+    fs.writeFileSync(orphan, "");
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(orphan, old, old);
+
+    await runCli(["refresh-pricing"]);
+
+    expect(fs.existsSync(orphan)).toBe(false);
   });
 });
