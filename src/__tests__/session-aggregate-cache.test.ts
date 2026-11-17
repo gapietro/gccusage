@@ -289,6 +289,35 @@ describe("the turn count with subagent transcripts (PR #156 review)", () => {
   });
 });
 
+describe("unusual session layouts (PR #156 review)", () => {
+  it("prices a session whose main transcript is missing from its subagents", async () => {
+    const layout = writeSession();
+    fs.rmSync(layout.main);
+
+    const ctx = await build();
+
+    expect(ctx.sessionCostUsd).toBeCloseTo(0.6, 10);
+    expect(ctx.sessionStartTime).toBe(LATER.getTime());
+    expect(ctx.turnCount).toBe(0);
+  });
+
+  it("finds main and subagent transcripts under different project dirs", async () => {
+    // Not observed: on the developer's machine all 12 subagent dirs sit
+    // beside their main transcript. The lookup searches every project dir
+    // for each independently, so it would still find both.
+    const layout = writeSession(SESSION, "-first");
+    const moved = path.join(tmpDir, ".claude", "projects", "-second", SESSION);
+    fs.mkdirSync(path.dirname(moved), { recursive: true });
+    fs.renameSync(path.join(path.dirname(layout.main), SESSION), moved);
+
+    const ctx = await build();
+
+    expect(ctx.sessionCostUsd).toBeCloseTo(0.7, 10);
+    expect(ctx.sessionStartTime).toBe(START.getTime());
+    expect(ctx.turnCount).toBe(2);
+  });
+});
+
 describe("the session start time (PR #156 review)", () => {
   const EARLIER = new Date(START.getTime() - 30 * 60_000);
 
