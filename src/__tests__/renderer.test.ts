@@ -9,44 +9,26 @@ import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
 import { allowContainedWidgetErrors } from "./helpers/contained-widget-errors.js";
+import { makeContext as baseContext } from "./fixtures/render-context.js";
 
 // Rendered in-process, so git widgets would run git in the checkout this suite
 // runs from (#148). None of these tests asserts on git.
 const RENDER_SETTINGS = gitFreeDefaultSettings();
 
+// The shared fixture with this file's own defaults: a stdin-sourced session
+// cost and a nonzero today figure, so the cost segments render, on an
+// 80-column terminal.
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
-  return {
+  return baseContext({
     stdin: {
       model: "claude-sonnet-4-20250514",
       cost: { total_cost_usd: 2.45 },
     },
-    metrics: {
-      byModel: new Map(),
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheCreation1hTokens: 0,
-        cacheReadTokens: 0,
-      },
-    },
-    block: null,
-    burnRate: null,
-    burnRateUncertain: false,
-    pricing: {},
     sessionCostUsd: 2.45,
     todayCostUsd: 18.72,
-    costByModel: new Map(),
-    unpricedModels: [],
-    approximatedModels: [],
-    sessionCostUncertain: false,
-    todayCostUncertain: false,
-    sessionStartTime: null,
     terminalWidth: 80,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: 0,
     ...overrides,
-  };
+  });
 }
 
 function makeSettings(overrides: Partial<Settings> = {}): Settings {
