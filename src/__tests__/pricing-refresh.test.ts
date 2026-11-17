@@ -11,6 +11,8 @@ const spawnMock = vi.fn(
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
 const { maybeSpawnPricingRefresh, REFRESH_BACKOFF_MS } = await import("../data/pricing-refresh.js");
+const { getPricingForRender } = await import("../data/pricing-fetcher.js");
+const { PRICING_CACHE_VERSION } = await import("../cache/pricing-cache.js");
 
 /**
  * The backoff stamp is written by the PARENT before spawning, deliberately.
@@ -100,11 +102,88 @@ describe("maybeSpawnPricingRefresh", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["1 day in the future", () => String(Date.now() + 24 * 60 * 60 * 1000)],
+    ["9e15", () => "9e15"],
+  ])("spawns when the stamp timestamp is %s, instead of latching the backoff on", (_label, stamp) => {
+    // COR-006: `v.finite()` closed #133 for 1e400 only. A finite future stamp
+    // (a clock set backwards, a restored VM snapshot) still gave a negative
+    // age, inside the backoff window until the clock caught up — for 9e15,
+    // for ~285,000 years.
+    fs.mkdirSync(path.dirname(stampPath()), { recursive: true });
+    fs.writeFileSync(stampPath(), `{"timestamp":${stamp()}}`);
+
+    maybeSpawnPricingRefresh(true);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it("never throws when the cache directory cannot be written", () => {
     process.env["XDG_CACHE_HOME"] = path.join(tmpDir, "nonexistent-file", "nope");
     fs.writeFileSync(path.join(tmpDir, "nonexistent-file"), "not a directory");
 
     // A statusline must render regardless; a refresh is best-effort.
     expect(() => maybeSpawnPricingRefresh(true)).not.toThrow();
+  });
+});
+
+/**
+ * COR-006 end to end: `pricing.json` itself carrying an untrusted timestamp.
+ * The bug was never the read alone: a negative age reported the table fresh,
+ * `stale: false` meant no refresher was ever spawned, and the refresher is the
+ * only thing that rewrites `pricing.json`. The file causing the wrong answer
+ * gated its own repair, which is #133's shape, so these assert the spawn
+ * rather than the read. The two calls are composed exactly as pipeline.ts
+ * composes them.
+ */
+describe("a pricing cache with an untrusted timestamp (COR-006)", () => {
+  const RATES =
+    '{"inputCostPerToken":1e-6,"outputCostPerToken":2e-6,"cacheCreationCostPerToken":1e-6,' +
+    '"cacheCreation1hCostPerToken":2e-6,"cacheReadCostPerToken":1e-7}';
+
+  function writePricing(stamp: string): void {
+    // Raw text: `JSON.stringify(Infinity)` is `null` (#133).
+    const file = path.join(tmpDir, "gccusage", "pricing.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      `{"version":${PRICING_CACHE_VERSION},"timestamp":${stamp},"data":{"claude-stamp-test":${RATES}}}`,
+    );
+  }
+
+  function renderOnce(): void {
+    maybeSpawnPricingRefresh(getPricingForRender(24 * 60 * 60 * 1000).stale);
+  }
+
+  it("does not spawn for a table stamped now (control: the raw fixture is fresh)", () => {
+    writePricing(String(Date.now()));
+    renderOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["1e400", () => "1e400"],
+    ["9e15", () => "9e15"],
+    ["1 day in the future", () => String(Date.now() + 24 * 60 * 60 * 1000)],
+  ])("spawns the refresher for a pricing.json timestamp of %s", (_label, stamp) => {
+    writePricing(stamp());
+    renderOnce();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  // PR #155 review: while that refresh is in flight, render with the cached
+  // prices rather than FALLBACK_PRICING — only the stamp is suspect. 1e400 is
+  // excluded because it fails the schema and the envelope is rejected whole.
+  it.each([
+    ["9e15", () => "9e15"],
+    ["1 day in the future", () => String(Date.now() + 24 * 60 * 60 * 1000)],
+  ])("renders with the cached prices AND spawns the refresher for a timestamp of %s", (_label, stamp) => {
+    writePricing(stamp());
+
+    const { pricing, stale } = getPricingForRender(24 * 60 * 60 * 1000);
+    maybeSpawnPricingRefresh(stale);
+
+    expect(Object.hasOwn(pricing, "claude-stamp-test")).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 });
