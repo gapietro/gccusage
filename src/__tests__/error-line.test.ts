@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
+import * as path from "node:path";
+import { getHomeDir } from "../utils/paths.js";
 import {
   formatConfigError,
   formatStdinError,
@@ -48,6 +50,24 @@ describe("formatConfigError", () => {
   it("survives HOME being unset", () => {
     delete process.env["HOME"];
     expect(formatConfigError(MESSAGE, CONFIG)).toContain(CONFIG);
+  });
+
+  // SEC-004. The path shown is getConfigPath(), which resolves home through
+  // getHomeDir() — the passwd entry when HOME is unset or empty. Shortening
+  // against raw $HOME instead left that path unshortened, and in the old
+  // `HOME || "~"` world the two disagreed about where home even was.
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])("collapses the resolved home directory when HOME is %s", (_label, home) => {
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+    const resolvedHome = getHomeDir();
+    const configPath = path.join(resolvedHome, ".config", "gccusage", "settings.json");
+
+    expect(formatConfigError(MESSAGE, configPath)).toContain(
+      `~${path.sep}.config${path.sep}gccusage${path.sep}settings.json`,
+    );
   });
 });
 

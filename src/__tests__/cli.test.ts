@@ -51,6 +51,22 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+// Same narrow shape as mockFs: null passes userInfo() through untouched. Set,
+// it stands in for the passwd entry, so a test of the HOME-empty fallback
+// resolves into its own temp dir instead of the developer's real home.
+const mockOs = vi.hoisted(() => ({ passwdHome: null as string | null }));
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return {
+    ...actual,
+    userInfo: (...args: Parameters<typeof actual.userInfo>) => {
+      const info = actual.userInfo(...args);
+      return mockOs.passwdHome === null ? info : { ...info, homedir: mockOs.passwdHome };
+    },
+  };
+});
+
 // `gccusage today` prices straight from the table, so an unpriced model was
 // dropped from both the total and the by-model list with nothing said (#82).
 vi.mock("../data/pricing-fetcher.js", () => ({
@@ -286,6 +302,29 @@ describe("gccusage setup", () => {
 
     await expect(runCli(["setup"])).rejects.toThrow(settingsPath());
     await expect(runCli(["setup"])).rejects.toThrow("re-run `gccusage setup`");
+  });
+
+  // SEC-004's class, in setup: `os.homedir()` returns "" for HOME="", and
+  // `resolve("", ".claude", "settings.json")` is relative to the cwd — so
+  // setup wrote a settings.json into whatever directory it was run from.
+  it("writes under the passwd home, not the working directory, when HOME is empty", async () => {
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-setup-cwd-"));
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwdDir);
+    process.env["HOME"] = "";
+    mockOs.passwdHome = tmpDir;
+    try {
+      await runCli(["setup"]);
+    } finally {
+      mockOs.passwdHome = null;
+      cwdSpy.mockRestore();
+    }
+
+    try {
+      expect(fs.existsSync(path.join(cwdDir, ".claude", "settings.json"))).toBe(false);
+      expect(JSON.parse(read(settingsPath())).statusLine.type).toBe("command");
+    } finally {
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+    }
   });
 
   it("removes the orphaned turn store left by the pre-#129 tracker", async () => {

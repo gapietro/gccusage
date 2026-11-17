@@ -3,12 +3,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { SettingsSchema, type Settings } from "./schema.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
-
-function getConfigDir(): string {
-  const xdg = process.env["XDG_CONFIG_HOME"];
-  if (xdg) return path.join(xdg, "gccusage");
-  return path.join(process.env["HOME"] || "~", ".config", "gccusage");
-}
+import { getConfigDir } from "../utils/paths.js";
 
 export function getConfigPath(): string {
   return path.join(getConfigDir(), "settings.json");

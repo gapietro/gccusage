@@ -2,6 +2,8 @@
 // no visible stderr in statusline mode — so a config failure is rendered as
 // the bar rather than beside it.
 
+import { getHomeDir } from "../utils/paths.js";
+
 // Written as a literal escape rather than via chalk: chalk.level is 0 when
 // stdout is a pipe and is only forced to 3 inside render/powerline.ts, so
 // using chalk here would mean importing that module for its side effect to
@@ -9,11 +11,19 @@
 const BOLD_RED = "[1;31m";
 const RESET = "[0m";
 
-/** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
+/**
+ * Collapse the home directory to `~` so the line stays short enough to read
+ * at a glance.
+ *
+ * `getHomeDir()`, not raw `$HOME`: the path being shortened came from
+ * `getConfigPath()`, which resolves home that way, so with HOME unset or
+ * empty the two must agree on where home is or the path is never shortened
+ * (SEC-004).
+ */
 function shortenPath(filePath: string): string {
-  const home = process.env["HOME"];
-  // A HOME of "/" would prefix-match every absolute path.
-  if (!home || home === "/" || !filePath.startsWith(home)) return filePath;
+  const home = getHomeDir();
+  // A home of "/" would prefix-match every absolute path.
+  if (home === "/" || !filePath.startsWith(home)) return filePath;
   return `~${filePath.slice(home.length)}`;
 }
 

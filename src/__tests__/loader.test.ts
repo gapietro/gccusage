@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { loadSettings } from "../config/loader.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 
@@ -269,4 +270,45 @@ describe("loadSettings with prototype-member keys in a section (#143)", () => {
       expect(Object.hasOwn(settings.powerline!, key)).toBe(false);
     },
   );
+});
+
+// SEC-004. With HOME unset the config dir was `path.join("~", ".config", …)` —
+// a RELATIVE path, resolved against whatever directory Claude Code was
+// launched in. A repo committing `~/.config/gccusage/settings.json` then had
+// its config loaded and its `custom-command` run on every render. A relative
+// XDG_CONFIG_HOME did the same.
+describe("where loadSettings looks for the config (SEC-004)", () => {
+  beforeEach(() => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function lookedAt(): string {
+    loadSettings();
+    const calls = vi.mocked(fs.existsSync).mock.calls;
+    return String(calls[calls.length - 1]![0]);
+  }
+
+  it.each([
+    ["HOME is unset", undefined],
+    ["HOME is empty", ""],
+  ])("never looks under the working directory when %s", (_label, home) => {
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", undefined);
+
+    const configPath = lookedAt();
+    expect(path.isAbsolute(configPath)).toBe(true);
+    expect(configPath.split(path.sep)).not.toContain("~");
+  });
+
+  it("ignores a relative XDG_CONFIG_HOME", () => {
+    vi.stubEnv("HOME", "/home/u");
+    vi.stubEnv("XDG_CONFIG_HOME", ".config");
+
+    expect(lookedAt()).toBe(path.join("/home/u", ".config", "gccusage", "settings.json"));
+  });
 });

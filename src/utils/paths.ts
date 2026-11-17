@@ -40,10 +40,37 @@ export function shardKey(sessionId: string): string {
     : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
 
+/**
+ * An `XDG_*` base directory, or undefined when it is unset, empty or relative.
+ *
+ * The XDG Base Directory spec says a relative path in these variables is
+ * invalid and must be ignored. Honouring one resolved it against the launch
+ * directory, and for the config dir that meant a repo could commit
+ * `.config/gccusage/settings.json` and have its `custom-command` run on every
+ * render (SEC-004).
+ */
+function xdgBaseDir(name: "XDG_CACHE_HOME" | "XDG_CONFIG_HOME"): string | undefined {
+  const value = process.env[name];
+  return value && path.isAbsolute(value) ? value : undefined;
+}
+
 export function getCacheDir(): string {
-  const xdg = process.env["XDG_CACHE_HOME"];
+  const xdg = xdgBaseDir("XDG_CACHE_HOME");
   if (xdg) return path.join(xdg, "gccusage");
   return path.join(getHomeDir(), ".cache", "gccusage");
+}
+
+/**
+ * Lives here, beside `getCacheDir`, so both are built on `getHomeDir()`. It
+ * used to sit in config/loader.ts as `HOME || "~"`, which for an unset or
+ * empty HOME is the relative path `~/.config/gccusage`. That resolves against
+ * the cwd, so a repo committing that path had its config, and its
+ * `custom-command`, loaded and run (SEC-004, reproduced via clone).
+ */
+export function getConfigDir(): string {
+  const xdg = xdgBaseDir("XDG_CONFIG_HOME");
+  if (xdg) return path.join(xdg, "gccusage");
+  return path.join(getHomeDir(), ".config", "gccusage");
 }
 
 export function ensureDir(dir: string): void {

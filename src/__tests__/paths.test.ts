@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   findSessionJsonlFiles,
   getCacheDir,
+  getConfigDir,
   getClaudeDataDir,
   getProjectsDir,
   findTodayJsonlFileStats,
@@ -78,6 +79,67 @@ describe("home directory resolution", () => {
     process.env["XDG_CACHE_HOME"] = path.join(tmpHome, "xdg");
     expect(getCacheDir()).toBe(path.join(tmpHome, "xdg", "gccusage"));
   });
+
+  // SEC-004. The XDG Base Directory spec: "If an implementation encounters a
+  // relative path in any of these variables it should consider the path
+  // invalid and ignore it." Honouring it resolved against the cwd.
+  it.each([".cache", "~/.cache", "cache/../cache"])(
+    "ignores a relative XDG_CACHE_HOME (%j)",
+    (relative) => {
+      process.env["XDG_CACHE_HOME"] = relative;
+      const dir = getCacheDir();
+      expect(dir).toBe(path.join(tmpHome, ".cache", "gccusage"));
+      expect(dir).not.toBe(path.resolve(relative, "gccusage"));
+    },
+  );
+});
+
+// SEC-004. getConfigDir used `HOME || "~"`: with HOME unset or empty that is
+// a relative path, so a repo committing `~/.config/gccusage/settings.json`
+// had its config — and its custom-command — loaded from the launch directory.
+describe("getConfigDir", () => {
+  let originalXdgConfig: string | undefined;
+
+  beforeEach(() => {
+    originalXdgConfig = process.env["XDG_CONFIG_HOME"];
+    delete process.env["XDG_CONFIG_HOME"];
+  });
+
+  afterEach(() => {
+    if (originalXdgConfig === undefined) delete process.env["XDG_CONFIG_HOME"];
+    else process.env["XDG_CONFIG_HOME"] = originalXdgConfig;
+  });
+
+  it("is under HOME by default", () => {
+    expect(getConfigDir()).toBe(path.join(tmpHome, ".config", "gccusage"));
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])("is absolute, with no literal ~ segment, when HOME is %s", (_label, home) => {
+    if (home === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = home;
+
+    const dir = getConfigDir();
+    expect(path.isAbsolute(dir)).toBe(true);
+    expect(dir.split(path.sep)).not.toContain("~");
+  });
+
+  it("prefers an absolute XDG_CONFIG_HOME", () => {
+    process.env["XDG_CONFIG_HOME"] = path.join(tmpHome, "xdg");
+    expect(getConfigDir()).toBe(path.join(tmpHome, "xdg", "gccusage"));
+  });
+
+  it.each([".config", "~/.config", "config/../config"])(
+    "ignores a relative XDG_CONFIG_HOME (%j)",
+    (relative) => {
+      process.env["XDG_CONFIG_HOME"] = relative;
+      const dir = getConfigDir();
+      expect(dir).toBe(path.join(tmpHome, ".config", "gccusage"));
+      expect(dir).not.toBe(path.resolve(relative, "gccusage"));
+    },
+  );
 });
 
 describe("findSessionJsonlFiles", () => {

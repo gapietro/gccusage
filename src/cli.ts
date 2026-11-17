@@ -4,12 +4,11 @@ import { calculateCostByModel, calculateTotalCost } from "./data/cost-calculator
 import { formatDollars, formatTokens, formatModelName } from "./utils/format.js";
 import { readFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic, sweepStaleTempFiles } from "./utils/atomic-json.js";
 import { resolveStableNodePath } from "./utils/node-path.js";
 import { PREMIUM_PROMPT_THRESHOLD } from "./data/pricing-tiers.js";
-import { getCacheDir } from "./utils/paths.js";
+import { getCacheDir, getHomeDir } from "./utils/paths.js";
 import { VERSION } from "./version.js";
 import type { TokenMetrics } from "./types/token-metrics.js";
 
@@ -224,7 +223,10 @@ function removeLegacyTurnStore(): void {
 function runSetup(): void {
   // Resolve the absolute path to this script's dist/index.js
   const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
-  const settingsPath = resolve(homedir(), ".claude", "settings.json");
+  // getHomeDir(), not os.homedir(): the latter returns "" for HOME="", and
+  // resolve("", ".claude", …) would edit a settings.json in the cwd — the
+  // same relative-home class as SEC-004.
+  const settingsPath = resolve(getHomeDir(), ".claude", "settings.json");
 
   // Validate before writing anything at all: a refused file leaves no .bak
   // and no partial write.
