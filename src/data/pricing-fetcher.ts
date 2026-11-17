@@ -5,7 +5,13 @@ import {
   savePricingCache,
 } from "../cache/pricing-cache.js";
 import { FALLBACK_PRICING } from "./fallback-pricing.js";
-import { anchorToSnapshot, sanitiseModelPricing } from "./pricing-validation.js";
+import {
+  anchorToSnapshot,
+  createPricingTable,
+  isStorablePricingKey,
+  mergePricingTables,
+  sanitiseModelPricing,
+} from "./pricing-validation.js";
 import { TIER_FIELDS, CACHE_1H_FIELD, CACHE_1H_INPUT_MULTIPLIER } from "./pricing-tiers.js";
 
 export const LITELLM_URL =
@@ -47,10 +53,10 @@ export interface RenderPricing {
 export function getPricingForRender(ttlMs: number): RenderPricing {
   const entry = loadPricingCacheEntry();
   if (!entry || entry.ageMs >= MAX_STALE_MS) {
-    return { pricing: { ...FALLBACK_PRICING }, stale: true };
+    return { pricing: mergePricingTables(FALLBACK_PRICING), stale: true };
   }
   return {
-    pricing: { ...FALLBACK_PRICING, ...entry.data },
+    pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
     stale: entry.ageMs >= ttlMs,
   };
 }
@@ -144,7 +150,7 @@ function parseTier(model: Record<string, unknown>): RateSet | null {
 }
 
 export function parseLitellmPricing(data: Record<string, unknown>): PricingTable {
-  const table: PricingTable = {};
+  const table = createPricingTable();
 
   for (const [key, value] of Object.entries(data)) {
     if (!key.startsWith("claude-") || typeof value !== "object" || !value) continue;
@@ -184,9 +190,12 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
     const sane = sanitiseModelPricing(pricing);
     if (!sane) continue;
 
-    // Store with the raw key (e.g. "claude/claude-sonnet-4-20250514" and also the model id)
+    // Store with the raw key (e.g. "claude/claude-sonnet-4-20250514" and also the model id).
+    // The model id is whatever follows the last "/", so the feed chooses it
+    // outright: `claude-x/__proto__` yields `__proto__`. The raw key always
+    // starts with "claude-" and cannot be one of the unstorable names (SEC-005).
     const modelId = key.includes("/") ? key.split("/").pop()! : key;
-    table[modelId] = sane;
+    if (isStorablePricingKey(modelId)) table[modelId] = sane;
     if (key !== modelId) table[key] = sane;
   }
 
@@ -204,7 +213,7 @@ export function parseLitellmPricing(data: Record<string, unknown>): PricingTable
 export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
   // Try cache first
   const cached = loadPricingCache(ttlMs);
-  if (cached) return { ...FALLBACK_PRICING, ...cached };
+  if (cached) return mergePricingTables(FALLBACK_PRICING, cached);
 
   // Try fetching from LiteLLM
   try {
@@ -214,12 +223,12 @@ export async function fetchPricing(ttlMs: number): Promise<PricingTable> {
       const pricing = anchorToSnapshot(parseLitellmPricing(data));
       if (Object.keys(pricing).length > 0) {
         savePricingCache(pricing);
-        return { ...FALLBACK_PRICING, ...pricing };
+        return mergePricingTables(FALLBACK_PRICING, pricing);
       }
     }
   } catch {
     // network error, use fallback
   }
 
-  return { ...FALLBACK_PRICING };
+  return mergePricingTables(FALLBACK_PRICING);
 }

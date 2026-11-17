@@ -14,6 +14,45 @@ export const MAX_COST_PER_TOKEN = 1e-3;
  */
 export const MAX_SNAPSHOT_DEVIATION = 10;
 
+/**
+ * A pricing table is a dictionary keyed by the LiteLLM feed and by the cache
+ * file, so it has no prototype. As a plain `{}`, a feed key such as
+ * `claude-x/__proto__` (model id `__proto__`) made `table[id] = pricing`
+ * REPLACE the table's prototype rather than add an entry. Every reader uses
+ * `Object.hasOwn` (#143), which made that inert, but a guard on reads alone
+ * holds only while the next reader remembers it. With no prototype there is
+ * nothing for a key to reach: every assignment is an own data property
+ * (SEC-005).
+ */
+export function createPricingTable(): PricingTable {
+  return Object.create(null) as PricingTable;
+}
+
+/**
+ * Tables layered in order, later winning, into a fresh prototype-less table.
+ * `Object.assign`, not spread into `{}`: the result is itself a table, keyed
+ * by the cache, and is held to the same rule as the tables it merges.
+ */
+export function mergePricingTables(...tables: PricingTable[]): PricingTable {
+  return Object.assign(createPricingTable(), ...tables);
+}
+
+/**
+ * The names valibot's `v.record` silently drops when the cache is read
+ * (`_isValidObjectKey`). Dropped at the feed and on every cache-sourced table
+ * too, so a fetched table and its round-trip through `pricing.json` hold the
+ * same keys instead of diverging on the second read. No Claude model is named
+ * any of these. Keeping `__proto__` would also be unsafe in one place no
+ * prototype-less object can help: `npm run pricing` writes the parsed table
+ * out as a TypeScript object literal, where a `"__proto__":` key SETS the
+ * prototype of FALLBACK_PRICING (SEC-005).
+ */
+const UNSTORABLE_KEYS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
+
+export function isStorablePricingKey(key: string): boolean {
+  return !UNSTORABLE_KEYS.has(key);
+}
+
 const COST_KEYS = [
   "inputCostPerToken",
   "outputCostPerToken",
@@ -78,8 +117,9 @@ function isSaneTier(tier: unknown, base: RateSet): boolean {
  * an `above200k` block while keeping the entry it belonged to.
  */
 export function sanitisePricingTable(table: Record<string, unknown>): PricingTable {
-  const out: PricingTable = {};
+  const out = createPricingTable();
   for (const [key, value] of Object.entries(table)) {
+    if (!isStorablePricingKey(key)) continue;
     const pricing = sanitiseModelPricing(value);
     if (pricing) out[key] = pricing;
   }
@@ -104,7 +144,7 @@ export function anchorToSnapshot(
   table: PricingTable,
   snapshot: PricingTable = FALLBACK_PRICING,
 ): PricingTable {
-  const out: PricingTable = {};
+  const out = createPricingTable();
 
   for (const [key, value] of Object.entries(table)) {
     // Own keys only (#143): a feed key such as "claude-x/constructor" yields

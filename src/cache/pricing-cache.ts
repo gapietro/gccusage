@@ -33,6 +33,10 @@ export const PRICING_CACHE_VERSION = 2;
 // value: a missing or stale version is rejected here rather than merely
 // ignored, so a pre-upgrade cache degrades to FALLBACK_PRICING (which now
 // carries the tiers) instead of silently shadowing it.
+//
+// `v.record` silently drops the keys `__proto__`, `prototype` and
+// `constructor`; `parseLitellmPricing` drops the same three, so a fetched
+// table and its round-trip through this file agree (SEC-005).
 const PricingCacheSchema = v.object({
   version: v.literal(PRICING_CACHE_VERSION),
   timestamp: persistedTimestamp(),
