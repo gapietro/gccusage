@@ -681,3 +681,22 @@ describe("stored uncertainty: review follow-ups (COR-009)", () => {
     expect(r.uncertain).toBe(true);
   });
 });
+
+// From the #155/#156 review: a calculated total is the whole session's
+// transcript priced from the table, so it never restarts. It goes DOWN only
+// when prices change (a refresh replacing the bundled snapshot, say). Read as
+// a restart, that fold inflated Today by roughly the whole session cost.
+describe("a calculated total that falls (repricing)", () => {
+  it("keeps today's accrued spend instead of folding the old total in", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    recordDailyCost({ sessionId: "c", costUsd: 10, source: "calculated" }, now);
+    expect(recordDailyCost({ sessionId: "c", costUsd: 8, source: "calculated" }, now).totalUsd).toBeCloseTo(10);
+    expect(recordDailyCost({ sessionId: "c", costUsd: 8.5, source: "calculated" }, now).totalUsd).toBeCloseTo(10.5);
+  });
+
+  it("still treats a falling stdin total as a restarted process", () => {
+    const now = new Date(2026, 6, 29, 10, 0, 0);
+    recordDailyCost({ sessionId: "s", costUsd: 5, source: "stdin" }, now);
+    expect(recordDailyCost({ sessionId: "s", costUsd: 0.5, source: "stdin" }, now).totalUsd).toBeCloseTo(5.5);
+  });
+});

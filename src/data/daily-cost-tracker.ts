@@ -277,6 +277,13 @@ function nextEntry(
     // across a source switch is not a restart. Re-baseline so today's
     // accrued spend carries over unchanged into the new scale.
     entry.baselineUsd = costUsd - accruedToday;
+  } else if (costUsd < entry.costUsd && source === "calculated") {
+    // A calculated total is the whole session's transcript priced from the
+    // table, so it never restarts; it falls only when prices change (a
+    // refresh replacing the bundled snapshot, say). Re-baseline as for a
+    // source switch so today's accrued spend carries over unchanged. Read as
+    // a restart, the fold below inflated Today by roughly the whole session.
+    entry.baselineUsd = costUsd - accruedToday;
   } else if (costUsd < entry.costUsd) {
     // A restarted session reuses the ID with a reset cumulative cost
     // (cumulative cost never decreases within one process). Fold the

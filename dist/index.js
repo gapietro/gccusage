@@ -4426,7 +4426,8 @@ function nextEntry(prev, input, newBaseline, today, now) {
 	if (entry.source !== void 0 && entry.source !== source) {
 		if (prev.uncertain && prev.date === today) entry.uncertain = true;
 		entry.baselineUsd = costUsd - accruedToday;
-	} else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
+	} else if (costUsd < entry.costUsd && source === "calculated") entry.baselineUsd = costUsd - accruedToday;
+	else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
 	entry.costUsd = costUsd;
 	entry.source = source;
 	entry.updatedAt = now.getTime();
