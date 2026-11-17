@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { getCacheDir, shardKey } from "../utils/paths.js";
 import { writeJsonAtomic, readJsonValidated } from "../utils/atomic-json.js";
+import { localDateKey } from "../utils/local-date.js";
 
 export type CostSource = "stdin" | "calculated";
 
@@ -50,6 +51,16 @@ const ShardSchema = v.object({
   // fallback to 0 makes a rejected value read as infinitely stale instead, so
   // it is pruned on the next sweep (#130).
   updatedAt: v.fallback(v.pipe(v.number(), v.safeInteger()), 0),
+  // The Claude Code process this entry belongs to (COR-005), as its start
+  // time: `now - cost.total_duration_ms`. Absent for a payload without a
+  // duration and for every shard written before this field existed; those
+  // stay one entry per session, exactly as before.
+  processStart: v.fallback(v.optional(v.pipe(v.number(), v.safeInteger())), undefined),
+  // The cost was a lower bound (unpriced or approximated models), or this
+  // session's latest cost could not be recorded and `costUsd` is stale
+  // (COR-009). Stored so every session's Today: carries the marker, not only
+  // the bar of the session that knew.
+  uncertain: v.fallback(v.boolean(), false),
 });
 
 type SessionCostEntry = v.InferOutput<typeof ShardSchema>;
@@ -82,16 +93,19 @@ function getLegacyPath(): string {
  * Concurrent sessions therefore cannot clobber each other's entries — there
  * is no shared read-modify-write left to lose an update.
  */
-function shardPath(sessionId: string): string {
-  return path.join(getShardDir(), `${shardKey(sessionId)}.json`);
+function shardPath(sessionId: string, processStart?: number): string {
+  const suffix = processStart === undefined ? "" : `.p${processStart}`;
+  return path.join(getShardDir(), `${shardKey(sessionId)}${suffix}.json`);
 }
 
-function dateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+/**
+ * How far apart two computed starts of one process may be. `now -
+ * total_duration_ms` is exact in Claude Code but read here after the spawn and
+ * the stdin read, so each render lands a little later than the true start;
+ * the stdin deadline caps that at seconds. Two processes of one session
+ * started this close together is not a case worth splitting.
+ */
+const PROCESS_START_TOLERANCE_MS = 30_000;
 
 /**
  * Split a pre-shard `daily-costs.json` into per-session files, then remove it.
@@ -129,7 +143,7 @@ function migrateLegacyStore(now: Date): void {
   }
 
   const sessions = legacy?.sessions ?? [];
-  const date = legacy?.date ?? dateStr(now);
+  const date = legacy?.date ?? localDateKey(now);
 
   try {
     for (const sessionRaw of sessions) {
@@ -148,6 +162,7 @@ function migrateLegacyStore(now: Date): void {
         baselineUsd: s.baselineUsd,
         source: s.source,
         updatedAt: s.updatedAt ?? now.getTime(),
+        uncertain: false,
       };
       writeJsonAtomic(target, entry);
     }
@@ -209,16 +224,32 @@ function readEntries(now: Date): SessionCostEntry[] {
  */
 function nextEntry(
   prev: SessionCostEntry | undefined,
-  sessionId: string,
-  costUsd: number,
-  source: CostSource,
+  input: DailyCostInput & { sessionId: string },
+  newBaseline: number,
   today: string,
   now: Date,
 ): SessionCostEntry {
+  const { sessionId, costUsd, source, processStart } = input;
+  const uncertain = input.uncertain ?? false;
   if (!prev) {
-    return { sessionId, date: today, costUsd, baselineUsd: 0, source, updatedAt: now.getTime() };
+    return {
+      sessionId,
+      date: today,
+      costUsd,
+      baselineUsd: newBaseline,
+      source,
+      updatedAt: now.getTime(),
+      processStart,
+      uncertain,
+    };
   }
-  const entry = { ...prev };
+  // `processStart` stays the FIRST value seen. It names the shard file, so
+  // refining it (say, to the minimum, since each estimate is late by the
+  // spawn delay) would move the entry to a new file on every render that came
+  // in a little earlier and leave the old file behind, counted twice. The
+  // match tolerance absorbs the jitter, and comparing against a fixed value
+  // means it can't accumulate.
+  const entry = { ...prev, uncertain };
   if (entry.date !== today) {
     // New day: carry the session forward, resetting its baseline to the
     // last cumulative cost so only post-midnight spend counts as today's.
@@ -244,49 +275,149 @@ function nextEntry(
   return entry;
 }
 
+export interface DailyCostInput {
+  sessionId: string | undefined;
+  costUsd: number;
+  source: CostSource;
+  /** `now - cost.total_duration_ms`; omit when the payload has no duration. */
+  processStart?: number;
+  /** The cost is a lower bound (unpriced or approximated models). */
+  uncertain?: boolean;
+}
+
+export interface DailyCostResult {
+  totalUsd: number;
+  /**
+   * Today's total is not exact: some session's figure is a lower bound, or a
+   * session's latest cost could not be recorded (non-finite, an overflowing
+   * re-baseline, or an unwritable store) so its stored figure is stale.
+   */
+  uncertain: boolean;
+}
+
+/**
+ * The stored entry this render belongs to, and the baseline a new entry
+ * should start from.
+ *
+ * With a `processStart`, each Claude Code process gets its own entry (and its
+ * own shard file, so two processes never write the same file — the REL-001
+ * single-writer property holds per process). Keyed by session alone, two
+ * terminals on one session_id read every alternation between their
+ * independent cumulative costs as a restart and folded the other process's
+ * whole cost into Today each time (COR-005).
+ *
+ * A NEW process's baseline is the largest cost stored for this session that
+ * does not exceed its first figure, or 0. `--resume` restores the cumulative
+ * cost (Claude Code's cost tracker `restore()` loads the cost saved at the
+ * previous process's exit), so a resumed process's first figure is at least
+ * that process's stored cost, which is already counted in its own entry;
+ * baselining at the stored cost rather than at the first figure also keeps
+ * a turn that ran before the first render. A concurrently started fresh
+ * process reports less than the running one, matches nothing, and counts
+ * from 0, as a session's first process always has.
+ */
+function findEntry(
+  entries: SessionCostEntry[],
+  input: DailyCostInput & { sessionId: string },
+): { index: number; newBaseline: number } {
+  const { sessionId, processStart, costUsd } = input;
+  let newBaseline = 0;
+  for (const e of entries) {
+    if (e.sessionId === sessionId && e.costUsd <= costUsd && e.costUsd > newBaseline) {
+      newBaseline = e.costUsd;
+    }
+  }
+  if (processStart === undefined) {
+    const index = entries.findIndex((e) => e.sessionId === sessionId && e.processStart === undefined);
+    return { index, newBaseline: 0 };
+  }
+  let index = -1;
+  let best = Infinity;
+  entries.forEach((e, i) => {
+    if (e.sessionId !== sessionId || e.processStart === undefined) return;
+    const gap = Math.abs(e.processStart - processStart);
+    if (gap <= PROCESS_START_TOLERANCE_MS && gap < best) {
+      best = gap;
+      index = i;
+    }
+  });
+  return { index, newBaseline };
+}
+
 /**
  * Record the current session's cumulative cost and return today's total
- * across all sessions (spend since local midnight only).
+ * across all sessions (spend since local midnight only), with whether that
+ * total is exact.
  *
- * A non-finite `costUsd` is not recorded: the session's shard is left exactly
- * as it was and today's total uses its last good figure. Persisting it would
+ * A non-finite `costUsd` is not recorded: the cost itself is left exactly as
+ * it was and today's total uses its last good figure. Persisting it would
  * write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
  * rejects on the next read, silently dropping the session from every bar's
  * total and losing its baseline (#145). Ingestion rejects non-finite token
- * counts, but finite ones can still overflow once priced and summed, so this
- * guard is the one that holds at the storage boundary. The caller marks
- * today's figure uncertain in that case.
+ * counts, but finite ones can still overflow once priced and summed, and two
+ * finite stored values can differ by more than Number.MAX_VALUE, so the
+ * re-baseline arithmetic is checked on what would be written, not only on
+ * the argument. Either way the entry is re-stamped `uncertain`, so other
+ * sessions' bars mark the stale figure too (COR-009).
+ *
+ * The shard write is caught. It was the one render-path write that was not,
+ * so a root-owned or full cache directory threw into `main().catch()` and
+ * erased the bar on every render (REL-005). A failed write costs the store
+ * update and marks Today uncertain; this render's own figure is still exact.
  */
+export function recordDailyCost(input: DailyCostInput, now: Date = new Date()): DailyCostResult {
+  const today = localDateKey(now);
+  const entries = readEntries(now);
+  let notRecorded = false;
+
+  const { sessionId } = input;
+  if (sessionId) {
+    const keyed = { ...input, sessionId };
+    const { index, newBaseline } = findEntry(entries, keyed);
+    const prev = index === -1 ? undefined : entries[index];
+    const next = Number.isFinite(input.costUsd)
+      ? nextEntry(prev, keyed, newBaseline, today, now)
+      : undefined;
+
+    if (next && Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
+      if (index === -1) entries.push(next);
+      else entries[index] = next;
+      notRecorded = !tryWrite(next);
+    } else {
+      notRecorded = true;
+      if (prev && !prev.uncertain) {
+        const stale = { ...prev, uncertain: true };
+        entries[index] = stale;
+        tryWrite(stale);
+      }
+    }
+  }
+
+  let totalUsd = 0;
+  let uncertain = notRecorded;
+  for (const e of entries) {
+    if (e.date !== today) continue;
+    totalUsd += Math.max(0, e.costUsd - e.baselineUsd);
+    if (e.uncertain) uncertain = true;
+  }
+  return { totalUsd, uncertain };
+}
+
+function tryWrite(entry: SessionCostEntry): boolean {
+  try {
+    writeJsonAtomic(shardPath(entry.sessionId, entry.processStart), entry);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `recordDailyCost` for callers that need only the total. */
 export function trackDailyCost(
   sessionId: string | undefined,
   costUsd: number,
   source: CostSource,
   now: Date = new Date(),
 ): number {
-  const today = dateStr(now);
-  const entries = readEntries(now);
-
-  if (sessionId && Number.isFinite(costUsd)) {
-    const index = entries.findIndex((e) => e.sessionId === sessionId);
-    const prev = index === -1 ? undefined : entries[index];
-    const next = nextEntry(prev, sessionId, costUsd, source, today, now);
-    // The argument check above is not sufficient on its own: two finite stored
-    // values can differ by more than Number.MAX_VALUE, so the re-baseline
-    // arithmetic in `nextEntry` can still produce an infinite baseline, which
-    // would be written as null and read back as 0. Check what would actually
-    // be written, and on failure keep both the shard and the in-memory entry
-    // unchanged.
-    if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
-      if (index === -1) entries.push(next);
-      else entries[index] = next;
-      writeJsonAtomic(shardPath(sessionId), next);
-    }
-  }
-
-  let total = 0;
-  for (const e of entries) {
-    if (e.date !== today) continue;
-    total += Math.max(0, e.costUsd - e.baselineUsd);
-  }
-  return total;
+  return recordDailyCost({ sessionId, costUsd, source }, now).totalUsd;
 }
