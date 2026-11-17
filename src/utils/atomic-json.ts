@@ -124,6 +124,14 @@ export const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1000;
  * Symlinks are skipped, not followed: the cache directory is ours, but a link
  * inside it could point anywhere. Best-effort throughout — a sweep that cannot
  * finish just leaves the files for the next one.
+ *
+ * Known and accepted gap: a `setup` killed between open and rename leaves its
+ * `settings.json.<pid>.<n>.tmp` (or `.bak` temp) in `~/.claude`, or beside a
+ * symlink's target, and nothing sweeps those. `~/.claude` is Claude Code's
+ * directory, not ours, and `setup` is a rare, interactive command whose user
+ * is watching it — unlike the per-render cache writes this sweep exists for.
+ * Walking someone else's directory, or a dotfiles repo, to delete files by
+ * name pattern is a worse risk than an occasional stray temp file there.
  */
 export function sweepStaleTempFiles(dir: string): void {
   sweepDir(dir, Date.now(), 1);
