@@ -6,7 +6,7 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -21,7 +21,7 @@ import * as path from "node:path";
 import { dirname, resolve } from "node:path";
 import process$1 from "node:process";
 import * as os$1 from "node:os";
-import os, { homedir } from "node:os";
+import os from "node:os";
 import tty from "node:tty";
 import * as crypto from "node:crypto";
 import { createHash } from "node:crypto";
@@ -1692,14 +1692,130 @@ const DEFAULT_SETTINGS = {
 };
 
 //#endregion
-//#region src/config/loader.ts
-function getConfigDir() {
-	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
+//#region src/utils/paths.ts
+function getHomeDir() {
+	const home = os$1.homedir();
+	if (path$10.isAbsolute(home)) return home;
+	try {
+		const fromPasswd = os$1.userInfo().homedir;
+		if (path$10.isAbsolute(fromPasswd)) return fromPasswd;
+	} catch {}
+	return os$1.tmpdir();
 }
+function getClaudeDataDir() {
+	return path$10.join(getHomeDir(), ".claude");
+}
+function getProjectsDir() {
+	return path$10.join(getClaudeDataDir(), "projects");
+}
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+function shardKey(sessionId) {
+	return SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+}
+/**
+* An `XDG_*` base directory, or undefined when it is unset, empty or relative.
+*
+* The XDG Base Directory spec says a relative path in these variables is
+* invalid and must be ignored. Honouring one resolved it against the launch
+* directory, and for the config dir that meant a repo could commit
+* `.config/gccusage/settings.json` and have its `custom-command` run on every
+* render (SEC-004).
+*/
+function xdgBaseDir(name) {
+	const value = process.env[name];
+	return value && path$10.isAbsolute(value) ? value : void 0;
+}
+function getCacheDir() {
+	const xdg = xdgBaseDir("XDG_CACHE_HOME");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(getHomeDir(), ".cache", "gccusage");
+}
+/**
+* Lives here, beside `getCacheDir`, so both are built on `getHomeDir()`. It
+* used to sit in config/loader.ts as `HOME || "~"`, which for an unset or
+* empty HOME is the relative path `~/.config/gccusage`. That resolves against
+* the cwd, so a repo committing that path had its config, and its
+* `custom-command`, loaded and run (SEC-004, reproduced via clone).
+*/
+function getConfigDir() {
+	const xdg = xdgBaseDir("XDG_CONFIG_HOME");
+	if (xdg) return path$10.join(xdg, "gccusage");
+	return path$10.join(getHomeDir(), ".config", "gccusage");
+}
+/**
+* Create `dir`, and any missing parents, as 0700 (SEC-003). The cache holds
+* session ids and per-session spend, and at the umask default of 0755 any
+* local user could list and read them.
+*
+* The mode applies only to directories this call creates. One that already
+* exists — `~/.cache` itself, say — is the user's, and its mode is their
+* choice, so nothing here chmods it.
+*/
+function ensureDir(dir) {
+	if (!fs$6.existsSync(dir)) fs$6.mkdirSync(dir, {
+		recursive: true,
+		mode: 448
+	});
+}
+function findJsonlFiles(dir) {
+	if (!fs$6.existsSync(dir)) return [];
+	try {
+		return fs$6.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$10.join(dir, f));
+	} catch {
+		return [];
+	}
+}
+function findSessionJsonlFiles(sessionId) {
+	if (!sessionId) return [];
+	const projectsDir = getProjectsDir();
+	if (!fs$6.existsSync(projectsDir)) return [];
+	const files = [];
+	try {
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$10.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
+			if (!stat.isDirectory()) continue;
+			const jsonlFiles = findJsonlFiles(fullPath);
+			files.push(...jsonlFiles.filter((f) => path$10.basename(f, ".jsonl") === sessionId));
+		}
+	} catch {}
+	return files;
+}
+/**
+* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
+* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
+* pair, and re-statting to get it would double the syscalls the cache exists
+* to avoid.
+*/
+function findTodayJsonlFileStats() {
+	const projectsDir = getProjectsDir();
+	if (!fs$6.existsSync(projectsDir)) return [];
+	const todayStart = new Date();
+	todayStart.setHours(0, 0, 0, 0);
+	const todayMs = todayStart.getTime();
+	const files = [];
+	try {
+		for (const projectDir of fs$6.readdirSync(projectsDir)) {
+			const fullPath = path$10.join(projectsDir, projectDir);
+			const stat = fs$6.statSync(fullPath);
+			if (!stat.isDirectory()) continue;
+			for (const f of findJsonlFiles(fullPath)) {
+				const fstat = fs$6.statSync(f);
+				if (fstat.mtimeMs >= todayMs) files.push({
+					path: f,
+					mtimeMs: fstat.mtimeMs,
+					size: fstat.size
+				});
+			}
+		}
+	} catch {}
+	return files;
+}
+
+//#endregion
+//#region src/config/loader.ts
 function getConfigPath() {
-	return path$10.join(getConfigDir(), "settings.json");
+	return path$9.join(getConfigDir(), "settings.json");
 }
 /**
 * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
@@ -1746,10 +1862,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (!fs$5.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs$5.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -1769,10 +1885,18 @@ function loadSettings() {
 //#region src/config/error-line.ts
 const BOLD_RED = "\x1B[1;31m";
 const RESET$2 = "\x1B[0m";
-/** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
+/**
+* Collapse the home directory to `~` so the line stays short enough to read
+* at a glance.
+*
+* `getHomeDir()`, not raw `$HOME`: the path being shortened came from
+* `getConfigPath()`, which resolves home that way, so with HOME unset or
+* empty the two must agree on where home is or the path is never shortened
+* (SEC-004).
+*/
 function shortenPath(filePath) {
-	const home = process.env["HOME"];
-	if (!home || home === "/" || !filePath.startsWith(home)) return filePath;
+	const home = getHomeDir();
+	if (home === "/" || !filePath.startsWith(home)) return filePath;
 	return `~${filePath.slice(home.length)}`;
 }
 /**
@@ -1829,90 +1953,6 @@ function formatStdinReadError(error) {
 */
 function formatDeadline(ms) {
 	return ms < 1e3 ? `${ms}ms` : `${ms / 1e3}s`;
-}
-
-//#endregion
-//#region src/utils/paths.ts
-function getHomeDir() {
-	const home = os$1.homedir();
-	if (path$9.isAbsolute(home)) return home;
-	try {
-		const fromPasswd = os$1.userInfo().homedir;
-		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
-	} catch {}
-	return os$1.tmpdir();
-}
-function getClaudeDataDir() {
-	return path$9.join(getHomeDir(), ".claude");
-}
-function getProjectsDir() {
-	return path$9.join(getClaudeDataDir(), "projects");
-}
-const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
-function shardKey(sessionId) {
-	return SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-}
-function getCacheDir() {
-	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$9.join(xdg, "gccusage");
-	return path$9.join(getHomeDir(), ".cache", "gccusage");
-}
-function ensureDir(dir) {
-	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
-}
-function findJsonlFiles(dir) {
-	if (!fs$5.existsSync(dir)) return [];
-	try {
-		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
-	} catch {
-		return [];
-	}
-}
-function findSessionJsonlFiles(sessionId) {
-	if (!sessionId) return [];
-	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
-	const files = [];
-	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
-			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
-		}
-	} catch {}
-	return files;
-}
-/**
-* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
-* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
-* pair, and re-statting to get it would double the syscalls the cache exists
-* to avoid.
-*/
-function findTodayJsonlFileStats() {
-	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
-	const todayStart = new Date();
-	todayStart.setHours(0, 0, 0, 0);
-	const todayMs = todayStart.getTime();
-	const files = [];
-	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
-			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$5.statSync(f);
-				if (fstat.mtimeMs >= todayMs) files.push({
-					path: f,
-					mtimeMs: fstat.mtimeMs,
-					size: fstat.size
-				});
-			}
-		}
-	} catch {}
-	return files;
 }
 
 //#endregion
@@ -2165,13 +2205,29 @@ let counter = 0;
 * already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
 * a file the user reads and edits, so it keeps its 2-space indentation and
 * trailing newline rather than the compact encoding `writeJsonAtomic` emits.
+*
+* `mode`, when given, is the exact permission set the file ends up with. The
+* rename replaces the target's inode, so the target's own mode never survives
+* a write: without this the result is whatever the umask gives a new file,
+* and setup turned a 0600 settings.json holding `env` secrets into 0644
+* (SEC-003). It is applied to the temp file before the rename, so the target
+* is never visible with a wider mode, even briefly.
 */
-function writeFileAtomic(filePath, contents) {
+function writeFileAtomic(filePath, contents, mode) {
 	const dir = path$8.dirname(filePath);
 	ensureDir(dir);
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$3.writeFileSync(tmpPath, contents, "utf-8");
 	try {
+		if (mode === void 0) fs$3.writeFileSync(tmpPath, contents, "utf-8");
+		else {
+			fs$3.writeFileSync(tmpPath, contents, {
+				encoding: "utf-8",
+				mode
+			});
+			try {
+				fs$3.chmodSync(tmpPath, mode);
+			} catch {}
+		}
 		fs$3.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
@@ -2181,15 +2237,73 @@ function writeFileAtomic(filePath, contents) {
 	}
 }
 /**
+* The exact shape of the temp names `writeFileAtomic` generates —
+* `<target>.<pid>.<counter>.tmp` — so the sweep cannot touch a user's own
+* `notes.tmp` or anything else that merely ends in `.tmp`.
+*/
+const TEMP_FILE_PATTERN = /\.\d+\.\d+\.tmp$/;
+/**
+* Old enough that no live write can still own the file. A write is one
+* `writeFileSync` and one `rename` of a few KB; an hour is many orders of
+* magnitude past that, so a younger temp file is left alone in case another
+* process is mid-write to it.
+*/
+const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1e3;
+/**
+* Remove orphaned `writeFileAtomic` temp files from `dir` and its immediate
+* subdirectories (the cache keeps targets in `daily/` and `blocks/` as well as
+* at the root, and an orphan lands beside its target).
+*
+* Moving the write into the try stops a failed write leaking one, but nothing
+* in-process can clean up after a SIGKILL between open and rename — the real
+* cache held one from October when REL-008 was found. So this sweeps after the
+* fact.
+*
+* Not called on the render path: it is a directory walk, and renders are the
+* one place this tool has a latency budget. Its caller is the detached
+* `refresh-pricing` child, which is already off the render path and already
+* rate-limited — it runs only when pricing is stale, and at most once per
+* refresh backoff — so the walk costs nothing a user waits for, and an orphan
+* lives about a day at worst.
+*
+* Symlinks are skipped, not followed: the cache directory is ours, but a link
+* inside it could point anywhere. Best-effort throughout — a sweep that cannot
+* finish just leaves the files for the next one.
+*/
+function sweepStaleTempFiles(dir) {
+	sweepDir(dir, Date.now(), 1);
+}
+function sweepDir(dir, now, depthLeft) {
+	let names;
+	try {
+		names = fs$3.readdirSync(dir);
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const full = path$8.join(dir, name);
+		try {
+			const stat = fs$3.lstatSync(full);
+			if (stat.isDirectory()) {
+				if (depthLeft > 0) sweepDir(full, now, depthLeft - 1);
+			} else if (stat.isFile() && TEMP_FILE_PATTERN.test(name) && now - stat.mtimeMs > STALE_TEMP_FILE_AGE_MS) fs$3.unlinkSync(full);
+		} catch {}
+	}
+}
+/**
 * Write JSON to `filePath` so that readers see either the previous contents
 * or the new ones, never a partial file: serialise into a uniquely named
 * sibling, then rename it over the target. Same directory means same
 * filesystem, which is what makes the rename atomic.
 *
 * Throws on failure; callers keep whatever error posture they already have.
+*
+* Always 0600: every caller is a cache file under `getCacheDir()` — session
+* ids, per-session spend, transcript-derived aggregates — and nobody but the
+* user needs to read them (SEC-003).
 */
 function writeJsonAtomic(filePath, data) {
-	writeFileAtomic(filePath, JSON.stringify(data));
+	writeFileAtomic(filePath, JSON.stringify(data), 384);
 }
 /**
 * Read a JSON file and validate it, or get nothing. Every cache file in this
@@ -2927,6 +3041,9 @@ function maybeSpawnPricingRefresh(stale) {
 		const child = spawn(process.execPath, [entry, "refresh-pricing"], {
 			detached: true,
 			stdio: "ignore"
+		});
+		child.on("error", (err) => {
+			if (process.env["GCCUSAGE_DEBUG"]) console.error("gccusage: pricing refresher failed to spawn —", err.message);
 		});
 		child.unref();
 	} catch {}
@@ -4830,8 +4947,17 @@ function tokensUntilCompact(usedTokens, windowSize) {
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = .7;
 const THRESHOLD_DANGER = .9;
+/**
+* The ratio is clamped to [0, 1] for the bar only. Claude Code's percentages
+* are not bounded to 0..100 — an exact-token payload can report 105% used, or
+* 106% remaining — and from 1.05 up (or -0.06 down) the rounded fill leaves
+* `BAR_WIDTH - filled` negative, where `String.repeat` throws a RangeError
+* that erased the whole bar (REL-007). The percentage text beside the bar is
+* left unclamped: an over-full window is what was reported, and worth seeing.
+*/
 function buildBar(ratio) {
-	const filled = Math.round(ratio * BAR_WIDTH);
+	const clamped = Math.min(1, Math.max(0, ratio));
+	const filled = Math.round(clamped * BAR_WIDTH);
 	const empty = BAR_WIDTH - filled;
 	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
@@ -5848,11 +5974,8 @@ function shouldCompact(settings, terminalWidth) {
 function collectWidgets(configs, context) {
 	const results = [];
 	for (const config of configs) {
-		const widget = getWidget(config.type);
-		if (!widget) continue;
-		const output = widget.render(context, config);
-		if (!output) continue;
-		const sanitized = sanitizeOutput(output);
+		const sanitized = renderWidget(config, context);
+		if (!sanitized) continue;
 		if (isSeparatorOutput(sanitized)) continue;
 		results.push({
 			output: sanitized,
@@ -5860,6 +5983,34 @@ function collectWidgets(configs, context) {
 		});
 	}
 	return results;
+}
+/**
+* One widget's sanitised output, or null when it has nothing to show — or when
+* it threw. The single place both layouts call a widget from.
+*
+* Containment is per widget. A throw used to propagate out of
+* `renderStatusline`, where `main().catch()` swallowed it and the WHOLE bar
+* was erased: `"-".repeat(-1)` in context-percent on an over-100% payload cost
+* the model, the cost and everything else on both lines (REL-007). This is the
+* general form of #141's colour guard, which closed one way a widget could take
+* the bar down; this closes the rest. `sanitizeOutput` sits inside the guard
+* because it is the first thing to touch what the widget returned, and a
+* malformed return is the same failure as a throw.
+*
+* Logged under `GCCUSAGE_DEBUG`, the gate `main()` uses, because before this
+* the error reached stderr through that handler. Containing it must not also
+* make it undiagnosable.
+*/
+function renderWidget(config, context) {
+	const widget = getWidget(config.type);
+	if (!widget) return null;
+	try {
+		const output = widget.render(context, config);
+		return output ? sanitizeOutput(output) : null;
+	} catch (err) {
+		if (process.env["GCCUSAGE_DEBUG"]) console.error(`gccusage: widget "${config.type}" failed —`, err instanceof Error ? err.stack ?? err.message : String(err));
+		return null;
+	}
 }
 function renderLine(outputs, settings, context, flex) {
 	const powerline = settings.powerline;
@@ -5922,11 +6073,8 @@ function renderFull(context, settings) {
 	for (const lineConfig of settings.lines) {
 		const outputs = [];
 		for (const widgetConfig of lineConfig.widgets) {
-			const widget = getWidget(widgetConfig.type);
-			if (!widget) continue;
-			const output = widget.render(context, widgetConfig);
-			if (!output) continue;
-			outputs.push(sanitizeOutput(output));
+			const output = renderWidget(widgetConfig, context);
+			if (output) outputs.push(output);
 		}
 		const cleaned = cleanSeparators(outputs);
 		if (cleaned.length === 0) continue;
@@ -6221,6 +6369,7 @@ async function runCli(args) {
 			console.log(VERSION);
 			break;
 		case "refresh-pricing":
+			sweepStaleTempFiles(getCacheDir());
 			await refreshPricing();
 			break;
 		default:
@@ -6329,19 +6478,61 @@ function removeLegacyTurnStore() {
 		});
 	} catch {}
 }
+/** Owner read/write only: for files that may hold `env` secrets. */
+const PRIVATE_FILE_MODE = 384;
+/**
+* The file a write to `settingsPath` should actually replace.
+*
+* `writeFileAtomic` renames a temp file over its target, and a rename over a
+* symlink replaces the link, not the file it points to. Dotfiles managers
+* link `~/.claude/settings.json` into a repo, so setup was silently turning
+* that link into a detached regular file (SEC-003). Writing to the resolved
+* path keeps the link and updates the file the user actually manages.
+*
+* Only the write is redirected. Reads, error messages and the `.bak` stay on
+* the logical path: it is the one the user knows, and a backup beside the
+* real target could land inside their dotfiles repo.
+*
+* A dangling link (its target does not exist yet) is followed one level, so
+* setup creates the file the link names rather than replacing the link.
+*/
+function resolveWriteTarget(settingsPath) {
+	try {
+		return realpathSync(settingsPath);
+	} catch {}
+	try {
+		if (lstatSync(settingsPath).isSymbolicLink()) return resolve(dirname(settingsPath), readlinkSync(settingsPath));
+	} catch {}
+	return settingsPath;
+}
+/**
+* The permission bits `target` already has, so a rewrite does not change them,
+* or 0600 for a file setup is creating. settings.json often carries `env`
+* secrets, and the atomic writer's temp file would otherwise take the umask
+* default: 0600 came back as 0644 (SEC-003). Preserved rather than forced to
+* 0600, because a user who chose a mode for their own file chose it.
+*/
+function existingModeOr(target) {
+	try {
+		return statSync(target).mode & 511;
+	} catch {
+		return PRIVATE_FILE_MODE;
+	}
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
-	const settingsPath = resolve(homedir(), ".claude", "settings.json");
+	const settingsPath = resolve(getHomeDir(), ".claude", "settings.json");
 	const existing = readExistingSettings(settingsPath);
 	const settings = existing?.settings ?? {};
-	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw);
+	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw, PRIVATE_FILE_MODE);
 	const node = resolveStableNodePath();
 	const command = buildStatusLineCommand(node.path, scriptPath);
 	settings["statusLine"] = {
 		type: "command",
 		command
 	};
-	writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	const target = resolveWriteTarget(settingsPath);
+	writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 	removeLegacyTurnStore();
 	console.log("gccusage setup complete!\n");
 	console.log(`  Settings: ${settingsPath}`);
