@@ -62,7 +62,7 @@ export function buildConfigJsonSchema(): Record<string, unknown> {
                       "Background color: a named color or #rgb/#rrggbb hex (ansi256 is not supported — see issue #42)",
                   },
                   icon: { type: "string", description: "Icon prefix" },
-                  format: { type: "string", description: "Custom format string" },
+                  format: { type: "string", description: "Reserved: accepted but currently ignored by every widget" },
                   command: { type: "string", description: "Shell command (custom-command widget)" },
                   text: { type: "string", description: "Static text (custom-text widget)" },
                   separator: { type: "string", description: "Separator string (separator widget)" },
@@ -119,7 +119,7 @@ export function buildConfigJsonSchema(): Record<string, unknown> {
             enum: [...COMPACT_MODES],
             default: compact.mode,
             description:
-              "auto compacts only when the rendered bar exceeds threshold and the terminal width is known",
+              "auto compacts when the terminal is narrower than threshold columns and its width is known",
           },
           threshold: {
             type: "number",
