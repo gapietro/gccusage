@@ -348,6 +348,8 @@ describe("the today-aggregate cache with subagent transcripts (COR-007)", () => 
             size: stat.size,
             byModel: [["test-model", mainMetrics]],
             totals: mainMetrics,
+            firstTimestamp: null,
+            humanTurns: 0,
           },
         },
       }),

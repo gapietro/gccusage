@@ -1,9 +1,7 @@
 import type { StatusJson } from "../types/status-json.js";
 import type { Settings } from "../config/schema.js";
 import type { RenderContext } from "../types/render-context.js";
-import { findSessionJsonlFiles } from "../utils/paths.js";
-import { parseJsonlFile } from "./jsonl-reader.js";
-import { aggregateTokens, getFirstTimestamp, countHumanTurns } from "./token-aggregator.js";
+import { getSessionAggregate } from "../cache/session-aggregate-cache.js";
 import { detectBlock } from "./block-tracker.js";
 import { getPricingForRender } from "./pricing-fetcher.js";
 import { maybeSpawnPricingRefresh } from "./pricing-refresh.js";
@@ -34,13 +32,12 @@ export async function buildRenderContext(
   stdin: StatusJson,
   settings: Settings,
 ): Promise<RenderContext> {
-  // Read this session's transcript. Today's transcripts are read further down,
-  // and only when `costSource` is "calculated" — the sole setting that
-  // consumes them (#94).
-  const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-  const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-
-  const metrics = aggregateTokens(sessionEntries);
+  // Read this session's transcripts: the main one and its subagents'
+  // (COR-007), each file's aggregate cached so only live files are
+  // re-parsed. Today's transcripts are read further down, and only when
+  // `costSource` is "calculated" — the sole setting that consumes them (#94).
+  const sessionAggregate = getSessionAggregate(stdin.session_id);
+  const metrics = sessionAggregate.metrics;
 
   // Get pricing — cache-or-fallback only. Refreshing happens in a detached
   // child so the bar never waits on the network (#84).
@@ -107,7 +104,7 @@ export async function buildRenderContext(
       : !Number.isFinite(sessionCostUsd);
 
   // Session timing
-  const sessionStartTime = getFirstTimestamp(sessionEntries);
+  const sessionStartTime = sessionAggregate.sessionStartTime;
 
   // Block detection
   const block = detectBlock(sessionStartTime);
@@ -155,9 +152,9 @@ export async function buildRenderContext(
     // which is neither a turn nor a render (#129). On a cache hit nothing here
     // runs at all — the previously rendered string is replayed — so the point
     // is not that the count is recomputed then, but that it is no longer
-    // perturbed by how often the cache missed. Costs nothing: `sessionEntries`
-    // is already in memory for `aggregateTokens` above.
-    turnCount: countHumanTurns(sessionEntries),
+    // perturbed by how often the cache missed. Costs nothing: it is counted
+    // per file alongside the tokens, and cached with them.
+    turnCount: sessionAggregate.turnCount,
     alerts: {
       sessionWarn: settings.alerts?.sessionWarn ?? 5,
       sessionDanger: settings.alerts?.sessionDanger ?? 15,
