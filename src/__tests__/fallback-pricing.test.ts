@@ -24,7 +24,8 @@ const TABLE_PATH = path.resolve(HERE, "../data/fallback-pricing.ts");
  *
  * The generator lives here rather than in `scripts/` so it can import the real
  * `parseLitellmPricing`. A plain-Node script cannot: `src/` uses `.js`
- * specifiers that only the bundler and vitest resolve (CLAUDE.md), so a
+ * specifiers that only the bundler and vitest resolve (plain Node throws
+ * ERR_MODULE_NOT_FOUND; see the header of scripts/concurrency-harness.ts), so a
  * `scripts/` generator would have to reimplement the parser and could then
  * parse the feed differently from the online path — the one thing this file
  * exists to prevent.
