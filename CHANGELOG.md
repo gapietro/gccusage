@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-18
+
 Remediation of the 2026-11-16 audit (see AUDIT.md).
 
 ### Added
@@ -207,7 +209,8 @@ they spun off. The ones that changed user-visible behaviour:
 - Windows is not supported. `setup` writes a POSIX shell string and the Node
   path resolver does not handle `.exe`.
 
-[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/gapietro/gccusage/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/gapietro/gccusage/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/gapietro/gccusage/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/gapietro/gccusage/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/gapietro/gccusage/releases/tag/v1.0.0
