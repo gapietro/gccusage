@@ -24,10 +24,11 @@ import { afterAll, beforeAll } from "vitest";
  *
  * Scoped by `useGitFixtureTimeout`, never set at import: a first version set
  * it when its module loaded, which raised the deadline for EVERY test in an
- * importing file. Several `renderer.test.ts` tests render the default layout
- * with no `cwd`, so their git widgets incidentally run against the checkout
- * itself, on Vitest's 5s default; with git slowed to 2.5s per call they went
- * from passing under the 2s production cap to timing out under 20s.
+ * importing file. At the time, several `renderer.test.ts` tests rendered the
+ * default layout with no `cwd`, so their git widgets incidentally ran against
+ * the checkout itself, on Vitest's 5s default; with git slowed to 2.5s per
+ * call they went from passing under the 2s production cap to timing out under
+ * 20s. (Those tests now render a git-free layout, #148.)
  */
 export const GIT_FIXTURE_TIMEOUT_MS = 20_000;
 

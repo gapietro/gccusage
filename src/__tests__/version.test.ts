@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { VERSION } from "../version.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ describe.skipIf(!distExists)("version and help flags against the shipped bundle"
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gccusage-version-"));
     try {
       const r = spawnSync(process.execPath, [DIST, ...args], {
-        env: { ...process.env, HOME: dir, XDG_CACHE_HOME: path.join(dir, "cache") },
+        env: isolatedEnv(dir),
         encoding: "utf8",
       });
       return { status: r.status, stdout: r.stdout, stderr: r.stderr };

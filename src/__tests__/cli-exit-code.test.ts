@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +24,7 @@ afterEach(() => {
 
 function runSetupProcess(): { status: number | null; stderr: string; stdout: string } {
   const result = spawnSync(process.execPath, [DIST, "setup"], {
-    env: { ...process.env, HOME: dir },
+    env: isolatedEnv(dir),
     encoding: "utf8",
   });
   return { status: result.status, stderr: result.stderr, stdout: result.stdout };

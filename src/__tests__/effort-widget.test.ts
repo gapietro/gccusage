@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as v from "valibot";
 import type { RenderContext } from "../types/render-context.js";
+import { makeContext } from "./fixtures/render-context.js";
 import { StatusJsonSchema } from "../types/status-json.js";
 import { effortWidget } from "../widgets/effort.js";
 import { getWidget } from "../widgets/registry.js";
@@ -13,37 +14,6 @@ import {
   EFFORT_MEDIUM,
   EFFORT_XHIGH,
 } from "../widgets/alert-colors.js";
-
-function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
-  return {
-    stdin: { model: "claude-sonnet-4-20250514" },
-    metrics: {
-      byModel: new Map(),
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheCreation1hTokens: 0,
-        cacheReadTokens: 0,
-      },
-    },
-    block: null,
-    burnRate: null,
-    pricing: {},
-    sessionCostUsd: 0,
-    todayCostUsd: 0,
-    costByModel: new Map(),
-    unpricedModels: [],
-    approximatedModels: [],
-    sessionCostUncertain: false,
-    todayCostUncertain: false,
-    sessionStartTime: null,
-    terminalWidth: 120,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: 0,
-    ...overrides,
-  };
-}
 
 const withEffort = (level: unknown) =>
   makeContext({ stdin: { model: "claude-opus-5-5", effort: { level } } as RenderContext["stdin"] });

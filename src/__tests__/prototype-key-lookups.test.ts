@@ -96,31 +96,52 @@ describe("calculateCostByModel (#143)", () => {
 });
 
 describe("calculateBurnRate (#143)", () => {
-  it.each(PROTOTYPE_KEYS)("drops the rate for stdin model id %j rather than rendering NaN", (key) => {
-    const rate = calculateBurnRate(
-      metrics(1_000_000, 0),
-      Date.now() - 30 * 60_000,
-      { "claude-opus-4-6": RATES },
-      key,
-    );
-    expect(rate).toBeNull();
+  // Before COR-008 this looked up the STDIN model id and priced the session at
+  // its rate, so a prototype-key id was a lookup to guard; the pinned
+  // contract was "no segment rather than NaN". The rate now divides the
+  // per-model session cost, and the stdin id no longer reaches it. The model
+  // ids that still do are the transcript's, through calculateCostByModel.
+  it.each(PROTOTYPE_KEYS)(
+    "rates only the priced part when transcript model %j is a prototype key, never NaN",
+    (key) => {
+      const session = calculateCostByModel(
+        new Map([
+          ["claude-opus-4-6", metrics(1_000_000, 0)],
+          [key, metrics(1_000_000, 0)],
+        ]),
+        { "claude-opus-4-6": RATES },
+      );
+      const rate = calculateBurnRate(session, Date.now() - 30 * 60_000);
+      // $5.00 of opus over half an hour; the key's tokens are unpriced.
+      expect(rate!.costPerHour).toBeCloseTo(10, 2);
+    },
+  );
+
+  it.each(PROTOTYPE_KEYS)("drops the rate when prototype key %j is the only model", (key) => {
+    const session = calculateCostByModel(new Map([[key, metrics(1_000_000, 0)]]), {
+      "claude-opus-4-6": RATES,
+    });
+    expect(calculateBurnRate(session, Date.now() - 30 * 60_000)).toBeNull();
   });
 });
 
 describe("a __proto__ key in pricing JSON (#143 item 3)", () => {
-  // `JSON.parse` keeps `"__proto__"` as an own key; assigning it onto the
-  // plain object `sanitisePricingTable` builds replaces that object's
-  // prototype instead of adding an entry. Local to the one object — nothing
-  // global is polluted — and with own-key lookups nothing inherited from the
-  // swapped prototype is reachable as a price.
+  // `JSON.parse` keeps `"__proto__"` as an own key. Assigned onto the plain
+  // object `sanitisePricingTable` used to build, it replaced that object's
+  // prototype instead of adding an entry: local to the one object, and with
+  // own-key lookups nothing inherited was reachable as a price. Since SEC-005
+  // the table has no prototype and the key is dropped (see
+  // pricing-table-prototype.test.ts); the read-side tests below still hold.
   const cached = JSON.parse(
     JSON.stringify({ "claude-opus-4-6": RATES }).replace("{", `{"__proto__":${JSON.stringify(RATES)},`),
   ) as Record<string, unknown>;
 
   it("builds the fixture it claims to (control)", () => {
     expect(Object.hasOwn(cached, "__proto__")).toBe(true);
+    // Was `not.toBe(Object.prototype)`, which recorded the prototype swap;
+    // SEC-005 makes the stronger claim: there is no prototype to swap.
     const table = sanitisePricingTable(cached);
-    expect(Object.getPrototypeOf(table)).not.toBe(Object.prototype);
+    expect(Object.getPrototypeOf(table)).toBeNull();
   });
 
   it("does not pollute Object.prototype", () => {

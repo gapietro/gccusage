@@ -2,11 +2,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildRenderContext } from "../data/pipeline.js";
+import { buildRenderContext, processStartOf } from "../data/pipeline.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import type { Settings } from "../config/schema.js";
 import type { StatusJson } from "../types/status-json.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
+import { noPasswd } from "./helpers/no-passwd.js";
+import { localDateKey } from "../utils/local-date.js";
+
+vi.mock("node:os", async (importOriginal) =>
+  (await import("./helpers/no-passwd.js")).mockOsModule(importOriginal),
+);
 
 // Pricing normally comes from the network; pin it so calculated costs are
 // exact. Everything else (transcripts, the daily cost store) runs for real
@@ -62,14 +68,6 @@ function shardPath(sessionId: string): string {
 
 function readShard(sessionId: string): unknown {
   return JSON.parse(fs.readFileSync(shardPath(sessionId), "utf-8"));
-}
-
-// The tracker keys its file on the local date, not UTC.
-function localToday(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 function writeTranscript(sessionId: string): void {
@@ -227,7 +225,7 @@ describe("buildRenderContext today cost", () => {
     fs.mkdirSync(shardDir(), { recursive: true });
     const seeded = {
       sessionId: "session-b",
-      date: localToday(),
+      date: localDateKey(new Date()),
       costUsd: 4.0,
       baselineUsd: 0,
       source: "stdin",
@@ -493,7 +491,10 @@ describe("non-finite calculated session cost (#145)", () => {
 
     expect(Number.isFinite(context.sessionCostUsd)).toBe(false);
     expect(context.todayCostUncertain).toBe(true);
-    expect(fs.existsSync(shardPath("session-overflow"))).toBe(false);
+    // A finite, uncertain placeholder (COR-009), never a null cost (#145).
+    const raw = fs.readFileSync(shardPath("session-overflow"), "utf8");
+    expect(raw).not.toContain("null");
+    expect(JSON.parse(raw)).toMatchObject({ costUsd: 0, uncertain: true });
   });
 
   it("leaves Today: certain when stdin supplied the session cost", async () => {
@@ -510,6 +511,32 @@ describe("non-finite calculated session cost (#145)", () => {
     expect(context.sessionCostUsd).toBe(4.2);
     expect(context.todayCostUncertain).toBe(false);
     expect(context.todayCostUsd).toBeCloseTo(4.2);
+  });
+});
+
+// SEC-004, review of #154. With no cache dir there is no daily store, so the
+// tracker can only report this session's spend — which is not "today", and
+// must not be shown as if it were.
+describe("no daily store (SEC-004)", () => {
+  it("marks Today: uncertain and reports this session's spend", async () => {
+    // HOME and XDG_CACHE_HOME are restored by the file's afterEach.
+    const originalTmpdir = process.env["TMPDIR"];
+    delete process.env["XDG_CACHE_HOME"];
+    process.env["HOME"] = "";
+    process.env["TMPDIR"] = tmpDir;
+    noPasswd.on = true;
+    try {
+      const context = await buildRenderContext(
+        { session_id: "session-a", cost: { total_cost_usd: 4.2 } },
+        settingsWith("auto"),
+      );
+      expect(context.todayCostUsd).toBe(4.2);
+      expect(context.todayCostUncertain).toBe(true);
+    } finally {
+      noPasswd.on = false;
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+    }
   });
 });
 
@@ -585,5 +612,28 @@ describe("today's transcripts are read only when they are used (#94)", () => {
     // "does read them under costSource calculated" above, since both calls
     // to buildRenderContext see the same three today-dated transcripts.
     expect(ctx.todayCostUsd).toBeCloseTo(2.2, 6);
+  });
+});
+
+describe("processStartOf (COR-005)", () => {
+  const NOW = 1_800_000_000_000;
+  const at = (total_duration_ms: unknown) =>
+    processStartOf({ cost: { total_cost_usd: 1, total_duration_ms } } as StatusJson, NOW);
+
+  it("is now minus the payload's duration", () => {
+    expect(at(60_000)).toBe(NOW - 60_000);
+  });
+  it.each([
+    ["missing", undefined],
+    ["negative", -1],
+    ["longer than the clock itself", NOW + 1],
+    ["non-finite", Infinity],
+  ])("is undefined for a %s duration", (_label, d) => {
+    expect(at(d)).toBeUndefined();
+  });
+  // A start ShardSchema would reject on read (v.safeInteger) must never be
+  // written: it read back as undefined and grew a new entry every render.
+  it("is undefined when the start would not be a safe integer", () => {
+    expect(processStartOf({ cost: { total_cost_usd: 1, total_duration_ms: 1 } } as StatusJson, 2 ** 60)).toBeUndefined();
   });
 });

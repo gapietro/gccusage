@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { customCommandWidget } from "../widgets/custom-command.js";
-import type { RenderContext } from "../types/render-context.js";
+import { makeContext } from "./fixtures/render-context.js";
 import type { WidgetConfig } from "../config/schema.js";
 
 const tmpdirs: string[] = [];
@@ -24,36 +24,6 @@ function countingCommand(): string {
   tmpdirs.push(dir);
   const counter = path.join(dir, "counter");
   return `printf x >> '${counter}'; wc -c < '${counter}' | tr -d ' '`;
-}
-
-function makeContext(): RenderContext {
-  return {
-    stdin: { model: "claude-sonnet-4-20250514" },
-    metrics: {
-      byModel: new Map(),
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheCreation1hTokens: 0,
-        cacheReadTokens: 0,
-      },
-    },
-    block: null,
-    burnRate: null,
-    pricing: {},
-    sessionCostUsd: 0,
-    todayCostUsd: 0,
-    costByModel: new Map(),
-    unpricedModels: [],
-    approximatedModels: [],
-    sessionCostUncertain: false,
-    todayCostUncertain: false,
-    sessionStartTime: null,
-    terminalWidth: 120,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: 0,
-  };
 }
 
 function renderTwice(config: WidgetConfig): [string | undefined, string | undefined] {

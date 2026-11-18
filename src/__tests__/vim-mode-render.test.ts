@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * #141 through the shipped bundle. A `vim.mode` naming an `Object.prototype`
@@ -59,9 +60,7 @@ function render(mode: string): string {
     cwd: dir,
     input: payload,
     env: {
-      ...process.env,
-      HOME: dir,
-      XDG_CONFIG_HOME: path.join(dir, "config"),
+      ...isolatedEnv(dir),
       ...refresher.env,
       COLUMNS: "200",
     },

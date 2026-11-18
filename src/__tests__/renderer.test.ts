@@ -8,43 +8,27 @@ import { stripAnsi, visibleLength } from "../utils/terminal.js";
 import { makeDeterministicGitRepo } from "./fixtures/git-repo-fixture.js";
 import { GIT_FIXTURE_TEST_TIMEOUT_MS, useGitFixtureTimeout } from "./fixtures/git-deadline.js";
 import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+import { allowContainedWidgetErrors } from "./helpers/contained-widget-errors.js";
+import { makeContext as baseContext } from "./fixtures/render-context.js";
 
 // Rendered in-process, so git widgets would run git in the checkout this suite
 // runs from (#148). None of these tests asserts on git.
 const RENDER_SETTINGS = gitFreeDefaultSettings();
 
+// The shared fixture with this file's own defaults: a stdin-sourced session
+// cost and a nonzero today figure, so the cost segments render, on an
+// 80-column terminal.
 function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
-  return {
+  return baseContext({
     stdin: {
       model: "claude-sonnet-4-20250514",
       cost: { total_cost_usd: 2.45 },
     },
-    metrics: {
-      byModel: new Map(),
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheCreation1hTokens: 0,
-        cacheReadTokens: 0,
-      },
-    },
-    block: null,
-    burnRate: null,
-    pricing: {},
     sessionCostUsd: 2.45,
     todayCostUsd: 18.72,
-    costByModel: new Map(),
-    unpricedModels: [],
-    approximatedModels: [],
-    sessionCostUncertain: false,
-    todayCostUncertain: false,
-    sessionStartTime: null,
     terminalWidth: 80,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: 0,
     ...overrides,
-  };
+  });
 }
 
 function makeSettings(overrides: Partial<Settings> = {}): Settings {
@@ -1211,5 +1195,82 @@ describe("a widget returning a non-string colour (#141)", () => {
     const visible = stripAnsi(bar);
     expect(visible).toContain("vimseg");
     expect(visible).toContain("Sonnet");
+  });
+});
+
+// REL-007. A widget whose render throws used to propagate out of
+// renderStatusline; main().catch() swallowed it and the WHOLE bar was erased —
+// one bad segment cost every other one. The thrower sits mid-line on purpose:
+// with it last, an early `return`/`break` out of the loop would also pass.
+describe("a widget whose render throws (REL-007)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  async function makeVimModeThrow(): Promise<void> {
+    // These tests exercise containment, so the suite-wide "no contained
+    // throws" check (setup/contained-widget-errors.ts) is waived for them.
+    allowContainedWidgetErrors();
+    const { vimModeWidget } = await import("../widgets/vim-mode.js");
+    vi.spyOn(vimModeWidget, "render").mockImplementation(() => {
+      throw new RangeError("Invalid count value: -1");
+    });
+  }
+
+  it.each([
+    ["full layout, powerline", 200, true],
+    ["compact layout, powerline", 60, true],
+    ["full layout, plain", 200, false],
+    ["compact layout, plain", 60, false],
+  ])("drops only its own segment (%s)", async (_name, terminalWidth, powerlineEnabled) => {
+    await makeVimModeThrow();
+
+    const bar = renderStatusline(
+      makeContext({ terminalWidth }),
+      makeSettings({
+        powerline: { enabled: powerlineEnabled, theme: "default", separator: "▶", separatorThin: "│" },
+        lines: [
+          {
+            widgets: [{ type: "model" }, { type: "vim-mode" }, { type: "custom-text", text: "after" }],
+            flex: "left",
+          },
+        ],
+      }),
+    );
+
+    const visible = stripAnsi(bar);
+    expect(visible).toContain("Sonnet");
+    expect(visible).toContain("after");
+  });
+
+  it("reports the failure on stderr under GCCUSAGE_DEBUG, naming the widget", async () => {
+    await makeVimModeThrow();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "1");
+
+    renderStatusline(
+      makeContext({ terminalWidth: 200 }),
+      makeSettings({ lines: [{ widgets: [{ type: "vim-mode" }], flex: "left" }] }),
+    );
+
+    // Containment must not make the failure invisible: before it, the stack
+    // reached stderr through main().catch() under this same gate (OPS-006).
+    const logged = errSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(logged).toContain("vim-mode");
+    expect(logged).toContain("Invalid count value: -1");
+  });
+
+  it("stays silent on stderr without GCCUSAGE_DEBUG", async () => {
+    await makeVimModeThrow();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("GCCUSAGE_DEBUG", "");
+
+    renderStatusline(
+      makeContext({ terminalWidth: 200 }),
+      makeSettings({ lines: [{ widgets: [{ type: "model" }, { type: "vim-mode" }], flex: "left" }] }),
+    );
+
+    expect(errSpy).not.toHaveBeenCalled();
   });
 });

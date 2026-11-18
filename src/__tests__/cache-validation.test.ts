@@ -10,6 +10,7 @@ import { loadBlockCache } from "../cache/block-cache.js";
 import { runStatusline } from "../statusline.js";
 import { getTerminalWidth } from "../utils/terminal.js";
 import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+import { localDateKey } from "../utils/local-date.js";
 
 // Rendered in-process, so git widgets would run git in the checkout this suite
 // runs from (#148). None of these tests asserts on git.
@@ -502,7 +503,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // 9.99) — "not-a-number" reaches `Math.max(0, e.costUsd - e.baselineUsd)`
     // as `NaN` exactly when `ShardSchema.costUsd` fails to reject it.
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const today = localDateKey(now);
     fs.writeFileSync(
       path.join(tmpDir, "gccusage", "daily", "ghost.json"),
       JSON.stringify({ sessionId: "ghost", date: today, costUsd: "not-a-number", updatedAt: now.getTime() }),
@@ -576,7 +577,7 @@ describe("no NaN survives a hostile cache directory (#92)", () => {
     // filtered out before its costUsd is ever read and this asserts nothing.
     fs.mkdirSync(path.join(tmpDir, "gccusage", "daily"), { recursive: true });
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const today = localDateKey(now);
     fs.writeFileSync(
       path.join(tmpDir, "gccusage", "daily", "infinite-cost.json"),
       `{"sessionId":"infinite-cost","date":"${today}","costUsd":1e400,"baselineUsd":0,"updatedAt":${now.getTime()}}`,

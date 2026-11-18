@@ -1,12 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  formatDollars,
-  formatTokens,
-  formatDuration,
-  formatPercent,
-  formatModelName,
-  formatCostPerHour,
-} from "../utils/format.js";
+import { formatDollars, formatTokens, formatDuration, formatPercent, formatModelName, formatCostPerHour, formatCost } from "../utils/format.js";
 
 describe("formatDollars", () => {
   it("formats zero", () => {
@@ -139,5 +132,19 @@ describe("formatCostPerHour", () => {
     it("renders NaN as the same marker", () => {
       expect(formatCostPerHour(NaN)).toBe("$?/hr");
     });
+  });
+});
+
+describe("formatCost (MAINT-003)", () => {
+  it("marks an uncertain finite amount", () => {
+    expect(formatCost(2.45, true)).toBe("$2.45?");
+    expect(formatCost(0, true)).toBe("$0.00?");
+  });
+  it("leaves a certain amount unmarked", () => {
+    expect(formatCost(2.45, false)).toBe("$2.45");
+  });
+  it.each([Infinity, -Infinity, NaN])("never stacks the marker onto $? for %s", (v) => {
+    expect(formatCost(v, true)).toBe("$?");
+    expect(formatCost(v, false)).toBe("$?");
   });
 });

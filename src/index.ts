@@ -36,7 +36,9 @@ async function main(): Promise<void> {
     // Returning here — before the stdin read and before runStatusline — keeps
     // the statusline cache untouched, so a stale bar is never served over the
     // error and the first prompt after a fix renders normally.
-    process.stdout.write(formatConfigError(error, getConfigPath()));
+    // An error implies a config file was found, so there is a path; the
+    // fallback only satisfies the type (getConfigPath is null with no home).
+    process.stdout.write(formatConfigError(error, getConfigPath() ?? "settings.json"));
     return;
   }
 
