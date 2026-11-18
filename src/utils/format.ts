@@ -1,12 +1,9 @@
 // `Number.prototype.toFixed` stringifies Infinity/-Infinity/NaN rather than
-// throwing (`Infinity.toFixed(0)` is the literal text "Infinity"), and a
-// non-finite `total_cost_usd` reaches this function straight from stdin —
-// there is no schema on that path to reject it. #130 constrained the daily
-// cost SHARD's `v.finite()` on read/write, but `trackDailyCost` computes
-// `Math.max(0, Infinity - 0)` and returns it in memory before anything ever
-// reads that shard, so the shard guard never sees it. "$0.00" is deliberately
-// not the fallback here: that would silently claim the cost is known and
-// zero, which is false. "$?" matches this repo's existing convention for a
+// throwing (`Infinity.toFixed(0)` is the literal text "Infinity"). The stdin
+// schema now drops a non-finite `total_cost_usd`, and the daily store never
+// persists one (#145), but a calculated cost can still arrive here
+// non-finite: finite token counts can overflow once priced and summed. "$0.00" is deliberately not the fallback here: that would silently
+// claim the cost is known and zero, which is false. "$?" matches this repo's existing convention for a
 // cost it cannot state confidently — see `sessionCostUncertain` in
 // session-cost.ts / today-spend.ts, which append a bare "?" to a real
 // computed amount; this is the same marker for the case where there is no
@@ -23,6 +20,20 @@ export function formatDollars(amount: number): string {
   if (amount < 1) return `$${amount.toFixed(2)}`;
   if (amount < 100) return `$${amount.toFixed(2)}`;
   return `$${amount.toFixed(0)}`;
+}
+
+/**
+ * A cost with the uncertainty marker: `formatDollars` plus a trailing `?` when
+ * `uncertain`, except when the amount is non-finite and already renders as
+ * `$?` — stacking the two read as `$??` (#145).
+ *
+ * One owner for both cost widgets (MAINT-003). As two copies of the rule, a
+ * change to one would bring `$??` back in the other with its tests green —
+ * the #68 shape `alertBg` was consolidated to avoid.
+ */
+export function formatCost(amount: number, uncertain: boolean): string {
+  const marked = uncertain && Number.isFinite(amount);
+  return formatDollars(amount) + (marked ? "?" : "");
 }
 
 // Same reasoning as `formatDollars` above, and the same "?" convention — but

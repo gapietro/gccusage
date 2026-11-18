@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { runStatusline } from "../statusline.js";
 import { stripAnsi } from "../utils/terminal.js";
 import { gitFreeDefaultSettings } from "./helpers/git-free-settings.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 // Rendered in-process, so git widgets would run git in the checkout this suite
 // runs from (#148). None of these tests asserts on git.
@@ -199,10 +200,7 @@ describe.skipIf(!distExists)("1-hour cache write pricing (#118)", () => {
     );
 
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      HOME: tmpDir,
-      XDG_CONFIG_HOME: path.join(tmpDir, "config"),
-      XDG_CACHE_HOME: path.join(tmpDir, "cache"),
+      ...isolatedEnv(tmpDir),
       // No pricing.json is seeded, so getPricingForRender reports the cache
       // stale and the render triggers maybeSpawnPricingRefresh's detached,
       // unref'd out-of-band child. That child does not block this process —

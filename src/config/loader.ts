@@ -3,15 +3,16 @@ import * as path from "node:path";
 import * as v from "valibot";
 import { SettingsSchema, type Settings } from "./schema.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
+import { getConfigDir } from "../utils/paths.js";
 
-function getConfigDir(): string {
-  const xdg = process.env["XDG_CONFIG_HOME"];
-  if (xdg) return path.join(xdg, "gccusage");
-  return path.join(process.env["HOME"] || "~", ".config", "gccusage");
-}
-
-export function getConfigPath(): string {
-  return path.join(getConfigDir(), "settings.json");
+/**
+ * Null when there is no config directory to look in (SEC-004: no home and no
+ * absolute XDG_CONFIG_HOME). That means "no config file", never "look
+ * somewhere shared".
+ */
+export function getConfigPath(): string | null {
+  const dir = getConfigDir();
+  return dir === null ? null : path.join(dir, "settings.json");
 }
 
 /**
@@ -112,7 +113,7 @@ function describeIssues(issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]
 export function loadSettings(): ConfigLoad {
   const configPath = getConfigPath();
 
-  if (!fs.existsSync(configPath)) {
+  if (configPath === null || !fs.existsSync(configPath)) {
     return { settings: DEFAULT_SETTINGS };
   }
 

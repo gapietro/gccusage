@@ -10,6 +10,8 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
+import { localDateKey } from "../utils/local-date.js";
 
 /**
  * #145 through the shipped bundle. A non-finite calculated session cost used
@@ -83,18 +85,12 @@ function shardPath(): string {
   return path.join(cacheHome, "gccusage", "daily", `${SESSION_ID}.json`);
 }
 
-function localDate(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
 /** The last good render of this session, as the store would hold it. */
 function seedShard(costUsd: number, baselineUsd: number): string {
   fs.mkdirSync(path.dirname(shardPath()), { recursive: true });
   const bytes = JSON.stringify({
     sessionId: SESSION_ID,
-    date: localDate(new Date()),
+    date: localDateKey(new Date()),
     costUsd,
     baselineUsd,
     source: "calculated",
@@ -111,9 +107,7 @@ function render(): string {
     cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, model: OPUS }),
     env: {
-      ...process.env,
-      HOME: dir,
-      XDG_CONFIG_HOME: path.join(dir, "config"),
+      ...isolatedEnv(dir),
       ...refresher.env,
       COLUMNS: "200",
     },
@@ -139,7 +133,10 @@ describe.skipIf(!distExists)("non-finite session cost through the real bundle (#
     expect((JSON.parse(raw) as { costUsd: number }).costUsd).toBeCloseTo(0.03, 10);
   });
 
-  it("leaves the shard byte-identical when the summed cost overflows", () => {
+  // Not byte-identical since COR-009: the shard is re-stamped
+  // `"uncertain": true` so other sessions' bars mark the stale figure. The
+  // figures themselves, which is what #145 protected, must not move.
+  it("leaves the shard's figures unchanged when the summed cost overflows", () => {
     const before = seedShard(0.5, 0.2);
     writeTranscript([
       `{"input_tokens":1.7e308,"output_tokens":0}`,
@@ -147,7 +144,14 @@ describe.skipIf(!distExists)("non-finite session cost through the real bundle (#
     ]);
     render();
 
-    expect(fs.readFileSync(shardPath(), "utf8")).toBe(before);
+    const after = fs.readFileSync(shardPath(), "utf8");
+    expect(after).not.toContain("null");
+    const parsed = JSON.parse(after) as Record<string, unknown>;
+    expect(parsed["uncertain"]).toBe(true);
+    expect({ ...parsed, uncertain: undefined }).toEqual({
+      ...(JSON.parse(before) as object),
+      uncertain: undefined,
+    });
   });
 
   it("renders one $? for the session and keeps its last good spend in Today:, marked", () => {

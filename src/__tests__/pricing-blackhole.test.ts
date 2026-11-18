@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { PRICING_REFRESH_STAMP_FILE } from "../data/pricing-refresh.js";
 import { writeGitFreeSettings } from "./helpers/git-free-settings.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * The acceptance test for #84, driven through the real shipped bundle.
@@ -94,9 +95,7 @@ afterEach(async () => {
  */
 function render(pricingUrl: string, slot = "cache"): { elapsedMs: number; output: string } {
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: dir,
-    XDG_CONFIG_HOME: path.join(dir, "config"),
+    ...isolatedEnv(dir),
     XDG_CACHE_HOME: path.join(dir, slot),
     // No pricing cache is seeded, so the render sees a stale table and must
     // decide to refresh — the exact path that used to reach the network.

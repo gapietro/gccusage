@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 // package.json sets "type": "module", so __dirname does not exist here.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -60,17 +61,18 @@ afterEach(() => {
 
 function runStatusline(columns: string | undefined): string {
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: dir,
-    XDG_CONFIG_HOME: path.join(dir, "config"),
+    ...isolatedEnv(dir),
     ...refresher.env,
   };
   if (columns === undefined) delete env["COLUMNS"];
   else env["COLUMNS"] = columns;
 
-  // A distinct session id per call: the statusline cache keys on
-  // (sessionId, costUsd) with a 5s TTL, so reusing one id would serve the
-  // first render back for the second width and the test would pass blind.
+  // A distinct session id per call, so no two renders can share a statusline
+  // cache entry. Belt and braces today: each test gets a fresh cache
+  // directory, and the cache key hashes the whole stdin payload plus the
+  // width the bundle detected (computeCacheKey). But it is the DETECTED width
+  // that is keyed, so if detection were the bug, two renders with one id in
+  // one directory would share a key and the second would replay the first.
   const sessionId = `width-test-${columns ?? "unset"}`;
 
   // stdio "pipe" on stdout is the point of this test: it reproduces the

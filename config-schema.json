@@ -66,7 +66,7 @@
                 },
                 "format": {
                   "type": "string",
-                  "description": "Custom format string"
+                  "description": "Reserved: accepted but currently ignored by every widget"
                 },
                 "command": {
                   "type": "string",
@@ -152,7 +152,7 @@
             "never"
           ],
           "default": "auto",
-          "description": "auto compacts only when the rendered bar exceeds threshold and the terminal width is known"
+          "description": "auto compacts when the terminal is narrower than threshold columns and its width is known"
         },
         "threshold": {
           "type": "number",

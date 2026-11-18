@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs$7 from "node:fs";
 import * as fs$6 from "node:fs";
 import * as fs$5 from "node:fs";
 import * as fs$4 from "node:fs";
@@ -6,7 +7,8 @@ import * as fs$3 from "node:fs";
 import * as fs$2 from "node:fs";
 import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
+import * as path$11 from "node:path";
 import * as path$10 from "node:path";
 import * as path$9 from "node:path";
 import * as path$8 from "node:path";
@@ -18,10 +20,10 @@ import * as path$3 from "node:path";
 import * as path$2 from "node:path";
 import * as path$1 from "node:path";
 import * as path from "node:path";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import process$1 from "node:process";
 import * as os$1 from "node:os";
-import os, { homedir } from "node:os";
+import os from "node:os";
 import tty from "node:tty";
 import * as crypto from "node:crypto";
 import { createHash } from "node:crypto";
@@ -238,6 +240,22 @@ function finite(message$1) {
 		message: message$1,
 		"~run"(dataset, config$1) {
 			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "finite", dataset, config$1);
+			return dataset;
+		}
+	};
+}
+/* @__NO_SIDE_EFFECTS__ */
+function integer(message$1) {
+	return {
+		kind: "validation",
+		type: "integer",
+		reference: integer,
+		async: false,
+		expects: null,
+		requirement: Number.isInteger,
+		message: message$1,
+		"~run"(dataset, config$1) {
+			if (dataset.typed && !this.requirement(dataset.value)) _addIssue(this, "integer", dataset, config$1);
 			return dataset;
 		}
 	};
@@ -833,6 +851,75 @@ function safeParse(schema, input, config$1) {
 }
 
 //#endregion
+//#region src/utils/schemas.ts
+/**
+* The shared rules for numbers that cross a JSON boundary: stdin and every
+* cache file. They used to be re-derived per schema, and the derivations
+* disagreed — `status-json.ts` had `finite()`, the pricing, statusline and
+* block caches had bare `v.number()`, the refresh stamp `finite()` only, and
+* the daily shard `safeInteger()` (COR-006). One owner, so the next schema
+* imports the rule rather than rediscovering it.
+*/
+/**
+* `v.finite()`, never bare `v.number()`.
+*
+* JSON has no `Infinity` literal, which made "JSON cannot encode it, so
+* `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
+* numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
+* both `v.number()` and `typeof x === "number"` accept it (#133, #137).
+*/
+function finiteNumber() {
+	return pipe(number(), finite());
+}
+/**
+* A millisecond stamp this program wrote with `Date.now()`.
+*
+* `safeInteger()`, which implies finite: `finite()` alone accepts `1e300`, and
+* `now - 1e300` is as never-stale as `now - Infinity` (#130). Every stamp
+* written here is an integer, so a fraction is corruption too.
+*
+* NOT sufficient on its own. `9e15` is a safe integer — and centuries in the
+* future — and so is a stamp written before the clock was set back or a VM
+* snapshot restored. "In the future" depends on when the file is read, which a
+* schema cannot know, so every consumer must take the age through `ageSince`.
+*/
+function persistedTimestamp() {
+	return pipe(number(), safeInteger());
+}
+/**
+* How far in the future a stamp may be and still read as age 0.
+*
+* Every stamp is written and read on the same machine, so there is no
+* cross-host skew to absorb; a negative age can only come from the clock
+* stepping backwards between a write and a read — an NTP correction, which is
+* normally well under a second. One second absorbs that without a pointless
+* miss. It must stay small against the shortest TTL it gates, the statusline
+* cache's 5 s default: a stamp inside the allowance reads as brand new, so it
+* can stretch that TTL by up to the allowance itself.
+*/
+const CLOCK_SKEW_ALLOWANCE_MS = 1e3;
+/**
+* The age of a persisted stamp, or `null` when the stamp cannot be trusted.
+*
+* Every cache measured age as `now - stored` and compared it against a TTL.
+* A stamp in the future made that negative, a negative age is younger than
+* every TTL, and the entry read as fresh until the clock caught up — forever,
+* for `9e15`. For the pricing cache that meant the refresher was never spawned,
+* and the refresher is the only writer of `pricing.json`: the file causing the
+* wrong answer gated its own repair, #133's shape (COR-006).
+*
+* `null` rather than `Infinity`, so the compiler makes each caller decide what
+* an untrusted age means (stale, expired, absent) instead of a comparison
+* happening to come out right. Within the skew allowance the age is clamped to
+* 0, so a caller never sees a remaining time longer than its whole window.
+*/
+function ageSince(timestamp, now = Date.now()) {
+	const age = now - timestamp;
+	if (!Number.isFinite(age) || age < -CLOCK_SKEW_ALLOWANCE_MS) return null;
+	return Math.max(0, age);
+}
+
+//#endregion
 //#region src/types/status-json.ts
 /**
 * Every field in this payload is optional AND independently recoverable.
@@ -854,27 +941,6 @@ function lenient(schema) {
 /** Same, for the fields that carry a numeric default rather than undefined. */
 function lenientWithDefault(schema, value) {
 	return fallback(optional(schema, value), value);
-}
-/**
-* `v.finite()`, never bare `v.number()` — for EVERY number in this payload.
-*
-* JSON has no `Infinity` literal, which made "JSON cannot encode it, so
-* `v.number()` is enough" a tempting and wrong conclusion. An out-of-range
-* numeric literal OVERFLOWS: `JSON.parse('{"x":1e400}').x` is `Infinity`, and
-* both `v.number()` and `typeof x === "number"` accept it.
-*
-* Applied at the boundary rather than in each formatter on purpose. #131
-* closed this for cost by guarding `formatDollars` and `formatCostPerHour`,
-* which left `formatTokens` rendering `InfinityM` for a window size and
-* `formatDuration` rendering `Infinityhr NaNm` — the class was being closed
-* one formatter at a time, and every widget added later re-opened it (#137).
-*
-* Costs only the offending field: every use sits inside `lenient` /
-* `lenientWithDefault`, so a rejected number falls back to undefined or its
-* default and the bar still draws, per the per-field posture of #83.
-*/
-function finiteNumber() {
-	return pipe(number(), finite());
 }
 const ModelSchema = union([string(), object({
 	id: lenient(string()),
@@ -1167,11 +1233,11 @@ function assembleStyles() {
 				];
 				let [colorString] = matches;
 				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
-				const integer = Number.parseInt(colorString, 16);
+				const integer$1 = Number.parseInt(colorString, 16);
 				return [
-					integer >> 16 & 255,
-					integer >> 8 & 255,
-					integer & 255
+					integer$1 >> 16 & 255,
+					integer$1 >> 8 & 255,
+					integer$1 & 255
 				];
 			},
 			enumerable: false
@@ -1692,14 +1758,363 @@ const DEFAULT_SETTINGS = {
 };
 
 //#endregion
-//#region src/config/loader.ts
-function getConfigDir() {
-	const xdg = process.env["XDG_CONFIG_HOME"];
-	if (xdg) return path$10.join(xdg, "gccusage");
-	return path$10.join(process.env["HOME"] || "~", ".config", "gccusage");
+//#region src/utils/paths.ts
+/**
+* The user's home directory as an absolute path, or null when there is no
+* trustworthy answer.
+*
+* os.homedir() honours HOME on POSIX and USERPROFILE on Windows, but returns
+* an empty string when HOME is set-but-empty, and throws when HOME is unset
+* and there is no passwd entry. The passwd entry is the fallback for both.
+*
+* Past that there is deliberately nothing. This used to fall back to
+* `os.tmpdir()`, which on Linux is the shared, world-writable `/tmp`: any
+* local user could plant `/tmp/.config/gccusage/settings.json` and have its
+* `custom-command` run as the victim on every render, and the cache, setup's
+* settings.json and the transcript scan all followed it there (SEC-004,
+* review of #154). `os.tmpdir()` also honours a relative TMPDIR. Every caller
+* treats null as "no such directory": no config, no cache, no transcripts.
+*/
+function getHomeDir() {
+	try {
+		const home = os$1.homedir();
+		if (path$11.isAbsolute(home)) return home;
+	} catch {}
+	try {
+		const fromPasswd = os$1.userInfo().homedir;
+		if (path$11.isAbsolute(fromPasswd)) return fromPasswd;
+	} catch {}
+	return null;
 }
+/**
+* `p` with the home directory collapsed to `~`, for display.
+*
+* Only on a path-segment boundary: a bare `startsWith(home)` turned
+* `/home/u2/x` into `~2/x` when home was `/home/u` (review of #154). With no
+* home, or a home of "/" (which would prefix-match every absolute path),
+* nothing is collapsed. The one owner for the error line and the cwd widget.
+*/
+function collapseHome(p) {
+	const home = getHomeDir();
+	if (home === null || home === "/") return p;
+	if (p === home) return "~";
+	const prefix = home.endsWith(path$11.sep) ? home : home + path$11.sep;
+	return p.startsWith(prefix) ? `~${path$11.sep}${p.slice(prefix.length)}` : p;
+}
+/** `~/.claude`, where Claude Code keeps its data, or null with no home. */
+function getClaudeDataDir() {
+	const home = getHomeDir();
+	return home === null ? null : path$11.join(home, ".claude");
+}
+/** Claude Code's transcript tree, or null with no home: then none are read. */
+function getProjectsDir() {
+	const dataDir = getClaudeDataDir();
+	return dataDir === null ? null : path$11.join(dataDir, "projects");
+}
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+function shardKey(sessionId) {
+	return SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+}
+/**
+* An `XDG_*` base directory, or undefined when it is unset, empty or relative.
+*
+* The XDG Base Directory spec says a relative path in these variables is
+* invalid and must be ignored. Honouring one resolved it against the launch
+* directory, and for the config dir that meant a repo could commit
+* `.config/gccusage/settings.json` and have its `custom-command` run on every
+* render (SEC-004).
+*/
+function xdgBaseDir(name) {
+	const value = process.env[name];
+	if (!value) return void 0;
+	if (path$11.isAbsolute(value)) return value;
+	reportIgnoredXdg(name, value);
+	return void 0;
+}
+/** `NAME=value` pairs already reported, so each is logged once per process. */
+const reportedXdg = new Set();
+/**
+* Ignoring a relative value moves the cache or config somewhere the user did
+* not ask for, silently. Say so under GCCUSAGE_DEBUG (review of #154) — once
+* per value, since getCacheDir runs many times per render.
+*/
+function reportIgnoredXdg(name, value) {
+	if (!process.env["GCCUSAGE_DEBUG"]) return;
+	const key = `${name}=${value}`;
+	if (reportedXdg.has(key)) return;
+	reportedXdg.add(key);
+	console.error(`gccusage: ignoring relative ${name}=${JSON.stringify(value)} — the XDG spec requires an absolute path`);
+}
+/**
+* The cache directory, or null when there is neither an absolute
+* XDG_CACHE_HOME nor a home directory — and then nothing is cached.
+*
+* Disabled rather than relocated. The alternative was a private
+* `<tmpdir>/gccusage-<uid>`, but that dir has to be verified (created 0700,
+* not a symlink, owned by us, no group/other bits) and a failed verification
+* still needs this same disabled path — so it would add a second code path,
+* with its own races, on top of the one it cannot avoid. Every cache here is
+* an optimisation: with none, the bar still renders, it just recomputes, and
+* the daily store reports this session's spend marked uncertain.
+*/
+function getCacheDir() {
+	const xdg = xdgBaseDir("XDG_CACHE_HOME");
+	if (xdg) return path$11.join(xdg, "gccusage");
+	const home = getHomeDir();
+	return home === null ? null : path$11.join(home, ".cache", "gccusage");
+}
+/**
+* Lives here, beside `getCacheDir`, so both are built on `getHomeDir()`. It
+* used to sit in config/loader.ts as `HOME || "~"`, which for an unset or
+* empty HOME is the relative path `~/.config/gccusage`. That resolves against
+* the cwd, so a repo committing that path had its config, and its
+* `custom-command`, loaded and run (SEC-004, reproduced via clone).
+*
+* Null when there is neither an absolute XDG_CONFIG_HOME nor a home: then
+* there is no config file and the defaults apply. Never a shared directory.
+*/
+function getConfigDir() {
+	const xdg = xdgBaseDir("XDG_CONFIG_HOME");
+	if (xdg) return path$11.join(xdg, "gccusage");
+	const home = getHomeDir();
+	return home === null ? null : path$11.join(home, ".config", "gccusage");
+}
+/**
+* Create `dir`, and any missing parents, as 0700 (SEC-003). The cache holds
+* session ids and per-session spend, and at the umask default of 0755 any
+* local user could list and read them.
+*
+* The mode applies only to directories this call creates. One that already
+* exists — `~/.cache` itself, say — is the user's, and its mode is their
+* choice, so nothing here chmods it.
+*/
+function ensureDir(dir) {
+	if (!fs$7.existsSync(dir)) fs$7.mkdirSync(dir, {
+		recursive: true,
+		mode: 448
+	});
+}
+/**
+* Strip group and other permission bits from an EXISTING cache tree: the
+* cache dir, its direct subdirectories (`daily/`, `blocks/`), and the files
+* at those two levels (SEC-003, review of #154).
+*
+* `ensureDir` only narrows directories it creates, and cache files only
+* become 0600 when rewritten, so an install from before SEC-003 kept a 0755
+* `~/.cache/gccusage`, a 0755 `daily/`, and 0644 shards for sessions that
+* never write again. This is the one-time fix-up for that.
+*
+* Bits are only ever removed (`mode & ~0o077`), never set, so this cannot
+* widen anything. Each entry is lstat'ed and skipped if it is a symlink or
+* is not owned by this uid: the tree is ours, but a link inside it could
+* point anywhere, and someone else's file is not ours to change. Skipped
+* entirely where there is no uid (Windows).
+*
+* Not run on the render path. Its callers are the detached refresh child
+* and `setup`. It needs no "done" marker: once the tree is narrowed, every
+* pass is a stat walk over a few dozen entries that changes nothing, at
+* the refresh cadence. A marker would be more state to get wrong, for a
+* saving no one would notice.
+*/
+function narrowCacheModes(cacheDir$1) {
+	if (typeof process.getuid !== "function") return;
+	const uid = process.getuid();
+	if (!narrowOwned(cacheDir$1, uid, true)) return;
+	let names;
+	try {
+		names = fs$7.readdirSync(cacheDir$1);
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const entry = path$11.join(cacheDir$1, name);
+		if (!narrowOwned(entry, uid, true)) continue;
+		let inner;
+		try {
+			inner = fs$7.readdirSync(entry);
+		} catch {
+			continue;
+		}
+		for (const innerName of inner) narrowOwned(path$11.join(entry, innerName), uid, false);
+	}
+}
+/**
+* Narrow one entry if it is ours and not a link. Returns true only for a
+* directory the caller may walk into. With `dirsToo` false, a directory is
+* left as found — the walk's depth limit.
+*/
+function narrowOwned(p, uid, dirsToo) {
+	let st;
+	try {
+		st = fs$7.lstatSync(p);
+	} catch {
+		return false;
+	}
+	if (st.isSymbolicLink() || st.uid !== uid) return false;
+	const isDir = st.isDirectory();
+	if (!st.isFile() && !isDir) return false;
+	if (isDir && !dirsToo) return false;
+	const current = st.mode & 511;
+	const narrowed = current & -64;
+	if (narrowed !== current) try {
+		fs$7.chmodSync(p, narrowed);
+	} catch {}
+	return isDir;
+}
+function findJsonlFiles(dir) {
+	if (!fs$7.existsSync(dir)) return [];
+	try {
+		return fs$7.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$11.join(dir, f));
+	} catch {
+		return [];
+	}
+}
+const SUBAGENT_TRANSCRIPT = /^agent-.*\.jsonl$/;
+/** The agent transcripts in `dir`, or null when `dir` cannot be listed. */
+function subagentTranscriptsIn(dir) {
+	try {
+		return fs$7.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path$11.join(dir, f));
+	} catch {
+		return null;
+	}
+}
+/**
+* The subagent transcripts of one session, given the session's directory
+* (`<project>/<sessionId>/`). COR-007: Claude Code writes a subagent's usage
+* to its own transcript there, never to the parent `<sessionId>.jsonl`, so a
+* walk of top-level transcripts alone misses it: 14.6% of tokens over the
+* audit's 7-day window on the developer's machine.
+*
+* Two fixed locations, no recursion:
+* - `subagents/agent-<id>.jsonl` — Task-tool agents;
+* - `subagents/workflows/<run>/agent-<id>.jsonl` — agents a workflow spawned.
+*   On the developer's machine these were 193 of 326 subagent transcripts
+*   and 0.63B of 2.23B subagent tokens, so a flat read of `subagents/` alone
+*   would leave much of COR-007 in place.
+* A missing or unreadable directory at either level yields nothing for that
+* level and never throws, so it cannot cost the caller the main transcript.
+*
+* Message ids are deduplicated per file only (`parseJsonlContent`), and that
+* is deliberate. Of 8,098 Task-agent message ids, 1 also appears in a parent
+* transcript (~0.01%; 1 of 1,688 in the audit's sample), and none of 4,516
+* workflow-agent ids appears anywhere else. Today's figure is aggregated and
+* cached PER FILE (`today-aggregate-cache.ts`), so cross-file dedup there would
+* mean persisting every file's message ids and invalidating across files.
+* Doing it for the session total alone would make the session and Today
+* disagree about the same responses. The cost of not doing it is an
+* over-count bounded by that overlap, against a ~15% under-count fixed.
+*/
+function findSubagentJsonlFiles(sessionDir) {
+	const subagentsDir = path$11.join(sessionDir, "subagents");
+	const files = subagentTranscriptsIn(subagentsDir);
+	if (files === null) return [];
+	const workflowsDir = path$11.join(subagentsDir, "workflows");
+	let runs;
+	try {
+		runs = fs$7.readdirSync(workflowsDir);
+	} catch {
+		return files;
+	}
+	for (const run of runs) files.push(...subagentTranscriptsIn(path$11.join(workflowsDir, run)) ?? []);
+	return files;
+}
+/**
+* Every transcript of one session, split by kind. Callers that need to know
+* where the session started, or what the user typed, read `main`; nothing
+* depends on the order of either list.
+*/
+function findSessionTranscripts(sessionId) {
+	const none = {
+		main: [],
+		subagents: []
+	};
+	if (!sessionId) return none;
+	const projectsDir = getProjectsDir();
+	if (projectsDir === null || !fs$7.existsSync(projectsDir)) return none;
+	const joinable = SAFE_SESSION_ID.test(sessionId);
+	const mainFiles = [];
+	const subagentFiles = [];
+	try {
+		for (const projectDir of fs$7.readdirSync(projectsDir)) {
+			const fullPath = path$11.join(projectsDir, projectDir);
+			const stat = fs$7.statSync(fullPath);
+			if (!stat.isDirectory()) continue;
+			const jsonlFiles = findJsonlFiles(fullPath);
+			mainFiles.push(...jsonlFiles.filter((f) => path$11.basename(f, ".jsonl") === sessionId));
+			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path$11.join(fullPath, sessionId)));
+		}
+	} catch {}
+	return {
+		main: mainFiles,
+		subagents: subagentFiles
+	};
+}
+/**
+* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
+* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
+* pair, and re-statting to get it would double the syscalls the cache exists
+* to avoid.
+*
+* Includes each session's subagent transcripts (COR-007). The session
+* directories are found from the one `readdir` per project this walk already
+* does, via its entry types, so the added cost is one failed `readdir` per
+* session directory without subagents, and a stat per agent file, which the
+* cache needs anyway. Every subagent file is filtered on its own mtime, not
+* its parent's: a session left open over midnight writes today's usage to a
+* subagent while the parent's last line is yesterday's.
+*
+* The today-aggregate cache needs no change for these files: it keys on the
+* path, so a subagent file is just another key, and one missing from a cache
+* written before this walk saw them is a miss that gets parsed and added.
+*/
+function findTodayJsonlFileStats() {
+	const projectsDir = getProjectsDir();
+	if (projectsDir === null || !fs$7.existsSync(projectsDir)) return [];
+	const todayStart = new Date();
+	todayStart.setHours(0, 0, 0, 0);
+	const todayMs = todayStart.getTime();
+	const files = [];
+	const addIfToday = (f) => {
+		try {
+			const fstat = fs$7.statSync(f);
+			if (fstat.mtimeMs >= todayMs) files.push({
+				path: f,
+				mtimeMs: fstat.mtimeMs,
+				size: fstat.size
+			});
+		} catch {}
+	};
+	try {
+		for (const projectDir of fs$7.readdirSync(projectsDir)) {
+			const fullPath = path$11.join(projectsDir, projectDir);
+			const stat = fs$7.statSync(fullPath);
+			if (!stat.isDirectory()) continue;
+			let entries;
+			try {
+				entries = fs$7.readdirSync(fullPath, { withFileTypes: true });
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				const entryPath = path$11.join(fullPath, entry.name);
+				if (entry.name.endsWith(".jsonl")) addIfToday(entryPath);
+				else if (entry.isDirectory()) for (const f of findSubagentJsonlFiles(entryPath)) addIfToday(f);
+			}
+		}
+	} catch {}
+	return files;
+}
+
+//#endregion
+//#region src/config/loader.ts
+/**
+* Null when there is no config directory to look in (SEC-004: no home and no
+* absolute XDG_CONFIG_HOME). That means "no config file", never "look
+* somewhere shared".
+*/
 function getConfigPath() {
-	return path$10.join(getConfigDir(), "settings.json");
+	const dir = getConfigDir();
+	return dir === null ? null : path$10.join(dir, "settings.json");
 }
 /**
 * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
@@ -1746,7 +2161,7 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (!fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (configPath === null || !fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
 		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
@@ -1769,11 +2184,17 @@ function loadSettings() {
 //#region src/config/error-line.ts
 const BOLD_RED = "\x1B[1;31m";
 const RESET$2 = "\x1B[0m";
-/** Collapse $HOME to `~` so the line stays short enough to read at a glance. */
+/**
+* Collapse the home directory to `~` so the line stays short enough to read
+* at a glance.
+*
+* `getHomeDir()`, not raw `$HOME`: the path being shortened came from
+* `getConfigPath()`, which resolves home that way, so with HOME unset or
+* empty the two must agree on where home is or the path is never shortened
+* (SEC-004). `collapseHome` also matches only on a segment boundary.
+*/
 function shortenPath(filePath) {
-	const home = process.env["HOME"];
-	if (!home || home === "/" || !filePath.startsWith(home)) return filePath;
-	return `~${filePath.slice(home.length)}`;
+	return collapseHome(filePath);
 }
 /**
 * One line, no trailing newline — matching what `runStatusline` returns, since
@@ -1832,87 +2253,169 @@ function formatDeadline(ms) {
 }
 
 //#endregion
-//#region src/utils/paths.ts
-function getHomeDir() {
-	const home = os$1.homedir();
-	if (path$9.isAbsolute(home)) return home;
+//#region src/utils/atomic-json.ts
+let counter = 0;
+/**
+* The same atomicity guarantee as `writeJsonAtomic`, for content that is
+* already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
+* a file the user reads and edits, so it keeps its 2-space indentation and
+* trailing newline rather than the compact encoding `writeJsonAtomic` emits.
+*
+* `mode`, when given, is the exact permission set the file ends up with. The
+* rename replaces the target's inode, so the target's own mode never survives
+* a write: without this the result is whatever the umask gives a new file,
+* and setup turned a 0600 settings.json holding `env` secrets into 0644
+* (SEC-003). It is applied to the temp file before the rename, so the target
+* is never visible with a wider mode, even briefly.
+*/
+function writeFileAtomic(filePath, contents, mode) {
+	const dir = path$9.dirname(filePath);
+	ensureDir(dir);
+	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 	try {
-		const fromPasswd = os$1.userInfo().homedir;
-		if (path$9.isAbsolute(fromPasswd)) return fromPasswd;
-	} catch {}
-	return os$1.tmpdir();
-}
-function getClaudeDataDir() {
-	return path$9.join(getHomeDir(), ".claude");
-}
-function getProjectsDir() {
-	return path$9.join(getClaudeDataDir(), "projects");
-}
-const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
-function shardKey(sessionId) {
-	return SAFE_SESSION_ID.test(sessionId) ? sessionId : crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-}
-function getCacheDir() {
-	const xdg = process.env["XDG_CACHE_HOME"];
-	if (xdg) return path$9.join(xdg, "gccusage");
-	return path$9.join(getHomeDir(), ".cache", "gccusage");
-}
-function ensureDir(dir) {
-	if (!fs$5.existsSync(dir)) fs$5.mkdirSync(dir, { recursive: true });
-}
-function findJsonlFiles(dir) {
-	if (!fs$5.existsSync(dir)) return [];
-	try {
-		return fs$5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$9.join(dir, f));
-	} catch {
-		return [];
+		createExclusive(tmpPath, contents, mode);
+		if (mode !== void 0) try {
+			fs$5.chmodSync(tmpPath, mode);
+		} catch {}
+		fs$5.renameSync(tmpPath, filePath);
+	} catch (err) {
+		try {
+			fs$5.unlinkSync(tmpPath);
+		} catch {}
+		throw err;
 	}
 }
-function findSessionJsonlFiles(sessionId) {
-	if (!sessionId) return [];
-	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
-	const files = [];
+/**
+* Write `contents` to a file at `tmpPath` that this call creates, never one
+* that was already there.
+*
+* The temp name is predictable (`<target>.<pid>.<n>.tmp`). With flag "w" a
+* symlink planted at that name was followed, so the write — and the chmod
+* after it — landed on whatever the link pointed at, and a leftover regular
+* file from a reused pid kept its own, possibly wider, mode (SEC-003, review
+* of #154). "wx" (O_CREAT|O_EXCL) refuses to open anything that exists,
+* symlinks included. On EEXIST the squatter is unlinked — which removes a
+* link, never its target — and the create is retried once. A second EEXIST
+* means someone is racing us for the name, and the write fails rather than
+* loop.
+*/
+function createExclusive(tmpPath, contents, mode) {
+	const options = {
+		encoding: "utf-8",
+		flag: "wx",
+		...mode === void 0 ? {} : { mode }
+	};
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
-			const jsonlFiles = findJsonlFiles(fullPath);
-			files.push(...jsonlFiles.filter((f) => path$9.basename(f, ".jsonl") === sessionId));
-		}
-	} catch {}
-	return files;
+		fs$5.writeFileSync(tmpPath, contents, options);
+	} catch (err) {
+		if (err.code !== "EEXIST") throw err;
+		fs$5.unlinkSync(tmpPath);
+		fs$5.writeFileSync(tmpPath, contents, options);
+	}
 }
 /**
-* Today's transcripts with the `mtimeMs` and `size` from the stat this walk
-* already performs. `today-aggregate-cache.ts` keys its reuse decision on that
-* pair, and re-statting to get it would double the syscalls the cache exists
-* to avoid.
+* The exact shape of the temp names `writeFileAtomic` generates —
+* `<target>.<pid>.<counter>.tmp` — so the sweep cannot touch a user's own
+* `notes.tmp` or anything else that merely ends in `.tmp`.
 */
-function findTodayJsonlFileStats() {
-	const projectsDir = getProjectsDir();
-	if (!fs$5.existsSync(projectsDir)) return [];
-	const todayStart = new Date();
-	todayStart.setHours(0, 0, 0, 0);
-	const todayMs = todayStart.getTime();
-	const files = [];
+const TEMP_FILE_PATTERN = /\.\d+\.\d+\.tmp$/;
+/**
+* Old enough that no live write can still own the file. A write is one
+* `writeFileSync` and one `rename` of a few KB; an hour is many orders of
+* magnitude past that, so a younger temp file is left alone in case another
+* process is mid-write to it.
+*/
+const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1e3;
+/**
+* Remove orphaned `writeFileAtomic` temp files from `dir` and its immediate
+* subdirectories (the cache keeps targets in `daily/` and `blocks/` as well as
+* at the root, and an orphan lands beside its target).
+*
+* Moving the write into the try stops a failed write leaking one, but nothing
+* in-process can clean up after a SIGKILL between open and rename — the real
+* cache held one from October when REL-008 was found. So this sweeps after the
+* fact.
+*
+* Not called on the render path: it is a directory walk, and renders are the
+* one place this tool has a latency budget. Its caller is the detached
+* `refresh-pricing` child, which is already off the render path and already
+* rate-limited — it runs only when pricing is stale, and at most once per
+* refresh backoff — so the walk costs nothing a user waits for, and an orphan
+* lives about a day at worst.
+*
+* Symlinks are skipped, not followed: the cache directory is ours, but a link
+* inside it could point anywhere. Best-effort throughout — a sweep that cannot
+* finish just leaves the files for the next one.
+*
+* Known and accepted gap: a `setup` killed between open and rename leaves its
+* `settings.json.<pid>.<n>.tmp` (or `.bak` temp) in `~/.claude`, or beside a
+* symlink's target, and nothing sweeps those. `~/.claude` is Claude Code's
+* directory, not ours, and `setup` is a rare, interactive command whose user
+* is watching it — unlike the per-render cache writes this sweep exists for.
+* Walking someone else's directory, or a dotfiles repo, to delete files by
+* name pattern is a worse risk than an occasional stray temp file there.
+*/
+function sweepStaleTempFiles(dir) {
+	sweepDir(dir, Date.now(), 1);
+}
+function sweepDir(dir, now, depthLeft) {
+	let names;
 	try {
-		for (const projectDir of fs$5.readdirSync(projectsDir)) {
-			const fullPath = path$9.join(projectsDir, projectDir);
-			const stat = fs$5.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
-			for (const f of findJsonlFiles(fullPath)) {
-				const fstat = fs$5.statSync(f);
-				if (fstat.mtimeMs >= todayMs) files.push({
-					path: f,
-					mtimeMs: fstat.mtimeMs,
-					size: fstat.size
-				});
-			}
-		}
-	} catch {}
-	return files;
+		names = fs$5.readdirSync(dir);
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const full = path$9.join(dir, name);
+		try {
+			const stat = fs$5.lstatSync(full);
+			if (stat.isDirectory()) {
+				if (depthLeft > 0) sweepDir(full, now, depthLeft - 1);
+			} else if (stat.isFile() && TEMP_FILE_PATTERN.test(name) && now - stat.mtimeMs > STALE_TEMP_FILE_AGE_MS) fs$5.unlinkSync(full);
+		} catch {}
+	}
+}
+/**
+* Write JSON to `filePath` so that readers see either the previous contents
+* or the new ones, never a partial file: serialise into a uniquely named
+* sibling, then rename it over the target. Same directory means same
+* filesystem, which is what makes the rename atomic.
+*
+* Throws on failure; callers keep whatever error posture they already have.
+*
+* Always 0600: every caller is a cache file under `getCacheDir()` — session
+* ids, per-session spend, transcript-derived aggregates — and nobody but the
+* user needs to read them (SEC-003).
+*/
+function writeJsonAtomic(filePath, data) {
+	writeFileAtomic(filePath, JSON.stringify(data), 384);
+}
+/**
+* Read a JSON file and validate it, or get nothing. Every cache file in this
+* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
+* checks nothing at runtime — while config got full valibot validation. The
+* caches are the files that can actually be corrupted, by a torn write or by
+* hand (#92).
+*
+* Returns null for a missing file, an unreadable one, malformed JSON, or a
+* document that does not match `schema`. Callers treat null as "rebuild from
+* scratch", which is the posture they already had for a missing file.
+*/
+function readJsonValidated(filePath, schema) {
+	let raw;
+	try {
+		raw = fs$5.readFileSync(filePath, "utf-8");
+	} catch {
+		return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const result = safeParse(schema, parsed);
+	return result.success ? result.output : null;
 }
 
 //#endregion
@@ -2148,9 +2651,272 @@ function getFirstTimestamp(entries) {
 * which is neither a turn nor a render.
 */
 function countHumanTurns(entries) {
-	let count = 0;
-	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count++;
-	return count;
+	let count$1 = 0;
+	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count$1++;
+	return count$1;
+}
+
+//#endregion
+//#region src/cache/file-aggregate.ts
+/**
+* Per-file transcript aggregates, cached on disk and reused while the file's
+* `mtimeMs` and `size` both still match. Shared by the today aggregate
+* (`today-aggregate-cache.ts`, #94) and the session aggregate
+* (`session-aggregate-cache.ts`, COR-007), which cache different entries of
+* the same files: today's are filtered to today, the session's are not.
+*/
+const count = pipe(finiteNumber(), minValue(0));
+const TokenCountsSchema = object({
+	inputTokens: count,
+	outputTokens: count,
+	cacheCreationTokens: count,
+	cacheCreation1hTokens: count,
+	cacheReadTokens: count
+});
+/**
+* `premium` is REQUIRED, so a cache file written before the tier split fails
+* validation and is discarded rather than read as "no premium tokens" — a
+* wrong total for the rest of the day is worse than one re-parse (#103).
+*
+* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
+* TTL split fails validation and is discarded rather than read as "no 1-hour
+* tokens" — which would under-cost the rest of the day (#118).
+*/
+const TokenMetricsSchema = object({
+	...TokenCountsSchema.entries,
+	premium: TokenCountsSchema
+});
+/**
+* `byModel` is entries rather than an object because a Map does not survive
+* JSON; `totals` is stored alongside it because entries carrying usage but no
+* `model` count toward the totals and toward no bucket, so the totals cannot
+* be reconstructed by summing `byModel`.
+*
+* `firstTimestamp` and `humanTurns` are what the session render derives from
+* a transcript besides its tokens: the session's start and its turn count.
+* They are REQUIRED, so a cache written before they existed is discarded
+* rather than read as "no start, no turns".
+*/
+const FileAggregateSchema = object({
+	mtimeMs: finiteNumber(),
+	size: pipe(finiteNumber(), minValue(0)),
+	byModel: array(tuple([string(), TokenMetricsSchema])),
+	totals: TokenMetricsSchema,
+	firstTimestamp: nullable(finiteNumber()),
+	humanTurns: pipe(finiteNumber(), integer(), minValue(0))
+});
+function emptyCounts() {
+	return {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheCreationTokens: 0,
+		cacheCreation1hTokens: 0,
+		cacheReadTokens: 0
+	};
+}
+function emptyMetrics() {
+	return {
+		...emptyCounts(),
+		premium: emptyCounts()
+	};
+}
+function addCountsInto(target, source) {
+	target.inputTokens += source.inputTokens;
+	target.outputTokens += source.outputTokens;
+	target.cacheCreationTokens += source.cacheCreationTokens;
+	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
+	target.cacheReadTokens += source.cacheReadTokens;
+}
+function addInto(target, source) {
+	addCountsInto(target, source);
+	if (source.premium) {
+		target.premium ??= emptyCounts();
+		addCountsInto(target.premium, source.premium);
+	}
+}
+function countsFinite(c) {
+	return Number.isFinite(c.inputTokens) && Number.isFinite(c.outputTokens) && Number.isFinite(c.cacheCreationTokens) && Number.isFinite(c.cacheCreation1hTokens) && Number.isFinite(c.cacheReadTokens);
+}
+/**
+* Whether a per-file aggregate survives a round-trip through the cache file.
+* Ingestion rejects non-finite counts, but finite ones can still sum past
+* Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails the
+* schema and discards every file's cached aggregate, so one such file would
+* force every file to be re-parsed on every render.
+*/
+function aggregateFinite(a) {
+	const metricsFinite = (m) => countsFinite(m) && (m.premium === void 0 || countsFinite(m.premium));
+	return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
+}
+/**
+* `TokenMetrics.premium` stays optional in memory (other call sites build
+* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
+* always populates it, so this is just bridging the wider in-memory type to the
+* stricter persisted one — not a silent default for genuinely-missing data.
+*/
+function withRequiredPremium(metrics) {
+	return {
+		...metrics,
+		premium: metrics.premium ?? emptyCounts()
+	};
+}
+function aggregateEntries(file, entries) {
+	const aggregate = aggregateTokens(entries);
+	return {
+		mtimeMs: file.mtimeMs,
+		size: file.size,
+		byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
+		totals: withRequiredPremium(aggregate.totals),
+		firstTimestamp: getFirstTimestamp(entries),
+		humanTurns: countHumanTurns(entries)
+	};
+}
+/**
+* Reuse each file's cached aggregate while its `mtimeMs` AND `size` both still
+* match, and re-parse the rest with `readEntries`. The result is always
+* assembled from aggregates verified against the live files during this
+* call, so two processes racing on the cache write can cost one extra
+* re-parse on a later render, never a wrong total.
+*
+* Whole files are re-parsed when they change, rather than resumed from a byte
+* offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
+* straddling an offset boundary would need that map carried across renders.
+*/
+function refreshFileAggregates(files, previous, readEntries$1) {
+	const next = {};
+	let changed = Object.keys(previous).length !== files.length;
+	for (const file of files) {
+		const hit = Object.hasOwn(previous, file.path) ? previous[file.path] : void 0;
+		if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
+			next[file.path] = hit;
+			continue;
+		}
+		next[file.path] = aggregateEntries(file, readEntries$1(file.path));
+		changed = true;
+	}
+	return {
+		files: next,
+		changed
+	};
+}
+/**
+* The aggregates that can be written. An overflowing file is used for this
+* render but not cached; it is re-parsed next time while every other file is
+* still a cache hit.
+*/
+function persistableAggregates(files) {
+	return Object.fromEntries(Object.entries(files).filter(([, a]) => aggregateFinite(a)));
+}
+/** Sum per-file aggregates into one session's or one day's metrics. */
+function sumAggregates(aggregates) {
+	const byModel = new Map();
+	const totals = emptyMetrics();
+	for (const aggregate of aggregates) {
+		addInto(totals, aggregate.totals);
+		for (const [model, metrics] of aggregate.byModel) {
+			let bucket = byModel.get(model);
+			if (!bucket) {
+				bucket = emptyMetrics();
+				byModel.set(model, bucket);
+			}
+			addInto(bucket, metrics);
+		}
+	}
+	return {
+		byModel,
+		totals
+	};
+}
+
+//#endregion
+//#region src/cache/session-aggregate-cache.ts
+const SessionAggregateCacheSchema = object({ files: record(string(), FileAggregateSchema) });
+const STALE_MS = 7 * 24 * 60 * 60 * 1e3;
+/** Null when there is no cache dir (SEC-004): every file is re-parsed. */
+function cacheDir() {
+	const dir = getCacheDir();
+	return dir === null ? null : path$8.join(dir, "session-aggregates");
+}
+/**
+* One file per session, keyed like the daily store's shards. A single shared
+* file would make two live sessions evict each other's aggregates on every
+* write, which is the full re-parse this cache exists to avoid.
+*/
+function cachePath$1(sessionId) {
+	const dir = cacheDir();
+	return dir === null ? null : path$8.join(dir, `${shardKey(sessionId)}.json`);
+}
+/**
+* Delete other sessions' caches untouched for a week. Run only when this
+* session's cache is created, so it costs one readdir per new session, not
+* per render. Judged on the file's mtime, which every write updates.
+*/
+function sweepStale(now) {
+	const dir = cacheDir();
+	if (dir === null) return;
+	let names;
+	try {
+		names = fs$3.readdirSync(dir);
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		const filePath = path$8.join(dir, name);
+		try {
+			if (now - fs$3.statSync(filePath).mtimeMs > STALE_MS) fs$3.unlinkSync(filePath);
+		} catch {}
+	}
+}
+function statAll(paths) {
+	const stats = [];
+	for (const filePath of paths) try {
+		const s = fs$3.statSync(filePath);
+		stats.push({
+			path: filePath,
+			mtimeMs: s.mtimeMs,
+			size: s.size
+		});
+	} catch {}
+	return stats;
+}
+/**
+* This session's token usage, start time and turn count, from every session
+* transcript (main and subagents, COR-007), with each file's aggregate
+* cached on (path, mtimeMs, size).
+*
+* A finished subagent transcript never changes, so on a steady render only
+* the live files are re-parsed. Before this cache, reading subagent
+* transcripts cost about +570 ms per uncached render on the developer's
+* largest session (177 agent files, 213 MB), because every file was
+* re-parsed every time (PR #156 review).
+*/
+function getSessionAggregate(sessionId) {
+	const transcripts = findSessionTranscripts(sessionId);
+	const mainPaths = new Set(transcripts.main);
+	const files = statAll([...transcripts.main, ...transcripts.subagents]);
+	const target = sessionId && files.length > 0 ? cachePath$1(sessionId) : null;
+	let previous = {};
+	if (target !== null) {
+		const cached = readJsonValidated(target, SessionAggregateCacheSchema);
+		if (cached) previous = cached.files;
+		else sweepStale(Date.now());
+	}
+	const next = refreshFileAggregates(files, previous, parseJsonlFile);
+	if (target !== null && next.changed) try {
+		writeJsonAtomic(target, { files: persistableAggregates(next.files) });
+	} catch {}
+	const all = files.map((f) => next.files[f.path]);
+	const main$1 = files.filter((f) => mainPaths.has(f.path)).map((f) => next.files[f.path]);
+	return {
+		metrics: sumAggregates(all),
+		sessionStartTime: earliestStart(main$1) ?? earliestStart(all),
+		turnCount: main$1.reduce((sum, a) => sum + a.humanTurns, 0)
+	};
+}
+function earliestStart(aggregates) {
+	let earliest = null;
+	for (const { firstTimestamp } of aggregates) if (firstTimestamp !== null && (earliest === null || firstTimestamp < earliest)) earliest = firstTimestamp;
+	return earliest;
 }
 
 //#endregion
@@ -2158,89 +2924,40 @@ function countHumanTurns(entries) {
 const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
 
 //#endregion
-//#region src/utils/atomic-json.ts
-let counter = 0;
-/**
-* The same atomicity guarantee as `writeJsonAtomic`, for content that is
-* already a string. `gccusage setup` needs this: `~/.claude/settings.json` is
-* a file the user reads and edits, so it keeps its 2-space indentation and
-* trailing newline rather than the compact encoding `writeJsonAtomic` emits.
-*/
-function writeFileAtomic(filePath, contents) {
-	const dir = path$8.dirname(filePath);
-	ensureDir(dir);
-	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
-	fs$3.writeFileSync(tmpPath, contents, "utf-8");
-	try {
-		fs$3.renameSync(tmpPath, filePath);
-	} catch (err) {
-		try {
-			fs$3.unlinkSync(tmpPath);
-		} catch {}
-		throw err;
-	}
-}
-/**
-* Write JSON to `filePath` so that readers see either the previous contents
-* or the new ones, never a partial file: serialise into a uniquely named
-* sibling, then rename it over the target. Same directory means same
-* filesystem, which is what makes the rename atomic.
-*
-* Throws on failure; callers keep whatever error posture they already have.
-*/
-function writeJsonAtomic(filePath, data) {
-	writeFileAtomic(filePath, JSON.stringify(data));
-}
-/**
-* Read a JSON file and validate it, or get nothing. Every cache file in this
-* codebase used to be read with `JSON.parse(raw) as SomeType` — a cast that
-* checks nothing at runtime — while config got full valibot validation. The
-* caches are the files that can actually be corrupted, by a torn write or by
-* hand (#92).
-*
-* Returns null for a missing file, an unreadable one, malformed JSON, or a
-* document that does not match `schema`. Callers treat null as "rebuild from
-* scratch", which is the posture they already had for a missing file.
-*/
-function readJsonValidated(filePath, schema) {
-	let raw;
-	try {
-		raw = fs$3.readFileSync(filePath, "utf-8");
-	} catch {
-		return null;
-	}
-	let parsed;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		return null;
-	}
-	const result = safeParse(schema, parsed);
-	return result.success ? result.output : null;
-}
-
-//#endregion
 //#region src/cache/block-cache.ts
-const BlockCacheSchema = object({ blockStartTime: number() });
+const BlockCacheSchema = object({ blockStartTime: persistedTimestamp() });
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getBlockCachePath() {
-	return path$7.join(getCacheDir(), "blocks", "current.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$7.join(dir, "blocks", "current.json");
 }
-function loadBlockCache() {
-	const cachePath$1 = getBlockCachePath();
-	const data = readJsonValidated(cachePath$1, BlockCacheSchema);
+/**
+* The cached block, if it is still running. The one place a cached start is
+* judged: the elapsed time comes back with it so `detectBlock` never
+* re-derives it as `now - blockStartTime`, a second gate that could disagree.
+*/
+function loadBlockCache(now = Date.now()) {
+	const cachePath$2 = getBlockCachePath();
+	if (cachePath$2 === null) return null;
+	const data = readJsonValidated(cachePath$2, BlockCacheSchema);
 	if (!data) return null;
-	if (Date.now() - data.blockStartTime > BLOCK_DURATION_MS) {
+	const elapsedMs = ageSince(data.blockStartTime, now);
+	if (elapsedMs === null || elapsedMs >= BLOCK_DURATION_MS) {
 		try {
-			fs$2.unlinkSync(cachePath$1);
+			fs$2.unlinkSync(cachePath$2);
 		} catch {}
 		return null;
 	}
-	return data;
+	return {
+		...data,
+		elapsedMs
+	};
 }
 function saveBlockCache(data) {
-	const cachePath$1 = getBlockCachePath();
+	const cachePath$2 = getBlockCachePath();
+	if (cachePath$2 === null) return;
 	try {
-		writeJsonAtomic(cachePath$1, data);
+		writeJsonAtomic(cachePath$2, data);
 	} catch {}
 }
 
@@ -2248,19 +2965,16 @@ function saveBlockCache(data) {
 //#region src/data/block-tracker.ts
 function detectBlock(sessionStartTime) {
 	const now = Date.now();
-	const cached = loadBlockCache();
-	if (cached) {
-		const elapsed = now - cached.blockStartTime;
-		if (elapsed < BLOCK_DURATION_MS) return {
-			blockStartTime: cached.blockStartTime,
-			elapsedMs: elapsed,
-			remainingMs: BLOCK_DURATION_MS - elapsed,
-			blockDurationMs: BLOCK_DURATION_MS
-		};
-	}
+	const cached = loadBlockCache(now);
+	if (cached) return {
+		blockStartTime: cached.blockStartTime,
+		elapsedMs: cached.elapsedMs,
+		remainingMs: BLOCK_DURATION_MS - cached.elapsedMs,
+		blockDurationMs: BLOCK_DURATION_MS
+	};
 	if (sessionStartTime !== null) {
-		const elapsed = now - sessionStartTime;
-		if (elapsed < BLOCK_DURATION_MS) {
+		const elapsed = ageSince(sessionStartTime, now);
+		if (elapsed !== null && elapsed < BLOCK_DURATION_MS) {
 			saveBlockCache({ blockStartTime: sessionStartTime });
 			return {
 				blockStartTime: sessionStartTime,
@@ -2506,6 +3220,45 @@ const MAX_COST_PER_TOKEN = .001;
 * stop believing it. Anthropic has never moved a price by this factor.
 */
 const MAX_SNAPSHOT_DEVIATION = 10;
+/**
+* A pricing table is a dictionary keyed by the LiteLLM feed and by the cache
+* file, so it has no prototype. As a plain `{}`, a feed key such as
+* `claude-x/__proto__` (model id `__proto__`) made `table[id] = pricing`
+* REPLACE the table's prototype rather than add an entry. Every reader uses
+* `Object.hasOwn` (#143), which made that inert, but a guard on reads alone
+* holds only while the next reader remembers it. With no prototype there is
+* nothing for a key to reach: every assignment is an own data property
+* (SEC-005).
+*/
+function createPricingTable() {
+	return Object.create(null);
+}
+/**
+* Tables layered in order, later winning, into a fresh prototype-less table.
+* `Object.assign`, not spread into `{}`: the result is itself a table, keyed
+* by the cache, and is held to the same rule as the tables it merges.
+*/
+function mergePricingTables(...tables) {
+	return Object.assign(createPricingTable(), ...tables);
+}
+/**
+* The names valibot's `v.record` silently drops when the cache is read
+* (`_isValidObjectKey`). Dropped at the feed and on every cache-sourced table
+* too, so a fetched table and its round-trip through `pricing.json` hold the
+* same keys instead of diverging on the second read. No Claude model is named
+* any of these. Keeping `__proto__` would also be unsafe in one place no
+* prototype-less object can help: `npm run pricing` writes the parsed table
+* out as a TypeScript object literal, where a `"__proto__":` key SETS the
+* prototype of FALLBACK_PRICING (SEC-005).
+*/
+const UNSTORABLE_KEYS = new Set([
+	"__proto__",
+	"prototype",
+	"constructor"
+]);
+function isStorablePricingKey(key) {
+	return !UNSTORABLE_KEYS.has(key);
+}
 const COST_KEYS = [
 	"inputCostPerToken",
 	"outputCostPerToken",
@@ -2537,10 +3290,9 @@ function isSaneModelPricing(value) {
 */
 function sanitiseModelPricing(value) {
 	if (!isSaneModelPricing(value)) return null;
-	const pricing = value;
-	if (pricing.above200k === void 0) return pricing;
-	if (isSaneTier(pricing.above200k, pricing)) return pricing;
-	const { above200k: _rejected,...withoutTier } = pricing;
+	if (value.above200k === void 0) return value;
+	if (isSaneTier(value.above200k, value)) return value;
+	const { above200k: _rejected,...withoutTier } = value;
 	return withoutTier;
 }
 /**
@@ -2550,8 +3302,7 @@ function sanitiseModelPricing(value) {
 */
 function isSaneTier(tier, base) {
 	if (!isSaneModelPricing(tier)) return false;
-	const rates = tier;
-	return COST_KEYS.every((key) => rates[key] >= base[key]);
+	return COST_KEYS.every((key) => tier[key] >= base[key]);
 }
 /**
 * Drop the entries that fail bounds, keep the rest. Never all-or-nothing —
@@ -2560,8 +3311,9 @@ function isSaneTier(tier, base) {
 * an `above200k` block while keeping the entry it belonged to.
 */
 function sanitisePricingTable(table) {
-	const out = {};
+	const out = createPricingTable();
 	for (const [key, value] of Object.entries(table)) {
+		if (!isStorablePricingKey(key)) continue;
 		const pricing = sanitiseModelPricing(value);
 		if (pricing) out[key] = pricing;
 	}
@@ -2582,7 +3334,7 @@ function sanitisePricingTable(table) {
 * Models absent from the snapshot are genuinely new and pass on bounds alone.
 */
 function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
-	const out = {};
+	const out = createPricingTable();
 	for (const [key, value] of Object.entries(table)) {
 		const known = Object.hasOwn(snapshot, key) ? snapshot[key] : void 0;
 		if (!known) {
@@ -2657,11 +3409,13 @@ function tierWithinDeviation(fetched, known) {
 const PRICING_CACHE_VERSION = 2;
 const PricingCacheSchema = object({
 	version: literal(PRICING_CACHE_VERSION),
-	timestamp: number(),
+	timestamp: persistedTimestamp(),
 	data: record(string(), unknown())
 });
+/** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getCachePath$1() {
-	return path$6.join(getCacheDir(), "pricing.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$6.join(dir, "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -2671,29 +3425,38 @@ function getCachePath$1() {
 * the table is too old to price from at all.
 */
 function loadPricingCacheEntry() {
-	const cache = readJsonValidated(getCachePath$1(), PricingCacheSchema);
+	const cachePath$2 = getCachePath$1();
+	if (cachePath$2 === null) return null;
+	const cache = readJsonValidated(cachePath$2, PricingCacheSchema);
 	if (!cache) return null;
+	const ageMs = ageSince(cache.timestamp);
 	const data = sanitisePricingTable(cache.data);
 	if (Object.keys(data).length === 0) return null;
 	return {
 		data,
-		ageMs: Date.now() - cache.timestamp
+		ageMs
 	};
 }
+/**
+* The cache only while it is known to be fresh. An unknown age is not fresh,
+* so `fetchPricing` refetches at once — the CLI's equivalent of the render
+* path's `stale: true`.
+*/
 function loadPricingCache(ttlMs) {
 	const entry = loadPricingCacheEntry();
-	if (!entry) return null;
+	if (!entry || entry.ageMs === null) return null;
 	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
-	const cachePath$1 = getCachePath$1();
+	const cachePath$2 = getCachePath$1();
+	if (cachePath$2 === null) return;
 	try {
 		const cache = {
 			version: PRICING_CACHE_VERSION,
 			timestamp: Date.now(),
 			data
 		};
-		writeJsonAtomic(cachePath$1, cache);
+		writeJsonAtomic(cachePath$2, cache);
 	} catch {}
 }
 
@@ -2727,15 +3490,20 @@ const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1e3;
 */
 function getPricingForRender(ttlMs) {
 	const entry = loadPricingCacheEntry();
-	if (!entry || entry.ageMs >= MAX_STALE_MS) return {
-		pricing: { ...FALLBACK_PRICING },
+	if (!entry) return {
+		pricing: mergePricingTables(FALLBACK_PRICING),
+		stale: true
+	};
+	if (entry.ageMs === null) return {
+		pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
+		stale: true
+	};
+	if (entry.ageMs >= MAX_STALE_MS) return {
+		pricing: mergePricingTables(FALLBACK_PRICING),
 		stale: true
 	};
 	return {
-		pricing: {
-			...FALLBACK_PRICING,
-			...entry.data
-		},
+		pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
 		stale: entry.ageMs >= ttlMs
 	};
 }
@@ -2816,7 +3584,7 @@ function parseTier(model) {
 	};
 }
 function parseLitellmPricing(data) {
-	const table = {};
+	const table = createPricingTable();
 	for (const [key, value] of Object.entries(data)) {
 		if (!key.startsWith("claude-") || typeof value !== "object" || !value) continue;
 		const model = value;
@@ -2836,7 +3604,7 @@ function parseLitellmPricing(data) {
 		const sane = sanitiseModelPricing(pricing);
 		if (!sane) continue;
 		const modelId = key.includes("/") ? key.split("/").pop() : key;
-		table[modelId] = sane;
+		if (isStorablePricingKey(modelId)) table[modelId] = sane;
 		if (key !== modelId) table[key] = sane;
 	}
 	return table;
@@ -2851,10 +3619,7 @@ function parseLitellmPricing(data) {
 */
 async function fetchPricing(ttlMs) {
 	const cached = loadPricingCache(ttlMs);
-	if (cached) return {
-		...FALLBACK_PRICING,
-		...cached
-	};
+	if (cached) return mergePricingTables(FALLBACK_PRICING, cached);
 	try {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
@@ -2862,14 +3627,11 @@ async function fetchPricing(ttlMs) {
 			const pricing = anchorToSnapshot(parseLitellmPricing(data));
 			if (Object.keys(pricing).length > 0) {
 				savePricingCache(pricing);
-				return {
-					...FALLBACK_PRICING,
-					...pricing
-				};
+				return mergePricingTables(FALLBACK_PRICING, pricing);
 			}
 		}
 	} catch {}
-	return { ...FALLBACK_PRICING };
+	return mergePricingTables(FALLBACK_PRICING);
 }
 
 //#endregion
@@ -2888,8 +3650,8 @@ const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 * again (#122).
 */
 const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
-function stampPath() {
-	return path$5.join(getCacheDir(), PRICING_REFRESH_STAMP_FILE);
+function stampPath(cacheDir$1) {
+	return path$5.join(cacheDir$1, PRICING_REFRESH_STAMP_FILE);
 }
 /**
 * `v.finite()`, not bare `v.number()`: `JSON.parse('{"timestamp":1e400}')`
@@ -2898,12 +3660,18 @@ function stampPath() {
 * the backoff window, and the stamp is only rewritten *after* the check — so
 * the file causing the wrong answer gated its own repair and pricing froze
 * permanently, silently (#133).
+*
+* `finite()` closed that for `1e400` only: any finite stamp in the future
+* (`9e15`, a clock set backwards) gave the same negative age, and latched the
+* backoff until the clock caught up. Hence `persistedTimestamp()` plus
+* `ageSince` below (COR-006).
 */
-const StampSchema = object({ timestamp: pipe(number(), finite()) });
-function attemptedRecently() {
-	const stamp = readJsonValidated(stampPath(), StampSchema);
+const StampSchema = object({ timestamp: persistedTimestamp() });
+function attemptedRecently(cacheDir$1) {
+	const stamp = readJsonValidated(stampPath(cacheDir$1), StampSchema);
 	if (stamp === null) return false;
-	return Date.now() - stamp.timestamp < REFRESH_BACKOFF_MS;
+	const age = ageSince(stamp.timestamp);
+	return age !== null && age < REFRESH_BACKOFF_MS;
 }
 /**
 * Refreshes pricing out of band when the cache is stale, so the render path
@@ -2919,180 +3687,74 @@ function attemptedRecently() {
 */
 function maybeSpawnPricingRefresh(stale) {
 	if (!stale) return;
+	const cacheDir$1 = getCacheDir();
+	if (cacheDir$1 === null) return;
 	try {
-		if (attemptedRecently()) return;
-		ensureDir(getCacheDir());
-		writeJsonAtomic(stampPath(), { timestamp: Date.now() });
+		if (attemptedRecently(cacheDir$1)) return;
+		ensureDir(cacheDir$1);
+		writeJsonAtomic(stampPath(cacheDir$1), { timestamp: Date.now() });
 		const entry = fileURLToPath(import.meta.url);
 		const child = spawn(process.execPath, [entry, "refresh-pricing"], {
 			detached: true,
 			stdio: "ignore"
+		});
+		child.on("error", (err) => {
+			if (process.env["GCCUSAGE_DEBUG"]) console.error("gccusage: pricing refresher failed to spawn —", err.message);
 		});
 		child.unref();
 	} catch {}
 }
 
 //#endregion
-//#region src/cache/today-aggregate-cache.ts
-const TokenCountsSchema = object({
-	inputTokens: pipe(number(), minValue(0)),
-	outputTokens: pipe(number(), minValue(0)),
-	cacheCreationTokens: pipe(number(), minValue(0)),
-	cacheCreation1hTokens: pipe(number(), minValue(0)),
-	cacheReadTokens: pipe(number(), minValue(0))
-});
+//#region src/utils/local-date.ts
 /**
-* `premium` is REQUIRED, so a cache file written before the tier split fails
-* validation and is discarded rather than read as "no premium tokens" — a
-* wrong total for the rest of the day is worse than one re-parse (#103).
+* The local calendar date as `YYYY-MM-DD`: the key both daily stores reset on
+* (the per-session cost shards and the today-aggregate cache).
 *
-* `cacheCreation1hTokens` is likewise REQUIRED, so a file written before the
-* TTL split fails validation and is discarded rather than read as "no 1-hour
-* tokens" — which would under-cost the rest of the day (#118).
+* One owner on purpose (MAINT-003). The two stores used to carry identical
+* private copies, and they must roll over at the same instant: if one moved to
+* UTC or a zone override and the other didn't, `Today:` and the calculated
+* today figure would reset at different times. Local, not UTC, to match
+* `isEntryFromToday`'s local midnight.
 */
-const TokenMetricsSchema = object({
-	...TokenCountsSchema.entries,
-	premium: TokenCountsSchema
-});
-/**
-* `byModel` is entries rather than an object because a Map does not survive
-* JSON; `totals` is stored alongside it because entries carrying usage but no
-* `model` count toward the totals and toward no bucket, so the totals cannot
-* be reconstructed by summing `byModel`.
-*/
-const FileAggregateSchema = object({
-	mtimeMs: number(),
-	size: number(),
-	byModel: array(tuple([string(), TokenMetricsSchema])),
-	totals: TokenMetricsSchema
-});
+function localDateKey(d) {
+	const month = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${d.getFullYear()}-${month}-${day}`;
+}
+
+//#endregion
+//#region src/cache/today-aggregate-cache.ts
 const TodayAggregateCacheSchema = object({
 	date: string(),
 	files: record(string(), FileAggregateSchema)
 });
+/** Null when there is no cache dir (SEC-004): every file is re-parsed. */
 function cachePath() {
-	return path$4.join(getCacheDir(), "today-aggregates.json");
-}
-/** Local date, matching how `filterTodayEntries` picks its midnight. */
-function localDateKey(now) {
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	const day = String(now.getDate()).padStart(2, "0");
-	return `${now.getFullYear()}-${month}-${day}`;
-}
-function emptyCounts() {
-	return {
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheCreationTokens: 0,
-		cacheCreation1hTokens: 0,
-		cacheReadTokens: 0
-	};
-}
-function emptyMetrics() {
-	return {
-		...emptyCounts(),
-		premium: emptyCounts()
-	};
-}
-function addCountsInto(target, source) {
-	target.inputTokens += source.inputTokens;
-	target.outputTokens += source.outputTokens;
-	target.cacheCreationTokens += source.cacheCreationTokens;
-	target.cacheCreation1hTokens += source.cacheCreation1hTokens;
-	target.cacheReadTokens += source.cacheReadTokens;
-}
-function addInto(target, source) {
-	addCountsInto(target, source);
-	if (source.premium) {
-		target.premium ??= emptyCounts();
-		addCountsInto(target.premium, source.premium);
-	}
-}
-/**
-* `TokenMetrics.premium` stays optional in memory (other call sites build
-* `TokenMetrics` by hand), but the on-disk schema requires it. `aggregateTokens`
-* always populates it, so this is just bridging the wider in-memory type to the
-* stricter persisted one — not a silent default for genuinely-missing data.
-*/
-function countsFinite(c) {
-	return Number.isFinite(c.inputTokens) && Number.isFinite(c.outputTokens) && Number.isFinite(c.cacheCreationTokens) && Number.isFinite(c.cacheCreation1hTokens) && Number.isFinite(c.cacheReadTokens);
-}
-/**
-* Whether a per-file aggregate survives a round-trip through the cache file.
-* Ingestion rejects non-finite counts, but finite ones can still sum past
-* Number.MAX_VALUE. `JSON.stringify` writes that as `null`, which fails
-* `TodayAggregateCacheSchema` and discards every file's cached aggregate, so
-* one such file would force the whole day to be re-parsed on every render.
-*/
-function aggregateFinite(a) {
-	const metricsFinite = (m) => countsFinite(m) && (m.premium === void 0 || countsFinite(m.premium));
-	return metricsFinite(a.totals) && a.byModel.every(([, m]) => metricsFinite(m));
-}
-function withRequiredPremium(metrics) {
-	return {
-		...metrics,
-		premium: metrics.premium ?? emptyCounts()
-	};
+	const dir = getCacheDir();
+	return dir === null ? null : path$4.join(dir, "today-aggregates.json");
 }
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
-*
-* A cached per-file aggregate is reused only when the file's `mtimeMs` AND
-* `size` both still match, so the returned figure is always assembled from
-* entries that were verified against the live files during this call. Two
-* statuslines racing on the write can therefore cost one extra re-parse on a
-* later render, but neither can serve a wrong total — the same no-lock posture
-* as the daily cost store.
-*
-* Whole files are re-parsed when they change, rather than resuming from a byte
-* offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
-* straddling an offset boundary would need that map carried across renders.
-* The only file that changes mid-day is the active transcript, and re-parsing
-* it whole is still flat with respect to the day's total volume (#94).
+* Reuse and re-parse follow `refreshFileAggregates`: a file is re-parsed only
+* when its `mtimeMs` or `size` changed. The only file that changes mid-day is
+* the active transcript, so re-parsing it whole is still flat with respect to
+* the day's total volume (#94).
 */
 function getTodayAggregate(now = new Date()) {
 	const files = findTodayJsonlFileStats();
 	const date = localDateKey(now);
-	const cached = readJsonValidated(cachePath(), TodayAggregateCacheSchema);
+	const target = cachePath();
+	const cached = target === null ? null : readJsonValidated(target, TodayAggregateCacheSchema);
 	const previous = cached && cached.date === date ? cached.files : {};
-	const next = {};
-	let changed = Object.keys(previous).length !== files.length;
-	for (const file of files) {
-		const hit = previous[file.path];
-		if (hit && hit.mtimeMs === file.mtimeMs && hit.size === file.size) {
-			next[file.path] = hit;
-			continue;
-		}
-		const entries = filterTodayEntries(parseJsonlFile(file.path), now);
-		const aggregate = aggregateTokens(entries);
-		next[file.path] = {
-			mtimeMs: file.mtimeMs,
-			size: file.size,
-			byModel: [...aggregate.byModel].map(([model, metrics]) => [model, withRequiredPremium(metrics)]),
-			totals: withRequiredPremium(aggregate.totals)
-		};
-		changed = true;
-	}
-	if (changed) try {
-		const persistable = Object.fromEntries(Object.entries(next).filter(([, aggregate]) => aggregateFinite(aggregate)));
-		writeJsonAtomic(cachePath(), {
+	const next = refreshFileAggregates(files, previous, (filePath) => filterTodayEntries(parseJsonlFile(filePath), now));
+	if (next.changed && target !== null) try {
+		writeJsonAtomic(target, {
 			date,
-			files: persistable
+			files: persistableAggregates(next.files)
 		});
 	} catch {}
-	const byModel = new Map();
-	const totals = emptyMetrics();
-	for (const aggregate of Object.values(next)) {
-		addInto(totals, aggregate.totals);
-		for (const [model, metrics] of aggregate.byModel) {
-			let bucket = byModel.get(model);
-			if (!bucket) {
-				bucket = emptyMetrics();
-				byModel.set(model, bucket);
-			}
-			addInto(bucket, metrics);
-		}
-	}
+	const { byModel, totals } = sumAggregates(Object.values(next.files));
 	return {
 		byModel,
 		totals,
@@ -3184,15 +3846,28 @@ function findPricing(model, table) {
 	}
 	return best === null ? null : table[best];
 }
-function calculateBurnRate(sessionMetrics, sessionStartTime, pricing, sessionModel) {
+/**
+* The calculated session cost per unit of elapsed time: the SAME per-model
+* figure the session total shows, divided by how long the session has run.
+*
+* COR-008: this used to price the session's token totals at the CURRENT
+* model's rate (the stdin model). A session of 400k opus and 1.6M haiku input
+* tokens over an hour read $10.00/hr with opus selected and $2.00/hr with
+* haiku, beside a per-model session total of $3.60. Taking `CostByModel`
+* rather than raw totals makes the rate agree with that total by
+* construction, whatever `/model` says now.
+*
+* Uncertainty is the caller's to flag, from the same `unpriced` and
+* `approximated` lists that mark the session total: the rate divides a lower
+* bound, so it is one too.
+*/
+function calculateBurnRate(session, sessionStartTime) {
 	if (!sessionStartTime) return null;
-	const elapsedMs = Date.now() - sessionStartTime;
-	if (elapsedMs < 1e4) return null;
+	const elapsedMs = ageSince(sessionStartTime);
+	if (elapsedMs === null || elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
-	if (!sessionModel) return null;
-	const modelPricing = findPricing(sessionModel, pricing);
-	if (!modelPricing) return null;
-	const sessionCost = calculateCost(sessionMetrics, modelPricing);
+	if (session.costs.size === 0 && session.unpriced.length > 0) return null;
+	const sessionCost = calculateTotalCost(session.costs);
 	const costPerMinute = sessionCost / elapsedMinutes;
 	return {
 		costPerHour: costPerMinute * 60,
@@ -4254,10 +4929,12 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 const ShardSchema = object({
 	sessionId: string(),
 	date: string(),
-	costUsd: pipe(number(), finite()),
-	baselineUsd: fallback(pipe(number(), finite()), 0),
+	costUsd: finiteNumber(),
+	baselineUsd: fallback(finiteNumber(), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(pipe(number(), safeInteger()), 0)
+	updatedAt: fallback(persistedTimestamp(), 0),
+	processStart: fallback(optional(persistedTimestamp()), void 0),
+	uncertain: fallback(boolean(), false)
 });
 const LegacyStoreSchema = object({
 	date: fallback(optional(string()), void 0),
@@ -4265,40 +4942,74 @@ const LegacyStoreSchema = object({
 });
 const LegacyEntrySchema = object({
 	sessionId: string(),
-	costUsd: pipe(number(), finite()),
-	baselineUsd: fallback(pipe(number(), finite()), 0),
+	costUsd: finiteNumber(),
+	baselineUsd: fallback(finiteNumber(), 0),
 	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(optional(pipe(number(), safeInteger())), void 0)
+	updatedAt: fallback(optional(persistedTimestamp()), void 0)
 });
 const STALE_SESSION_MS = 48 * 3600 * 1e3;
-function getShardDir() {
-	return path$3.join(getCacheDir(), "daily");
-}
-function getLegacyPath() {
-	return path$3.join(getCacheDir(), "daily-costs.json");
+/**
+* Whether a shard is old enough to prune. Pruning deletes data, so a stamp in
+* the future (COR-006) is not simply "stale" the way it is for a cache: a
+* clock stepped back by more than `ageSince`'s skew allowance would then
+* delete every live session's spend. A future stamp within the stale window
+* is kept (it still counts only on its own `date`); one further out than
+* that is no clock correction, just garbage, and is pruned.
+*/
+function isStale(updatedAt, now) {
+	const age = ageSince(updatedAt, now.getTime());
+	if (age === null) return updatedAt - now.getTime() > STALE_SESSION_MS;
+	return age >= STALE_SESSION_MS;
 }
 /**
-* One file per session, so a render only ever writes its own session's data.
-* Concurrent sessions therefore cannot clobber each other's entries — there
-* is no shared read-modify-write left to lose an update.
+* Null when there is no cache dir (SEC-004: no home and no absolute
+* XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
 */
-function shardPath(sessionId) {
-	return path$3.join(getShardDir(), `${shardKey(sessionId)}.json`);
+function getStorePaths() {
+	const cacheDir$1 = getCacheDir();
+	if (cacheDir$1 === null) return null;
+	return {
+		shardDir: path$3.join(cacheDir$1, "daily"),
+		legacyPath: path$3.join(cacheDir$1, "daily-costs.json")
+	};
 }
-function dateStr(d) {
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
+/**
+* One file per session, or per Claude Code process for stdin costs
+* (COR-005), so a render only ever writes its own entry's file. Concurrent
+* sessions and processes therefore cannot clobber each other's entries —
+* there is no shared read-modify-write left to lose an update.
+*/
+function shardPath(store, sessionId, processStart) {
+	const suffix = processStart === void 0 ? "" : `.p${processStart}`;
+	return path$3.join(store.shardDir, `${shardKey(sessionId)}${suffix}.json`);
 }
+/**
+* How far apart two computed starts of one process may be. `now -
+* total_duration_ms` is exact in Claude Code, but `now` is taken here after
+* the spawn and the stdin read (before any transcript parse, see
+* pipeline.ts), so each estimate is late by roughly a second. Two processes of
+* one session started closer than this share an entry; resumes of the same
+* saved state in quick succession can (a tmux restore), so it is kept small.
+*/
+const PROCESS_START_TOLERANCE_MS = 1e4;
+/**
+* Claude Code runs the statusline command when its statusline controller
+* starts (2.1.326: `#S()` calls the run method immediately), so a fresh
+* process's first render lands seconds in. A first render further in than
+* this, already carrying spend, is a process whose cost was restored
+* (`--resume`, including `--fork-session`, which hands the parent's cost to a
+* new session_id) or a statusline switched on mid-session. Either way the
+* spend so far is not today's to count when no stored entry accounts for it.
+*/
+const RESTORED_FIRST_RENDER_MS = 12e4;
 /**
 * Split a pre-shard `daily-costs.json` into per-session files, then remove it.
 * Without this, today's total would reset to zero once on upgrade. Two
 * processes migrating at the same time write identical shards, so it is safe
 * to run unsynchronised.
 */
-function migrateLegacyStore(now) {
-	const legacyPath = getLegacyPath();
+function migrateLegacyStore(store, now) {
+	const legacyPath = store.legacyPath;
 	if (!fs$1.existsSync(legacyPath)) return;
 	let raw;
 	try {
@@ -4314,13 +5025,13 @@ function migrateLegacyStore(now) {
 		legacy = null;
 	}
 	const sessions = legacy?.sessions ?? [];
-	const date = legacy?.date ?? dateStr(now);
+	const date = legacy?.date ?? localDateKey(now);
 	try {
 		for (const sessionRaw of sessions) {
 			const parsed = safeParse(LegacyEntrySchema, sessionRaw);
 			if (!parsed.success) continue;
 			const s = parsed.output;
-			const target = shardPath(s.sessionId);
+			const target = shardPath(store, s.sessionId);
 			if (fs$1.existsSync(target)) continue;
 			const entry = {
 				sessionId: s.sessionId,
@@ -4328,7 +5039,8 @@ function migrateLegacyStore(now) {
 				costUsd: s.costUsd,
 				baselineUsd: s.baselineUsd,
 				source: s.source,
-				updatedAt: s.updatedAt ?? now.getTime()
+				updatedAt: s.updatedAt ?? now.getTime(),
+				uncertain: false
 			};
 			writeJsonAtomic(target, entry);
 		}
@@ -4344,21 +5056,21 @@ function migrateLegacyStore(now) {
 * entries from an earlier day are returned as they are, and re-baseline
 * lazily when their own session next writes.
 */
-function readEntries(now) {
-	migrateLegacyStore(now);
+function readEntries(store, now) {
+	migrateLegacyStore(store, now);
 	let files;
 	try {
-		files = fs$1.readdirSync(getShardDir());
+		files = fs$1.readdirSync(store.shardDir);
 	} catch {
 		return [];
 	}
 	const entries = [];
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
-		const fullPath = path$3.join(getShardDir(), file);
+		const fullPath = path$3.join(store.shardDir, file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
-		if (now.getTime() - entry.updatedAt >= STALE_SESSION_MS) {
+		if (isStale(entry.updatedAt, now)) {
 			try {
 				fs$1.unlinkSync(fullPath);
 			} catch {}
@@ -4372,22 +5084,32 @@ function readEntries(now) {
 * The entry `trackDailyCost` would store for this render. Pure: `prev` is not
 * mutated, so the caller can discard the result if it isn't safe to write.
 */
-function nextEntry(prev, sessionId, costUsd, source, today, now) {
+function nextEntry(prev, input, newBaseline, today, now) {
+	const { sessionId, costUsd, source, processStart } = input;
+	const uncertain = input.uncertain ?? false;
 	if (!prev) return {
 		sessionId,
 		date: today,
 		costUsd,
-		baselineUsd: 0,
+		baselineUsd: newBaseline,
 		source,
-		updatedAt: now.getTime()
+		updatedAt: now.getTime(),
+		processStart,
+		uncertain
 	};
-	const entry = { ...prev };
+	const entry = {
+		...prev,
+		uncertain
+	};
 	if (entry.date !== today) {
 		entry.baselineUsd = entry.costUsd;
 		entry.date = today;
 	}
 	const accruedToday = Math.max(0, entry.costUsd - entry.baselineUsd);
-	if (entry.source !== void 0 && entry.source !== source) entry.baselineUsd = costUsd - accruedToday;
+	if (entry.source !== void 0 && entry.source !== source) {
+		if (prev.uncertain && prev.date === today) entry.uncertain = true;
+		entry.baselineUsd = costUsd - accruedToday;
+	} else if (costUsd < entry.costUsd && source === "calculated") entry.baselineUsd = costUsd - accruedToday;
 	else if (costUsd < entry.costUsd) entry.baselineUsd = -accruedToday;
 	entry.costUsd = costUsd;
 	entry.source = source;
@@ -4395,37 +5117,171 @@ function nextEntry(prev, sessionId, costUsd, source, today, now) {
 	return entry;
 }
 /**
-* Record the current session's cumulative cost and return today's total
-* across all sessions (spend since local midnight only).
+* The stored entry this render belongs to, and the baseline a new entry
+* should start from.
 *
-* A non-finite `costUsd` is not recorded: the session's shard is left exactly
-* as it was and today's total uses its last good figure. Persisting it would
+* With a `processStart` (stdin costs only; see `recordDailyCost`), each Claude
+* Code process gets its own entry, in its own shard file, so two processes
+* never write the same file and the REL-001 single-writer property holds per
+* process. Keyed by session alone, two terminals on one session_id read every
+* alternation between their independent cumulative costs as a restart and
+* folded the other process's whole cost into Today each time (COR-005).
+*
+* Without one, the render updates the session's most recently updated entry
+* of any kind. A calculated cost is the whole session's transcript, so every
+* process reports the same series and must share one entry; and one process
+* whose payload sometimes lacks a duration must not grow a second entry.
+*
+* A NEW process entry's baseline, in order:
+* - the largest cost stored for this session, from the same source, that its
+*   first figure reaches. `--resume` restores the cumulative cost saved at
+*   the previous process's exit, which is already counted in that entry;
+*   baselining at the stored figure, not the first one, keeps a turn that ran
+*   before the first render. Same source only: stdin and calculated figures
+*   are on different scales.
+* - its first figure, when the session's only figures are from the other
+*   source (the same spend, re-scaled; the existing entry keeps what it
+*   counted) or the first render is late enough to be restored with nothing
+*   stored to account for it (`RESTORED_FIRST_RENDER_MS`).
+* - otherwise 0: a fresh process, concurrent or first, counts from zero.
+*/
+function findEntry(entries, input, now) {
+	const { sessionId, processStart, costUsd, source } = input;
+	const session = [];
+	entries.forEach((e, i) => {
+		if (e.sessionId === sessionId) session.push(i);
+	});
+	if (processStart === void 0) {
+		let index$1 = -1;
+		for (const i of session) if (index$1 === -1 || entries[i].updatedAt > entries[index$1].updatedAt) index$1 = i;
+		return {
+			index: index$1,
+			newBaseline: 0
+		};
+	}
+	let index = -1;
+	let best = Infinity;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.processStart === void 0) continue;
+		const gap = Math.abs(e.processStart - processStart);
+		if (gap <= PROCESS_START_TOLERANCE_MS && gap < best) {
+			best = gap;
+			index = i;
+		}
+	}
+	if (index !== -1) return {
+		index,
+		newBaseline: 0
+	};
+	let newBaseline = 0;
+	let restoredFrom = false;
+	for (const i of session) {
+		const e = entries[i];
+		if (e.source === source && e.costUsd <= costUsd && e.costUsd >= newBaseline) {
+			newBaseline = e.costUsd;
+			restoredFrom = true;
+		}
+	}
+	if (!restoredFrom) {
+		const otherSourceOnly = session.length > 0 && session.every((i) => entries[i].source !== source);
+		const lateFirstRender = now.getTime() - processStart > RESTORED_FIRST_RENDER_MS;
+		if (otherSourceOnly || lateFirstRender) newBaseline = costUsd;
+	}
+	return {
+		index: -1,
+		newBaseline
+	};
+}
+/**
+* Record the current session's cumulative cost and return today's total
+* across all sessions (spend since local midnight only), with whether that
+* total is exact.
+*
+* A non-finite `costUsd` is not recorded: the cost itself is left exactly as
+* it was and today's total uses its last good figure. Persisting it would
 * write `"costUsd": null` (`JSON.stringify(Infinity)`), which `ShardSchema`
 * rejects on the next read, silently dropping the session from every bar's
 * total and losing its baseline (#145). Ingestion rejects non-finite token
-* counts, but finite ones can still overflow once priced and summed, so this
-* guard is the one that holds at the storage boundary. The caller marks
-* today's figure uncertain in that case.
+* counts, but finite ones can still overflow once priced and summed, and two
+* finite stored values can differ by more than Number.MAX_VALUE, so the
+* re-baseline arithmetic is checked on what would be written, not only on
+* the argument. Either way the entry is re-stamped `uncertain`, so other
+* sessions' bars mark the stale figure too (COR-009).
+*
+* The shard write is caught. It was the one render-path write that was not,
+* so a root-owned or full cache directory threw into `main().catch()` and
+* erased the bar on every render (REL-005). A failed write costs the store
+* update and marks Today uncertain; this render's own figure is still exact.
 */
-function trackDailyCost(sessionId, costUsd, source, now = new Date()) {
-	const today = dateStr(now);
-	const entries = readEntries(now);
-	if (sessionId && Number.isFinite(costUsd)) {
-		const index = entries.findIndex((e) => e.sessionId === sessionId);
+function recordDailyCost(input, now = new Date()) {
+	const store = getStorePaths();
+	if (store === null) return {
+		totalUsd: Number.isFinite(input.costUsd) ? input.costUsd : 0,
+		uncertain: true
+	};
+	const today = localDateKey(now);
+	const entries = readEntries(store, now);
+	let notRecorded = false;
+	const { sessionId } = input;
+	if (sessionId) {
+		const processStart = input.source === "stdin" ? input.processStart : void 0;
+		const keyed = {
+			...input,
+			sessionId,
+			processStart
+		};
+		const { index, newBaseline } = findEntry(entries, keyed, now);
 		const prev = index === -1 ? void 0 : entries[index];
-		const next = nextEntry(prev, sessionId, costUsd, source, today, now);
-		if (Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
+		const next = Number.isFinite(input.costUsd) ? nextEntry(prev, keyed, newBaseline, today, now) : void 0;
+		if (next && Number.isFinite(next.costUsd) && Number.isFinite(next.baselineUsd)) {
 			if (index === -1) entries.push(next);
 			else entries[index] = next;
-			writeJsonAtomic(shardPath(sessionId), next);
+			notRecorded = !tryWrite(store, next);
+		} else {
+			notRecorded = true;
+			if (prev && !prev.uncertain) {
+				const stale = {
+					...prev,
+					uncertain: true
+				};
+				entries[index] = stale;
+				tryWrite(store, stale);
+			} else if (!prev) {
+				const placeholder = {
+					sessionId,
+					date: today,
+					costUsd: 0,
+					baselineUsd: 0,
+					source: input.source,
+					updatedAt: now.getTime(),
+					processStart,
+					uncertain: true
+				};
+				entries.push(placeholder);
+				tryWrite(store, placeholder);
+			}
 		}
 	}
-	let total = 0;
+	let totalUsd = 0;
+	let uncertain = notRecorded;
 	for (const e of entries) {
 		if (e.date !== today) continue;
-		total += Math.max(0, e.costUsd - e.baselineUsd);
+		totalUsd += Math.max(0, e.costUsd - e.baselineUsd);
+		if (e.uncertain) uncertain = true;
 	}
-	return total;
+	return {
+		totalUsd,
+		uncertain
+	};
+}
+function tryWrite(store, entry) {
+	try {
+		writeJsonAtomic(shardPath(store, entry.sessionId, entry.processStart), entry);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 //#endregion
@@ -4443,9 +5299,9 @@ function getStdinBurnRate(stdin) {
 	};
 }
 async function buildRenderContext(stdin, settings) {
-	const sessionFiles = findSessionJsonlFiles(stdin.session_id);
-	const sessionEntries = sessionFiles.flatMap(parseJsonlFile);
-	const metrics = aggregateTokens(sessionEntries);
+	const renderStartedAt = Date.now();
+	const sessionAggregate = getSessionAggregate(stdin.session_id);
+	const metrics = sessionAggregate.metrics;
 	const { pricing, stale } = getPricingForRender(settings.cache?.pricingTtlMs ?? 864e5);
 	maybeSpawnPricingRefresh(stale);
 	const session = calculateCostByModel(metrics.byModel, pricing);
@@ -4462,19 +5318,28 @@ async function buildRenderContext(stdin, settings) {
 		sessionCostSource = "stdin";
 	}
 	const today = settings.costSource === "calculated" ? calculateCostByModel(getTodayAggregate().byModel, pricing) : null;
-	const todayCostUsd = today !== null ? calculateTotalCost(today.costs) : trackDailyCost(stdin.session_id, sessionCostUsd, sessionCostSource);
 	const sessionCostUncertain = sessionCostSource === "calculated" && (session.unpriced.length > 0 || session.approximated.length > 0);
-	const todayCostUncertain = today !== null ? today.unpriced.length > 0 || today.approximated.length > 0 : !Number.isFinite(sessionCostUsd);
-	const sessionStartTime = getFirstTimestamp(sessionEntries);
+	const stored = today === null ? recordDailyCost({
+		sessionId: stdin.session_id,
+		costUsd: sessionCostUsd,
+		source: sessionCostSource,
+		processStart: processStartOf(stdin, renderStartedAt),
+		uncertain: sessionCostUncertain
+	}, new Date(renderStartedAt)) : null;
+	const todayCostUsd = stored ? stored.totalUsd : calculateTotalCost(today.costs);
+	const todayCostUncertain = stored ? stored.uncertain : today.unpriced.length > 0 || today.approximated.length > 0;
+	const sessionStartTime = sessionAggregate.sessionStartTime;
 	const block = detectBlock(sessionStartTime);
-	const modelId = typeof stdin.model === "string" ? stdin.model : stdin.model?.id;
-	const jsonlBurnRate = calculateBurnRate(metrics.totals, sessionStartTime, pricing, modelId);
-	const burnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) ?? jsonlBurnRate : jsonlBurnRate;
+	const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
+	const stdinBurnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) : null;
+	const burnRate = stdinBurnRate ?? jsonlBurnRate;
+	const burnRateUncertain = burnRate !== null && stdinBurnRate === null && (session.unpriced.length > 0 || session.approximated.length > 0);
 	return {
 		stdin,
 		metrics,
 		block,
 		burnRate,
+		burnRateUncertain,
 		pricing,
 		sessionCostUsd,
 		todayCostUsd,
@@ -4485,7 +5350,7 @@ async function buildRenderContext(stdin, settings) {
 		todayCostUncertain,
 		sessionStartTime,
 		terminalWidth: getTerminalWidth(),
-		turnCount: countHumanTurns(sessionEntries),
+		turnCount: sessionAggregate.turnCount,
 		alerts: {
 			sessionWarn: settings.alerts?.sessionWarn ?? 5,
 			sessionDanger: settings.alerts?.sessionDanger ?? 15,
@@ -4493,6 +5358,24 @@ async function buildRenderContext(stdin, settings) {
 			dailyDanger: settings.alerts?.dailyDanger ?? 25
 		}
 	};
+}
+/**
+* When this Claude Code process started, from the payload: `now -
+* cost.total_duration_ms`. Stable for the life of a process (a resumed process
+* continues its restored clock), and different for two processes sharing a
+* session_id, which is what lets the daily store keep them apart (COR-005).
+*
+* `undefined` for anything that is not a plausible start: a missing or
+* negative duration, one longer than the clock itself, or a result that is
+* not a safe integer — `ShardSchema` reads `processStart` back with
+* `v.safeInteger()`, so an unsafe one was written, dropped on read, and grew
+* a new entry on every render.
+*/
+function processStartOf(stdin, now) {
+	const duration = stdin.cost?.total_duration_ms;
+	if (duration === void 0 || !Number.isFinite(duration) || duration < 0 || duration > now) return void 0;
+	const start = Math.round(now - duration);
+	return Number.isSafeInteger(start) ? start : void 0;
 }
 
 //#endregion
@@ -4504,11 +5387,24 @@ function formatDollars(amount) {
 	if (amount < 100) return `$${amount.toFixed(2)}`;
 	return `$${amount.toFixed(0)}`;
 }
-function formatTokens(count) {
-	if (!Number.isFinite(count)) return "?";
-	if (count < 1e3) return `${count}`;
-	if (count < 1e6) return `${(count / 1e3).toFixed(1)}k`;
-	return `${(count / 1e6).toFixed(2)}M`;
+/**
+* A cost with the uncertainty marker: `formatDollars` plus a trailing `?` when
+* `uncertain`, except when the amount is non-finite and already renders as
+* `$?` — stacking the two read as `$??` (#145).
+*
+* One owner for both cost widgets (MAINT-003). As two copies of the rule, a
+* change to one would bring `$??` back in the other with its tests green —
+* the #68 shape `alertBg` was consolidated to avoid.
+*/
+function formatCost(amount, uncertain) {
+	const marked = uncertain && Number.isFinite(amount);
+	return formatDollars(amount) + (marked ? "?" : "");
+}
+function formatTokens(count$1) {
+	if (!Number.isFinite(count$1)) return "?";
+	if (count$1 < 1e3) return `${count$1}`;
+	if (count$1 < 1e6) return `${(count$1 / 1e3).toFixed(1)}k`;
+	return `${(count$1 / 1e6).toFixed(2)}M`;
 }
 function formatDuration(ms) {
 	if (!Number.isFinite(ms)) return "?";
@@ -4649,8 +5545,7 @@ const effortWidget = { render(context, config) {
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
-	const marked = context.sessionCostUncertain && Number.isFinite(cost);
-	const amount = formatDollars(cost) + (marked ? "?" : "");
+	const amount = formatCost(cost, context.sessionCostUncertain);
 	const text = label ? `${label} ${amount}` : amount;
 	const bg = alertBg(cost, context.alerts.sessionWarn, context.alerts.sessionDanger, config.bg);
 	return {
@@ -4665,8 +5560,7 @@ const sessionCostWidget = { render(context, config) {
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
 	const label = config.label ?? "Today:";
-	const marked = context.todayCostUncertain && Number.isFinite(cost);
-	const text = `${label} ${formatDollars(cost)}${marked ? "?" : ""}`;
+	const text = `${label} ${formatCost(cost, context.todayCostUncertain)}`;
 	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,
@@ -4693,7 +5587,9 @@ const blockTimerWidget = { render(context, config) {
 const burnRateWidget = { render(context, config) {
 	if (!context.burnRate) return null;
 	const label = config.label ?? "";
-	const rate = formatCostPerHour(context.burnRate.costPerHour);
+	const costPerHour = context.burnRate.costPerHour;
+	const marked = context.burnRateUncertain && Number.isFinite(costPerHour);
+	const rate = formatCostPerHour(costPerHour) + (marked ? "?" : "");
 	const text = label ? `${label} ${rate}` : rate;
 	return {
 		text,
@@ -4830,8 +5726,17 @@ function tokensUntilCompact(usedTokens, windowSize) {
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = .7;
 const THRESHOLD_DANGER = .9;
+/**
+* The ratio is clamped to [0, 1] for the bar only. Claude Code's percentages
+* are not bounded to 0..100 — an exact-token payload can report 105% used, or
+* 106% remaining — and from 1.05 up (or -0.06 down) the rounded fill leaves
+* `BAR_WIDTH - filled` negative, where `String.repeat` throws a RangeError
+* that erased the whole bar (REL-007). The percentage text beside the bar is
+* left unclamped: an over-full window is what was reported, and worth seeing.
+*/
 function buildBar(ratio) {
-	const filled = Math.round(ratio * BAR_WIDTH);
+	const clamped = Math.min(1, Math.max(0, ratio));
+	const filled = Math.round(clamped * BAR_WIDTH);
 	const empty = BAR_WIDTH - filled;
 	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
@@ -5014,7 +5919,7 @@ const perModelBreakdownWidget = { render(context, config) {
 //#region src/widgets/session-clock.ts
 const sessionClockWidget = { render(context, config) {
 	if (!context.sessionStartTime) return null;
-	const elapsed = Date.now() - context.sessionStartTime;
+	const elapsed = ageSince(context.sessionStartTime) ?? Number.NaN;
 	const label = config.label ?? "Session:";
 	const text = label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed);
 	return {
@@ -5027,10 +5932,9 @@ const sessionClockWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/cwd.ts
 const cwdWidget = { render(context, config) {
-	let cwd = context.stdin.cwd;
-	if (!cwd) return null;
-	const home = getHomeDir();
-	if (cwd.startsWith(home)) cwd = "~" + cwd.slice(home.length);
+	const raw = context.stdin.cwd;
+	if (!raw) return null;
+	const cwd = collapseHome(raw);
 	const label = config.label ?? "";
 	const text = label ? `${label} ${cwd}` : cwd;
 	return {
@@ -5291,10 +6195,10 @@ const compactCountdownWidget = { render(context, config) {
 //#endregion
 //#region src/widgets/turn-counter.ts
 const turnCounterWidget = { render(context, config) {
-	const count = context.turnCount;
-	if (!count || count < 1) return null;
+	const count$1 = context.turnCount;
+	if (!count$1 || count$1 < 1) return null;
 	const label = config.label ?? "#";
-	const text = `${label}${count}`;
+	const text = `${label}${count$1}`;
 	return {
 		text,
 		fg: config.fg,
@@ -5835,6 +6739,33 @@ function shrinkOutputs(outputs, overflow) {
 }
 
 //#endregion
+//#region src/render/contained-error-hook.ts
+/**
+* A test seam for widget throws the renderer contains (REL-007, review of #154).
+*
+* Containing a throw is right for users — one bad segment must not erase the
+* bar — but it also makes the throw invisible to a test that only asserts a
+* segment is ABSENT: "renders no burn rate" passes just the same whether the
+* widget returned null on purpose or crashed. The test setup file
+* (`src/__tests__/setup/contained-widget-errors.ts`) installs a listener here
+* before every test and fails any test where it fired, unless that test
+* opted in.
+*
+* Keyed on `globalThis` with a registered symbol rather than held in module
+* state, so a test that calls `vi.resetModules()` and re-imports the renderer
+* still reports to the same listener. This module imports nothing, so the
+* setup file can load it without pulling the renderer's dependency graph in
+* ahead of any test file's `vi.mock`.
+*
+* In production nothing is installed and the call is a no-op.
+*/
+const CONTAINED_WIDGET_ERROR_HOOK = Symbol.for("gccusage.containedWidgetError");
+function reportContainedWidgetError(widgetType, error) {
+	const listener = globalThis[CONTAINED_WIDGET_ERROR_HOOK];
+	if (typeof listener === "function") listener(widgetType, error);
+}
+
+//#endregion
 //#region src/render/renderer.ts
 function shouldCompact(settings, terminalWidth) {
 	const compact = settings.compact;
@@ -5848,11 +6779,8 @@ function shouldCompact(settings, terminalWidth) {
 function collectWidgets(configs, context) {
 	const results = [];
 	for (const config of configs) {
-		const widget = getWidget(config.type);
-		if (!widget) continue;
-		const output = widget.render(context, config);
-		if (!output) continue;
-		const sanitized = sanitizeOutput(output);
+		const sanitized = renderWidget(config, context);
+		if (!sanitized) continue;
 		if (isSeparatorOutput(sanitized)) continue;
 		results.push({
 			output: sanitized,
@@ -5860,6 +6788,35 @@ function collectWidgets(configs, context) {
 		});
 	}
 	return results;
+}
+/**
+* One widget's sanitised output, or null when it has nothing to show — or when
+* it threw. The single place both layouts call a widget from.
+*
+* Containment is per widget. A throw used to propagate out of
+* `renderStatusline`, where `main().catch()` swallowed it and the WHOLE bar
+* was erased: `"-".repeat(-1)` in context-percent on an over-100% payload cost
+* the model, the cost and everything else on both lines (REL-007). This is the
+* general form of #141's colour guard, which closed one way a widget could take
+* the bar down; this closes the rest. `sanitizeOutput` sits inside the guard
+* because it is the first thing to touch what the widget returned, and a
+* malformed return is the same failure as a throw.
+*
+* Logged under `GCCUSAGE_DEBUG`, the gate `main()` uses, because before this
+* the error reached stderr through that handler. Containing it must not also
+* make it undiagnosable.
+*/
+function renderWidget(config, context) {
+	const widget = getWidget(config.type);
+	if (!widget) return null;
+	try {
+		const output = widget.render(context, config);
+		return output ? sanitizeOutput(output) : null;
+	} catch (err) {
+		if (process.env["GCCUSAGE_DEBUG"]) console.error(`gccusage: widget "${config.type}" failed —`, err instanceof Error ? err.stack ?? err.message : String(err));
+		reportContainedWidgetError(config.type, err);
+		return null;
+	}
 }
 function renderLine(outputs, settings, context, flex) {
 	const powerline = settings.powerline;
@@ -5922,11 +6879,8 @@ function renderFull(context, settings) {
 	for (const lineConfig of settings.lines) {
 		const outputs = [];
 		for (const widgetConfig of lineConfig.widgets) {
-			const widget = getWidget(widgetConfig.type);
-			if (!widget) continue;
-			const output = widget.render(context, widgetConfig);
-			if (!output) continue;
-			outputs.push(sanitizeOutput(output));
+			const output = renderWidget(widgetConfig, context);
+			if (output) outputs.push(output);
 		}
 		const cleaned = cleanSeparators(outputs);
 		if (cleaned.length === 0) continue;
@@ -6013,28 +6967,34 @@ function stringOrUndefined(color) {
 //#region src/cache/cache-manager.ts
 const CacheEntrySchema = object({
 	output: string(),
-	timestamp: number(),
+	timestamp: persistedTimestamp(),
 	key: string()
 });
+/** Null when there is no cache dir (SEC-004): every check misses. */
 function getCachePath() {
-	return path$1.join(getCacheDir(), "statusline-cache.json");
+	const dir = getCacheDir();
+	return dir === null ? null : path$1.join(dir, "statusline-cache.json");
 }
 function checkCache(ttlMs, key) {
-	const entry = readJsonValidated(getCachePath(), CacheEntrySchema);
+	const cachePath$2 = getCachePath();
+	if (cachePath$2 === null) return null;
+	const entry = readJsonValidated(cachePath$2, CacheEntrySchema);
 	if (!entry) return null;
 	if (entry.key !== key) return null;
-	if (Date.now() - entry.timestamp > ttlMs) return null;
+	const age = ageSince(entry.timestamp);
+	if (age === null || age > ttlMs) return null;
 	return entry.output;
 }
 function writeCache(output, key) {
-	const cachePath$1 = getCachePath();
+	const cachePath$2 = getCachePath();
+	if (cachePath$2 === null) return;
 	try {
 		const entry = {
 			output,
 			timestamp: Date.now(),
 			key
 		};
-		writeJsonAtomic(cachePath$1, entry);
+		writeJsonAtomic(cachePath$2, entry);
 	} catch {}
 }
 
@@ -6197,7 +7157,7 @@ function resolveStableNodePath(probe = defaultProbe()) {
 * the other turns the suite red rather than shipping a binary that misreports
 * itself — the exact gap OPS-007 named.
 */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 
 //#endregion
 //#region src/cli.ts
@@ -6220,13 +7180,19 @@ async function runCli(args) {
 		case "-v":
 			console.log(VERSION);
 			break;
-		case "refresh-pricing":
+		case "refresh-pricing": {
+			const cacheDir$1 = getCacheDir();
+			if (cacheDir$1 !== null) {
+				sweepStaleTempFiles(cacheDir$1);
+				narrowCacheModes(cacheDir$1);
+			}
 			await refreshPricing();
 			break;
+		}
 		default:
 			console.error(`Unknown command: ${command}`);
 			printHelp();
-			process.exit(1);
+			process.exitCode = 1;
 	}
 }
 async function reportToday() {
@@ -6321,30 +7287,143 @@ function readExistingSettings(settingsPath) {
 * command that configures the statusline.
 */
 function removeLegacyTurnStore() {
-	const cacheDir = getCacheDir();
-	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
+	const cacheDir$1 = getCacheDir();
+	if (cacheDir$1 === null) return;
+	for (const target of [resolve(cacheDir$1, "turns"), resolve(cacheDir$1, "turn-count.json")]) try {
 		rmSync(target, {
 			recursive: true,
 			force: true
 		});
 	} catch {}
 }
+/** Owner read/write only: for files that may hold `env` secrets. */
+const PRIVATE_FILE_MODE = 384;
+/**
+* The file a write to `settingsPath` should actually replace.
+*
+* `writeFileAtomic` renames a temp file over its target, and a rename over a
+* symlink replaces the link, not the file it points to. Dotfiles managers
+* link `~/.claude/settings.json` into a repo, so setup was silently turning
+* that link into a detached regular file (SEC-003). Writing to the resolved
+* path keeps the link and updates the file the user actually manages.
+*
+* Only the write is redirected. Reads, error messages and the `.bak` stay on
+* the logical path: it is the one the user knows, and a backup beside the
+* real target could land inside their dotfiles repo.
+*
+* A dangling link (its target does not exist yet) is followed, so setup
+* creates the file the link names rather than replacing the link. Each hop
+* resolves the link's text against its directory's REAL path, as the kernel
+* does: `..` in a relative link means the parent of where the link really
+* lives, so lexical resolution from a symlinked `~/.claude` wrote somewhere
+* the link never pointed (review of #154). The final directory must already
+* exist — a link into an unmounted volume is refused rather than recreated
+* as a shadow directory chain — and a loop is refused rather than "repaired"
+* by replacing one of its links with a file.
+*/
+function resolveWriteTarget(settingsPath) {
+	try {
+		return realpathSync(settingsPath);
+	} catch (err) {
+		const code = err.code;
+		if (code === "ELOOP") throw symlinkLoopError(settingsPath, err);
+		if (code !== "ENOENT") throw err;
+	}
+	let current = settingsPath;
+	for (let hops = 0; isSymlink(current); hops++) {
+		if (hops >= MAX_SYMLINK_HOPS) throw symlinkLoopError(settingsPath);
+		current = resolve(realDirOf(settingsPath, current), readlinkSync(current));
+	}
+	if (current === settingsPath) return settingsPath;
+	return resolve(realDirOf(settingsPath, current), basename(current));
+}
+/** The same bound the kernel applies (Linux MAXSYMLINKS). */
+const MAX_SYMLINK_HOPS = 40;
+function isSymlink(p) {
+	try {
+		return lstatSync(p).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+/** `dirname(p)` with symlinks resolved; refuses when it does not exist. */
+function realDirOf(settingsPath, p) {
+	try {
+		return realpathSync(dirname(p));
+	} catch (err) {
+		if (err.code !== "ENOENT") throw err;
+		throw new Error(`${settingsPath} is a symlink to ${p}, whose directory does not exist (an unmounted volume, or a moved dotfiles repo?). Nothing was changed. Restore the link's target, or remove the link, and re-run \`gccusage setup\`.`, { cause: err });
+	}
+}
+function symlinkLoopError(settingsPath, cause) {
+	return new Error(`${settingsPath} is part of a symlink loop. Nothing was changed. Point it at a real file and re-run \`gccusage setup\`.`, { cause });
+}
+/**
+* Refuse, with a message that says what to do, when settings.json is a
+* symlink into a directory setup cannot write.
+*
+* The atomic writer creates its temp file beside the target, so it needs
+* the target's DIRECTORY writable, not just the file. nix home-manager links
+* settings.json into the read-only store: the write failed with a bare
+* EACCES naming a temp file the user never heard of, and only after the
+* .bak was written, contradicting "a refused file leaves no .bak" (review
+* of #154). Replacing the link instead would silently detach a managed
+* file. The file is theirs to edit through whatever manages it.
+*
+* Other errors (ENOENT for a missing directory, say) are left to surface
+* from the write itself.
+*/
+function assertRedirectedTargetWritable(settingsPath, target) {
+	try {
+		accessSync(dirname(target), constants.W_OK);
+	} catch (err) {
+		const code = err.code;
+		if (code !== "EACCES" && code !== "EROFS" && code !== "EPERM") throw err;
+		throw new Error(`${settingsPath} is a symlink to ${target}, and ${dirname(target)} is not writable (${code}) — is it managed by home-manager or a dotfiles tool? Nothing was changed. Add the statusLine entry there yourself, through that tool.`, { cause: err });
+	}
+}
+/**
+* The permission bits `target` already has, so a rewrite does not change them,
+* or 0600 for a file setup is creating. settings.json often carries `env`
+* secrets, and the atomic writer's temp file would otherwise take the umask
+* default: 0600 came back as 0644 (SEC-003). Preserved rather than forced to
+* 0600, because a user who chose a mode for their own file chose it.
+*
+* Less group and other write. The writer applies the mode with an explicit
+* chmod, which bypasses the umask, so a 0666 file would come back 0666 —
+* setup re-emitting a file anyone on the machine can rewrite, and through
+* its `hooks` and `statusLine`, run commands as the user (review of #154).
+*/
+function existingModeOr(target) {
+	try {
+		return statSync(target).mode & 493;
+	} catch {
+		return PRIVATE_FILE_MODE;
+	}
+}
 function runSetup() {
 	const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
-	const settingsPath = resolve(homedir(), ".claude", "settings.json");
+	const home = getHomeDir();
+	if (home === null) throw new Error("cannot determine home directory: HOME is unset or empty and there is no passwd entry. Set HOME and re-run `gccusage setup`.");
+	const settingsPath = resolve(home, ".claude", "settings.json");
 	const existing = readExistingSettings(settingsPath);
 	const settings = existing?.settings ?? {};
-	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw);
+	const target = resolveWriteTarget(settingsPath);
+	const redirected = isSymlink(settingsPath);
+	if (redirected) assertRedirectedTargetWritable(settingsPath, target);
+	if (existing) writeFileAtomic(`${settingsPath}.bak`, existing.raw, PRIVATE_FILE_MODE);
 	const node = resolveStableNodePath();
 	const command = buildStatusLineCommand(node.path, scriptPath);
 	settings["statusLine"] = {
 		type: "command",
 		command
 	};
-	writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+	writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 	removeLegacyTurnStore();
+	const cacheDir$1 = getCacheDir();
+	if (cacheDir$1 !== null) narrowCacheModes(cacheDir$1);
 	console.log("gccusage setup complete!\n");
-	console.log(`  Settings: ${settingsPath}`);
+	console.log(`  Settings: ${settingsPath}${redirected ? ` -> ${target}` : ""}`);
 	console.log(`  Command:  ${command}`);
 	if (existing) console.log(`  Backup:   ${settingsPath}.bak`);
 	console.log();
@@ -6384,7 +7463,7 @@ async function main() {
 	}
 	const { settings, error } = loadSettings();
 	if (error) {
-		process.stdout.write(formatConfigError(error, getConfigPath()));
+		process.stdout.write(formatConfigError(error, getConfigPath() ?? "settings.json"));
 		return;
 	}
 	const isTTY = process.stdin.isTTY;
