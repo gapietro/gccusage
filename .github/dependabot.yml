@@ -13,6 +13,16 @@ updates:
         dependency-type: development
       runtime-dependencies:
         dependency-type: production
+    ignore:
+      # TypeScript 7 (the native port) ships no JavaScript compiler API, and
+      # type-only.test.ts needs ts.transpileModule to prove a coverage-excluded
+      # file emits nothing. 6.x is the last line that has it.
+      - dependency-name: typescript
+        versions: [">=7"]
+      # Types track the oldest supported runtime (engines: node >=22), so the
+      # typecheck rejects APIs that would crash on Node 22.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:

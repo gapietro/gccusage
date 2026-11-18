@@ -44,13 +44,13 @@
   },
   "author": "gapietro",
   "devDependencies": {
-    "@types/node": "^26.6.6",
+    "@types/node": "^22.20.5",
     "@vitest/coverage-v8": "^5.1.0",
     "chalk": "^6.0.1",
     "get-east-asian-width": "^1.7.0",
     "oxlint": "1.93.0",
     "tsdown": "^0.23.7",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "valibot": "^1.5.0",
     "vitest": "^5.1.0"
   },
