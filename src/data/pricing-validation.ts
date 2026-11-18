@@ -91,11 +91,10 @@ export function isSaneModelPricing(value: unknown): value is ModelPricing {
  */
 export function sanitiseModelPricing(value: unknown): ModelPricing | null {
   if (!isSaneModelPricing(value)) return null;
-  const pricing = value as ModelPricing;
-  if (pricing.above200k === undefined) return pricing;
-  if (isSaneTier(pricing.above200k, pricing)) return pricing;
+  if (value.above200k === undefined) return value;
+  if (isSaneTier(value.above200k, value)) return value;
 
-  const { above200k: _rejected, ...withoutTier } = pricing;
+  const { above200k: _rejected, ...withoutTier } = value;
   return withoutTier;
 }
 
@@ -106,8 +105,7 @@ export function sanitiseModelPricing(value: unknown): ModelPricing | null {
  */
 function isSaneTier(tier: unknown, base: RateSet): boolean {
   if (!isSaneModelPricing(tier)) return false;
-  const rates = tier as RateSet;
-  return COST_KEYS.every((key) => rates[key] >= base[key]);
+  return COST_KEYS.every((key) => tier[key] >= base[key]);
 }
 
 /**

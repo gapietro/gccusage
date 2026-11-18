@@ -71,7 +71,10 @@ export async function runCli(args: string[]): Promise<void> {
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
-      process.exit(1);
+      // Not process.exit(1), for the reason index.ts gives on its CLI-failure
+      // path: stderr to a pipe is asynchronous on macOS, and an immediate exit
+      // can cut the message off. Returning lets Node flush and exit with this.
+      process.exitCode = 1;
   }
 }
 

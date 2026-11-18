@@ -3290,10 +3290,9 @@ function isSaneModelPricing(value) {
 */
 function sanitiseModelPricing(value) {
 	if (!isSaneModelPricing(value)) return null;
-	const pricing = value;
-	if (pricing.above200k === void 0) return pricing;
-	if (isSaneTier(pricing.above200k, pricing)) return pricing;
-	const { above200k: _rejected,...withoutTier } = pricing;
+	if (value.above200k === void 0) return value;
+	if (isSaneTier(value.above200k, value)) return value;
+	const { above200k: _rejected,...withoutTier } = value;
 	return withoutTier;
 }
 /**
@@ -3303,8 +3302,7 @@ function sanitiseModelPricing(value) {
 */
 function isSaneTier(tier, base) {
 	if (!isSaneModelPricing(tier)) return false;
-	const rates = tier;
-	return COST_KEYS.every((key) => rates[key] >= base[key]);
+	return COST_KEYS.every((key) => tier[key] >= base[key]);
 }
 /**
 * Drop the entries that fail bounds, keep the rest. Never all-or-nothing —
@@ -3865,8 +3863,8 @@ function findPricing(model, table) {
 */
 function calculateBurnRate(session, sessionStartTime) {
 	if (!sessionStartTime) return null;
-	const elapsedMs = Date.now() - sessionStartTime;
-	if (elapsedMs < 1e4) return null;
+	const elapsedMs = ageSince(sessionStartTime);
+	if (elapsedMs === null || elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
 	if (session.costs.size === 0 && session.unpriced.length > 0) return null;
 	const sessionCost = calculateTotalCost(session.costs);
@@ -7194,7 +7192,7 @@ async function runCli(args) {
 		default:
 			console.error(`Unknown command: ${command}`);
 			printHelp();
-			process.exit(1);
+			process.exitCode = 1;
 	}
 }
 async function reportToday() {

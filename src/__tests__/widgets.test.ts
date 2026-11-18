@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
 import type { RenderContext } from "../types/render-context.js";
+import { makeContext } from "./fixtures/render-context.js";
 import { cwdWidget } from "../widgets/cwd.js";
 import { tokenBreakdownWidget } from "../widgets/token-breakdown.js";
 import { tokensInputWidget } from "../widgets/tokens-input.js";
@@ -24,38 +25,6 @@ import {
   COMPACT_COUNTDOWN_AMBER,
   COMPACT_COUNTDOWN_RED,
 } from "../widgets/alert-colors.js";
-
-function makeContext(overrides: Partial<RenderContext> = {}): RenderContext {
-  return {
-    stdin: { model: "claude-sonnet-4-20250514" },
-    metrics: {
-      byModel: new Map(),
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheCreation1hTokens: 0,
-        cacheReadTokens: 0,
-      },
-    },
-    block: null,
-    burnRate: null,
-    burnRateUncertain: false,
-    pricing: {},
-    sessionCostUsd: 0,
-    todayCostUsd: 0,
-    costByModel: new Map(),
-    unpricedModels: [],
-    approximatedModels: [],
-    sessionCostUncertain: false,
-    todayCostUncertain: false,
-    sessionStartTime: null,
-    terminalWidth: 120,
-    alerts: { sessionWarn: 5, sessionDanger: 15, dailyWarn: 10, dailyDanger: 25 },
-    turnCount: 0,
-    ...overrides,
-  };
-}
 
 describe("modelWidget", () => {
   it("renders model name", () => {

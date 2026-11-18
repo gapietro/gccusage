@@ -12,6 +12,7 @@ import { getTodayAggregate } from "../cache/today-aggregate-cache.js";
 import { parseJsonlFile } from "../data/jsonl-reader.js";
 import { DEFAULT_SETTINGS } from "../config/defaults.js";
 import type { Settings } from "../config/schema.js";
+import { localDateKey } from "../utils/local-date.js";
 
 /**
  * COR-007: subagent transcripts were never read.
@@ -333,7 +334,7 @@ describe("the today-aggregate cache with subagent transcripts (COR-007)", () => 
     const cacheFile = path.join(tmpDir, "cache", "gccusage", "today-aggregates.json");
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
     const now = new Date();
-    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const date = localDateKey(now);
     const zero = {
       inputTokens: 0,
       outputTokens: 0,

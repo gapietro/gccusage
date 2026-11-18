@@ -185,6 +185,27 @@ describe("calculateBurnRate", () => {
       calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), Date.now() - 1000),
     ).toBeNull();
   });
+
+  // COR-006 follow-up: the elapsed time is taken through `ageSince`, like the
+  // session clock and the block tracker, rather than raw subtraction. A start
+  // in the future (a clock set backwards) has no trustworthy age, so there is
+  // no rate to divide by. Raw subtraction also returned null here, but only
+  // because a negative age happens to be under the 10s floor.
+  it.each([
+    ["an hour in the future", () => Date.now() + 60 * 60_000],
+    ["centuries in the future", () => 9e15],
+  ])("returns null for a session start %s", (_label, start) => {
+    expect(calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), start())).toBeNull();
+  });
+
+  // The case raw subtraction got wrong: an infinitely old start divided the
+  // cost by an infinite duration and reported a confident "$0.00/hr" beside
+  // real spend. `ageSince` rejects a non-finite age outright.
+  it("returns null for a start with no finite age", () => {
+    expect(
+      calculateBurnRate(session([["claude-sonnet-4-20250514", metrics]]), -Infinity),
+    ).toBeNull();
+  });
 });
 
 describe("findPricing fuzzy tie-break (#91)", () => {

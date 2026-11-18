@@ -12,6 +12,7 @@ import {
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
 import { writeGitFreeSettings } from "./helpers/git-free-settings.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * Claude Code owns this payload format and evolves it. Before #83 the schema
@@ -174,9 +175,7 @@ function render(payload: string, sessionId: string): string {
     cwd: dir,
     input: payload.replace("__SID__", sessionId),
     env: {
-      ...process.env,
-      HOME: dir,
-      XDG_CONFIG_HOME: path.join(dir, "config"),
+      ...isolatedEnv(dir),
       ...refresher.env,
       COLUMNS: "200",
     },
