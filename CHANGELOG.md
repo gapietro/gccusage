@@ -6,6 +6,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Remediation of the 2026-11-16 audit (see AUDIT.md).
+
+### Added
+
+- Subagent transcripts are read. Claude Code writes Task and workflow agents'
+  usage to separate files beside the session transcript
+  (`<session>/subagents/…`); calculated costs, the token widgets, per-model
+  figures and `gccusage today` now include them. Each transcript file's
+  totals are cached, so only files that changed are re-read (COR-007).
+- The burn rate carries the `?` marker when the calculated session cost it
+  comes from is incomplete (COR-008).
+- `GCCUSAGE_DEBUG=1` also names a widget whose render failed and any relative
+  `XDG_*` value that was ignored.
+
+### Changed
+
+- The calculated burn rate is the session's per-model cost over its elapsed
+  time, so it matches the session total whichever model is current. It used
+  to price every token at the current model's rate: the same session read
+  $10.00/hr or $2.00/hr depending on `/model` (COR-008).
+- `Today:` is tracked per Claude Code process for costs Claude Code reports,
+  and its `?` marker is stored per session, so an incomplete or stale figure
+  is marked on every session's bar (COR-005, COR-009).
+- Cache files are created readable by you only (files `0600`, directories
+  `0700`); an existing cache directory is narrowed in the background (SEC-003).
+- `setup` keeps `settings.json`'s permissions (never group- or
+  world-writable), writes the `.bak` as `0600`, and writes through a symlinked
+  `settings.json` to its target instead of replacing the link. A target in a
+  read-only directory is refused with an explanation (SEC-003).
+- `npm install` no longer builds `dist/index.js` (it is committed), which also
+  fixes `npm install -g github:gapietro/gccusage` failing without the build
+  toolchain (OPS-009).
+
+### Fixed
+
+- A daily cost store that cannot be written (a root-owned or full cache
+  directory) no longer erases the whole bar on every render; `Today:` is
+  marked `?` instead (REL-005).
+- Two terminals on one session (`--resume` in a second window) no longer
+  inflate `Today:` without bound; one case showed $16.50 for $6.40 of spend
+  (COR-005). A forked or long-idle resumed session's restored cost is not
+  counted as today's, and a calculated total that falls because prices
+  changed is no longer read as a restart.
+- A cache timestamp in the future (a clock set backwards) or one JSON reads as
+  `Infinity` no longer freezes pricing, serves an old bar past its TTL, or
+  pins the block timer; the session clock shows `Session: ?` instead of a
+  negative time (COR-006).
+- A widget that fails costs only its own segment instead of the whole bar,
+  and a context usage over 100% renders a full bar instead of nothing
+  (REL-007). A failed pricing-refresh spawn no longer exits 1 with a stack
+  trace (REL-006). Interrupted cache writes no longer leave temporary files
+  behind, and old ones are swept (REL-008).
+- With `HOME` empty or unset, configuration is no longer read relative to the
+  current directory, or from a shared temporary directory, where a repository
+  or another user could plant a `custom-command` (SEC-004).
+- Pricing tables built from the feed no longer take on a prototype from a
+  `__proto__` model id (SEC-005).
+- `~` is shown for the home directory only on a path boundary: with home
+  `/home/u`, `/home/u2/x` was shown as `~2/x`.
+
+### Upgrade notes
+
+- Downgrading to 1.2.0 or earlier after running this version can count part
+  of today twice until midnight: older versions read the per-process daily
+  records (`~/.cache/gccusage/daily/*.p*.json`) as extra sessions. Delete
+  those files after a downgrade.
+- The today-aggregate cache is rebuilt once after upgrading.
+
 ## [1.2.0] — 2026-11-12
 
 ### Added

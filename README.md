@@ -50,8 +50,9 @@ Works standalone — no need to be inside Claude Code.
 |---------|--------------|
 | `gccusage` | Statusline mode — reads the status JSON on stdin and writes one bar |
 | `gccusage setup` | Point Claude Code's `statusLine` at this install |
-| `gccusage today` | Print today's usage report, broken down by model |
-| `gccusage help` | Usage summary |
+| `gccusage today` | Print today's usage report, broken down by model, priced from your transcripts |
+| `gccusage help` | Usage summary (also `--help`, `-h`) |
+| `gccusage version` | Print the version (also `--version`, `-v`) |
 
 ### Alternative: global install from GitHub
 
@@ -72,6 +73,10 @@ gccusage setup
 
 Adds the following to `~/.claude/settings.json` (creates the file if missing, preserves existing settings). If the file already exists, it writes a `settings.json.bak` backup of the previous contents before making any changes. If the existing file is not a JSON object (e.g. `null`, a bare string, an array) or is not valid JSON at all, `setup` refuses to touch it, exits with status 1, and leaves it exactly as it was:
 
+- **Permissions are kept.** An existing file keeps its mode (never made group- or world-writable), a new one is created `0600`, and the `.bak` is always `0600`, since `settings.json` often holds API keys in its `env` block.
+- **Symlinks are followed, not replaced.** If `settings.json` is a link into a dotfiles repo, the file it points to is updated and the link stays; `setup` prints both paths. If that file's directory is read-only (for example a Nix home-manager store), `setup` stops with an explanation and writes nothing, not even the `.bak`.
+- **No home directory, no setup.** With `HOME` unset and no passwd entry, `setup` refuses rather than guess a location.
+
 ```json
 {
   "statusLine": {
@@ -89,7 +94,7 @@ Claude Code pipes JSON status data via stdin on each render. gccusage parses it 
 
 ## Configuration
 
-Create `~/.config/gccusage/settings.json` to customize. You only need to specify the keys you want to override — everything else uses defaults.
+Create `~/.config/gccusage/settings.json` to customize (or `$XDG_CONFIG_HOME/gccusage/settings.json` when `XDG_CONFIG_HOME` is set to an absolute path; a relative value is ignored, as the XDG spec requires). You only need to specify the keys you want to override — everything else uses defaults. Caches live in `~/.cache/gccusage` (or `$XDG_CACHE_HOME/gccusage`), readable by you only.
 
 Every setting, with its default:
 
@@ -114,7 +119,7 @@ Every setting, with its default:
 
 ### Editor autocomplete
 
-Point the file at the published JSON Schema and most editors will autocomplete widget types, option lists and defaults, and flag typos as you write:
+Point the file at the published JSON Schema and most editors will autocomplete widget types, option lists and defaults, and flag invalid values as you write (a misspelled key name is not flagged; gccusage ignores keys it does not know):
 
 ```json
 {
@@ -235,13 +240,29 @@ list every widget you want. `flex` controls how the line uses leftover width:
   fetched model pricing, ignoring what Claude Code reports.
 
 The burn rate always follows the same source as the session total, so the bar
-never shows a stdin-priced rate beside a transcript-priced total.
+never shows a stdin-priced rate beside a transcript-priced total. Calculated,
+it is the session's per-model cost divided by its elapsed time — the same
+figure as the total beside it, whichever model is current.
+
+A calculated cost reads the session's whole transcript set: the main
+transcript plus any subagent transcripts Claude Code writes beside it
+(`<session>/subagents/`, including workflow agents), which can be a large
+share of a session's tokens. Each transcript file's totals are cached, so
+only files that changed are re-read. The token widgets read the same set in
+every cost mode.
+
+`Today:` and `gccusage today` can differ. `Today:` sums what each Claude Code
+process reported (or what was calculated, per `costSource`) since local
+midnight, across every session that rendered a bar today. `gccusage today`
+prices today's transcripts itself from the pricing table. Two terminals on
+one session (`--resume` in a second window) are tracked separately, so
+neither inflates `Today:`.
 
 Model pricing is fetched from the LiteLLM feed and cached for 24h. When the
 fetch fails, an offline snapshot committed at `src/data/fallback-pricing.ts`
 takes over. If a model is missing from both — a model newer than the snapshot,
 seen while offline — its tokens cannot be priced, and any figure computed
-without them is marked with a `?`:
+without them is marked with a `?`, including the burn rate (`$3.60/hr?`):
 
 ```
  Opus 4.6 ▶ $0.33? ▶ Today: $4.10? ▶ [===-------] 30% (200.0k)
@@ -249,7 +270,10 @@ without them is marked with a `?`:
 
 The `?` means the number is real but incomplete, not that it is zero. Costs
 Claude Code reports itself are never marked, since no missing price can affect
-them. Refresh the snapshot with `npm run pricing`.
+them. `Today:` is marked whenever any session's figure in it is incomplete or
+stale — a session whose latest cost could not be recorded keeps its last good
+figure — so the mark shows on every session's bar, not only on the one that
+knew. Refresh the snapshot with `npm run pricing`.
 
 ### Compact mode
 
@@ -300,9 +324,9 @@ segment.
 | `model` | Current Claude model name and version |
 | `effort` | Reasoning effort level (`low`/`medium`/`high`/`xhigh`/`max`), coloured per level; hidden for models without effort support |
 | `session-cost` | Session cost in USD (color alerts at thresholds) |
-| `today-spend` | Total daily cost across all sessions |
+| `today-spend` | Total spend since local midnight across all sessions (`?` when any part is incomplete) |
 | `context-percent` | Context window usage with progress bar |
-| `burn-rate` | Session spend rate in USD/hour |
+| `burn-rate` | Session spend rate in USD/hour (`?` when the calculated session cost is incomplete) |
 | `cache-hit-rate` | Prompt cache hit percentage (`Hit: 99%`) |
 | `token-breakdown` | Session input and output counts in one segment (`In:396 Out:137.8k`) |
 | `compact-countdown` | Tokens remaining before auto-compact ([see note](#about-the-auto-compact-countdown)) |
@@ -321,7 +345,7 @@ segment.
 | `tokens-output` | Session output token count (`Out: 137.8k`) |
 | `tokens-cached` | Cached token count (`Cached: 5.24M`) |
 | `per-model` | Cost breakdown by model (`Sonnet 4.5:$3.40`) |
-| `session-clock` | Time since the session began (`Session: 2hr 13m`); measured from the transcript, so it survives a resume |
+| `session-clock` | Time since the session began (`Session: 2hr 13m`); measured from the main transcript, so it survives a resume (`Session: ?` if that start is in the future) |
 | `cwd` | Current working directory |
 | `project` | Project name (repo root), from `workspace.project_dir` |
 
@@ -437,14 +461,14 @@ Commands are cached for 30s by default with a 2s execution timeout. Set
 }
 ```
 
-**Costs showing $0.00**: Ensure Claude Code is piping the status JSON correctly. The `cost.total_cost_usd` field must be present in stdin.
+**Costs showing $0.00**: the session cost comes from `cost.total_cost_usd` on stdin, or, when that is absent, from the session's transcript under `~/.claude/projects`. `$0.00` means neither was available: check that Claude Code is piping the status JSON, and that a transcript exists for the session id it sends.
 
 **Cache issues**: Delete `~/.cache/gccusage/statusline-cache.json` to force a fresh render.
 
 **The statusline disappeared entirely**: gccusage degrades to printing nothing
 if it fails internally — a missing bar beats a stack trace in your prompt — and
 Claude Code erases the statusline when a command produces no output. So a blank
-bar means gccusage hit an error, not that it is uninstalled. To see what:
+bar usually means gccusage hit an error, not that it is uninstalled. To see what:
 
 ```bash
 echo '{"session_id":"x","cost":{"total_cost_usd":1}}' | GCCUSAGE_DEBUG=1 gccusage
@@ -452,7 +476,12 @@ echo '{"session_id":"x","cost":{"total_cost_usd":1}}' | GCCUSAGE_DEBUG=1 gccusag
 
 `GCCUSAGE_DEBUG=1` prints the swallowed error and its stack to stderr. It is
 off by default so nothing can leak into your prompt, and it changes nothing
-else about how gccusage behaves. Errors in your *input* — an unusable payload,
+else about how gccusage behaves. It also names any single widget whose render
+failed (that widget's segment is dropped and the rest of the bar still
+renders), and any relative `XDG_*` value that was ignored. If it prints
+nothing at all, no error occurred: every widget in your layout declined to
+render, for example a layout of only `vim-mode` and git widgets outside a
+repository. Check your `lines`. Errors in your *input* — an unusable payload,
 a bad config, a stdin read failure — already show up as a `⚠ gccusage` line on
 the bar itself and do not need the flag.
 
@@ -464,6 +493,21 @@ exceeded, so raise it if those segments vanish in a very large repo; and
 `GCCUSAGE_PRICING_URL` overrides the pricing feed. A timeout that is not a
 whole number of milliseconds between 1 and 2147483647 is ignored in favour of
 the default.
+
+## Known limitations
+
+- **Windows is not supported.** `setup` writes a POSIX shell command and the
+  Node path resolution does not handle `.exe`.
+- **Turning the statusline on mid-session** does not count that session's
+  spend so far as today's: its first render arrives with a cost already
+  restored or accrued, which is indistinguishable from a resumed session's.
+- **A resumed session's calculated burn rate is diluted**: it divides by the
+  time since the transcript began, which can be days.
+- **`format`** is accepted by the config schema but no widget reads it.
+- **Downgrading** to 1.2.0 or earlier after running a newer version can count
+  part of today twice until midnight: older versions read the per-process
+  daily records (`~/.cache/gccusage/daily/*.p*.json`) as extra sessions.
+  Deleting those files after a downgrade avoids it.
 
 ## Development
 
@@ -500,7 +544,7 @@ spawn them skip themselves on older versions rather than failing.
 
 1. Remove the `statusLine` key from `~/.claude/settings.json`
 2. `npm unlink -g gccusage` (or delete the cloned repo)
-3. Optionally delete config and cache: `rm -rf ~/.config/gccusage ~/.cache/gccusage`
+3. Optionally delete config and cache: `rm -rf ~/.config/gccusage ~/.cache/gccusage` (or the `gccusage` directories under `$XDG_CONFIG_HOME` / `$XDG_CACHE_HOME` if you set them)
 
 ## License
 
