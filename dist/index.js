@@ -1,37 +1,21 @@
 #!/usr/bin/env node
-import * as fs$7 from "node:fs";
-import * as fs$6 from "node:fs";
-import * as fs$5 from "node:fs";
-import * as fs$4 from "node:fs";
-import * as fs$3 from "node:fs";
-import * as fs$2 from "node:fs";
-import * as fs$1 from "node:fs";
 import * as fs from "node:fs";
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from "node:fs";
-import * as path$11 from "node:path";
-import * as path$10 from "node:path";
-import * as path$9 from "node:path";
-import * as path$8 from "node:path";
-import * as path$7 from "node:path";
-import * as path$6 from "node:path";
-import * as path$5 from "node:path";
-import * as path$4 from "node:path";
-import * as path$3 from "node:path";
-import * as path$2 from "node:path";
-import * as path$1 from "node:path";
 import * as path from "node:path";
 import { basename, dirname, resolve } from "node:path";
 import process$1 from "node:process";
-import * as os$1 from "node:os";
-import os from "node:os";
+import os$1, * as os from "node:os";
 import tty from "node:tty";
 import * as crypto from "node:crypto";
 import { createHash } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-//#region node_modules/valibot/dist/index.mjs
-let store$4;
+const DEFAULT_CONFIG = {
+	lang: void 0,
+	message: void 0,
+	abortEarly: void 0,
+	abortPipeEarly: void 0
+};
 /**
 * Returns the global configuration.
 *
@@ -41,49 +25,13 @@ let store$4;
 */
 /* @__NO_SIDE_EFFECTS__ */
 function getGlobalConfig(config$1) {
+	if (!config$1 && true) return DEFAULT_CONFIG;
 	return {
-		lang: config$1?.lang ?? store$4?.lang,
+		lang: config$1?.lang ?? void 0,
 		message: config$1?.message,
-		abortEarly: config$1?.abortEarly ?? store$4?.abortEarly,
-		abortPipeEarly: config$1?.abortPipeEarly ?? store$4?.abortPipeEarly
+		abortEarly: config$1?.abortEarly ?? void 0,
+		abortPipeEarly: config$1?.abortPipeEarly ?? void 0
 	};
-}
-let store$3;
-/**
-* Returns a global error message.
-*
-* @param lang The language of the message.
-*
-* @returns The error message.
-*/
-/* @__NO_SIDE_EFFECTS__ */
-function getGlobalMessage(lang) {
-	return store$3?.get(lang);
-}
-let store$2;
-/**
-* Returns a schema error message.
-*
-* @param lang The language of the message.
-*
-* @returns The error message.
-*/
-/* @__NO_SIDE_EFFECTS__ */
-function getSchemaMessage(lang) {
-	return store$2?.get(lang);
-}
-let store$1;
-/**
-* Returns a specific error message.
-*
-* @param reference The identifier reference.
-* @param lang The language of the message.
-*
-* @returns The error message.
-*/
-/* @__NO_SIDE_EFFECTS__ */
-function getSpecificMessage(reference, lang) {
-	return store$1?.get(reference)?.get(lang);
 }
 /**
 * Stringifies an unknown input to a literal or type string.
@@ -132,28 +80,26 @@ function _addIssue(context, label, dataset, config$1, other) {
 		abortPipeEarly: config$1.abortPipeEarly
 	};
 	const isSchema = context.kind === "schema";
-	const message$1 = other?.message ?? context.message ?? /* @__PURE__ */ getSpecificMessage(context.reference, issue.lang) ?? (isSchema ? /* @__PURE__ */ getSchemaMessage(issue.lang) : null) ?? config$1.message ?? /* @__PURE__ */ getGlobalMessage(issue.lang);
+	const message$1 = other?.message ?? context.message ?? (context.reference, issue.lang, void 0) ?? (isSchema ? (issue.lang, void 0) : null) ?? config$1.message ?? (issue.lang, void 0);
 	if (message$1 !== void 0) issue.message = typeof message$1 === "function" ? message$1(issue) : message$1;
 	if (isSchema) dataset.typed = false;
 	if (dataset.issues) dataset.issues.push(issue);
 	else dataset.issues = [issue];
 }
 /**
-* Returns the Standard Schema properties.
+* Compares two values using the SameValueZero algorithm, which treats `NaN`
+* as equal to itself unlike `===`.
 *
-* @param context The schema context.
+* @param value1 The first value.
+* @param value2 The second value.
 *
-* @returns The Standard Schema properties.
+* @returns Whether the values are equal.
+*
+* @internal
 */
 /* @__NO_SIDE_EFFECTS__ */
-function _getStandardProps(context) {
-	return {
-		version: 1,
-		vendor: "valibot",
-		validate(value$1) {
-			return context["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig());
-		}
-	};
+function _isSameValueZero(value1, value2) {
+	return value1 === value2 || Number.isNaN(value1) && Number.isNaN(value2);
 }
 /**
 * Disallows inherited object properties and prevents object prototype
@@ -168,7 +114,7 @@ function _getStandardProps(context) {
 */
 /* @__NO_SIDE_EFFECTS__ */
 function _isValidObjectKey(object$1, key) {
-	return Object.hasOwn(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
+	return Object.prototype.hasOwnProperty.call(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
 }
 /**
 * Joins multiple `expects` values with the given separator.
@@ -185,6 +131,26 @@ function _joinExpects(values$1, separator) {
 	const list = [...new Set(values$1)];
 	if (list.length > 1) return `(${list.join(` ${separator} `)})`;
 	return list[0] ?? "never";
+}
+/**
+* Eagerly creates and attaches the Standard Schema properties of a schema.
+*
+* Hint: The contextual `this` type includes the standard properties that are
+* attached before the schema is returned.
+*
+* @param schema The schema to attach standard properties to.
+*
+* @returns The schema with standard properties attached.
+*
+* @internal
+*/
+function _standardSchema(schema) {
+	schema["~standard"] = {
+		version: 1,
+		vendor: "valibot",
+		validate: (value$1) => schema["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig())
+	};
+	return schema;
 }
 /* @__NO_SIDE_EFFECTS__ */
 function getDotPath(issue) {
@@ -315,12 +281,9 @@ function getFallback(schema, dataset, config$1) {
 */
 /* @__NO_SIDE_EFFECTS__ */
 function fallback(schema, fallback$1) {
-	return {
+	return _standardSchema({
 		...schema,
 		fallback: fallback$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			const outputDataset = schema["~run"](dataset, config$1);
 			return outputDataset.issues ? {
@@ -328,7 +291,7 @@ function fallback(schema, fallback$1) {
 				value: /* @__PURE__ */ getFallback(this, outputDataset, config$1)
 			} : outputDataset;
 		}
-	};
+	});
 }
 /**
 * Returns the default value of the schema.
@@ -345,7 +308,7 @@ function getDefault(schema, dataset, config$1) {
 }
 /* @__NO_SIDE_EFFECTS__ */
 function array(item, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "array",
 		reference: array,
@@ -353,9 +316,6 @@ function array(item, message$1) {
 		async: false,
 		item,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			const input = dataset.value;
 			if (Array.isArray(input)) {
@@ -389,30 +349,27 @@ function array(item, message$1) {
 			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function boolean(message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "boolean",
 		reference: boolean,
 		expects: "boolean",
 		async: false,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "boolean") dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function literal(literal_, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "literal",
 		reference: literal,
@@ -420,19 +377,16 @@ function literal(literal_, message$1) {
 		async: false,
 		literal: literal_,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
-			if (dataset.value === this.literal) dataset.typed = true;
+			if (/* @__PURE__ */ _isSameValueZero(dataset.value, this.literal)) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function nullable(wrapped, default_) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "nullable",
 		reference: nullable,
@@ -440,9 +394,6 @@ function nullable(wrapped, default_) {
 		async: false,
 		wrapped,
 		default: default_,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (dataset.value === null) {
 				if (this.default !== void 0) dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
@@ -453,30 +404,27 @@ function nullable(wrapped, default_) {
 			}
 			return this.wrapped["~run"](dataset, config$1);
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function number(message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "number",
 		reference: number,
 		expects: "number",
 		async: false,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "number" && !isNaN(dataset.value)) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function object(entries$1, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "object",
 		reference: object,
@@ -484,9 +432,6 @@ function object(entries$1, message$1) {
 		async: false,
 		entries: entries$1,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			const input = dataset.value;
 			if (input && typeof input === "object") {
@@ -537,11 +482,11 @@ function object(entries$1, message$1) {
 			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function optional(wrapped, default_) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "optional",
 		reference: optional,
@@ -549,9 +494,6 @@ function optional(wrapped, default_) {
 		async: false,
 		wrapped,
 		default: default_,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (dataset.value === void 0) {
 				if (this.default !== void 0) dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
@@ -562,11 +504,11 @@ function optional(wrapped, default_) {
 			}
 			return this.wrapped["~run"](dataset, config$1);
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function picklist(options, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "picklist",
 		reference: picklist,
@@ -574,19 +516,16 @@ function picklist(options, message$1) {
 		async: false,
 		options,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (this.options.includes(dataset.value)) dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function record(key, value$1, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "record",
 		reference: record,
@@ -595,9 +534,6 @@ function record(key, value$1, message$1) {
 		key,
 		value: value$1,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			const input = dataset.value;
 			if (input && typeof input === "object") {
@@ -650,30 +586,27 @@ function record(key, value$1, message$1) {
 			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function string(message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "string",
 		reference: string,
 		expects: "string",
 		async: false,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			if (typeof dataset.value === "string") dataset.typed = true;
 			else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /* @__NO_SIDE_EFFECTS__ */
 function tuple(items, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "tuple",
 		reference: tuple,
@@ -681,9 +614,6 @@ function tuple(items, message$1) {
 		async: false,
 		items,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			const input = dataset.value;
 			if (Array.isArray(input)) {
@@ -717,7 +647,7 @@ function tuple(items, message$1) {
 			} else _addIssue(this, "type", dataset, config$1);
 			return dataset;
 		}
-	};
+	});
 }
 /**
 * Returns the sub issues of the provided datasets for the union issue.
@@ -731,13 +661,13 @@ function tuple(items, message$1) {
 /* @__NO_SIDE_EFFECTS__ */
 function _subIssues(datasets) {
 	let issues;
-	if (datasets) for (const dataset of datasets) if (issues) issues.push(...dataset.issues);
+	if (datasets) for (const dataset of datasets) if (issues) for (const issue of dataset.issues) issues.push(issue);
 	else issues = dataset.issues;
 	return issues;
 }
 /* @__NO_SIDE_EFFECTS__ */
 function union(options, message$1) {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "union",
 		reference: union,
@@ -745,9 +675,6 @@ function union(options, message$1) {
 		async: false,
 		options,
 		message: message$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			let validDataset;
 			let typedDatasets;
@@ -772,7 +699,7 @@ function union(options, message$1) {
 			else _addIssue(this, "type", dataset, config$1, { issues: /* @__PURE__ */ _subIssues(untypedDatasets) });
 			return dataset;
 		}
-	};
+	});
 }
 /**
 * Creates a unknown schema.
@@ -781,20 +708,17 @@ function union(options, message$1) {
 */
 /* @__NO_SIDE_EFFECTS__ */
 function unknown() {
-	return {
+	return _standardSchema({
 		kind: "schema",
 		type: "unknown",
 		reference: unknown,
 		expects: "unknown",
 		async: false,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset) {
 			dataset.typed = true;
 			return dataset;
 		}
-	};
+	});
 }
 /**
 * Parses an unknown input based on a schema.
@@ -812,12 +736,9 @@ function parse(schema, input, config$1) {
 }
 /* @__NO_SIDE_EFFECTS__ */
 function pipe(...pipe$1) {
-	return {
+	return _standardSchema({
 		...pipe$1[0],
 		pipe: pipe$1,
-		get "~standard"() {
-			return /* @__PURE__ */ _getStandardProps(this);
-		},
 		"~run"(dataset, config$1) {
 			for (const item of pipe$1) if (item.kind !== "metadata") {
 				if (dataset.issues && (item.kind === "schema" || item.kind === "transformation")) {
@@ -828,7 +749,7 @@ function pipe(...pipe$1) {
 			}
 			return dataset;
 		}
-	};
+	});
 }
 /**
 * Parses an unknown input based on a schema.
@@ -849,9 +770,7 @@ function safeParse(schema, input, config$1) {
 		issues: dataset.issues
 	};
 }
-
-//#endregion
-//#region src/utils/schemas.ts
+// src/utils/schemas.ts
 /**
 * The shared rules for numbers that cross a JSON boundary: stdin and every
 * cache file. They used to be re-derived per schema, and the derivations
@@ -869,7 +788,7 @@ function safeParse(schema, input, config$1) {
 * both `v.number()` and `typeof x === "number"` accept it (#133, #137).
 */
 function finiteNumber() {
-	return pipe(number(), finite());
+	return /* @__PURE__ */ pipe(/* @__PURE__ */ number(), /* @__PURE__ */ finite());
 }
 /**
 * A millisecond stamp this program wrote with `Date.now()`.
@@ -884,20 +803,8 @@ function finiteNumber() {
 * schema cannot know, so every consumer must take the age through `ageSince`.
 */
 function persistedTimestamp() {
-	return pipe(number(), safeInteger());
+	return /* @__PURE__ */ pipe(/* @__PURE__ */ number(), /* @__PURE__ */ safeInteger());
 }
-/**
-* How far in the future a stamp may be and still read as age 0.
-*
-* Every stamp is written and read on the same machine, so there is no
-* cross-host skew to absorb; a negative age can only come from the clock
-* stepping backwards between a write and a read — an NTP correction, which is
-* normally well under a second. One second absorbs that without a pointless
-* miss. It must stay small against the shortest TTL it gates, the statusline
-* cache's 5 s default: a stamp inside the allowance reads as brand new, so it
-* can stretch that TTL by up to the allowance itself.
-*/
-const CLOCK_SKEW_ALLOWANCE_MS = 1e3;
 /**
 * The age of a persisted stamp, or `null` when the stamp cannot be trusted.
 *
@@ -915,12 +822,10 @@ const CLOCK_SKEW_ALLOWANCE_MS = 1e3;
 */
 function ageSince(timestamp, now = Date.now()) {
 	const age = now - timestamp;
-	if (!Number.isFinite(age) || age < -CLOCK_SKEW_ALLOWANCE_MS) return null;
+	if (!Number.isFinite(age) || age < -1e3) return null;
 	return Math.max(0, age);
 }
-
-//#endregion
-//#region src/types/status-json.ts
+// src/types/status-json.ts
 /**
 * Every field in this payload is optional AND independently recoverable.
 *
@@ -936,60 +841,58 @@ function ageSince(timestamp, now = Date.now()) {
 * the compaction countdown.
 */
 function lenient(schema) {
-	return fallback(optional(schema), void 0);
+	return /* @__PURE__ */ fallback(/* @__PURE__ */ optional(schema), void 0);
 }
 /** Same, for the fields that carry a numeric default rather than undefined. */
 function lenientWithDefault(schema, value) {
-	return fallback(optional(schema, value), value);
+	return /* @__PURE__ */ fallback(/* @__PURE__ */ optional(schema, value), value);
 }
-const ModelSchema = union([string(), object({
-	id: lenient(string()),
-	display_name: lenient(string())
+const ModelSchema = /* @__PURE__ */ union([/* @__PURE__ */ string(), /* @__PURE__ */ object({
+	id: lenient(/* @__PURE__ */ string()),
+	display_name: lenient(/* @__PURE__ */ string())
 })]);
-const CostSchema = object({
+const CostSchema = /* @__PURE__ */ object({
 	total_cost_usd: lenient(finiteNumber()),
 	total_duration_ms: lenient(finiteNumber()),
 	total_api_duration_ms: lenient(finiteNumber()),
 	total_lines_added: lenient(finiteNumber()),
 	total_lines_removed: lenient(finiteNumber())
 });
-const CurrentUsageSchema = object({
+const CurrentUsageSchema = /* @__PURE__ */ object({
 	input_tokens: lenientWithDefault(finiteNumber(), 0),
 	output_tokens: lenientWithDefault(finiteNumber(), 0),
 	cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
 	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
-const ContextWindowSchema = union([finiteNumber(), object({
+const ContextWindowSchema = /* @__PURE__ */ union([finiteNumber(), /* @__PURE__ */ object({
 	context_window_size: lenient(finiteNumber()),
-	used_percentage: lenient(nullable(finiteNumber())),
-	remaining_percentage: lenient(nullable(finiteNumber())),
+	used_percentage: lenient(/* @__PURE__ */ nullable(finiteNumber())),
+	remaining_percentage: lenient(/* @__PURE__ */ nullable(finiteNumber())),
 	total_input_tokens: lenient(finiteNumber()),
 	total_output_tokens: lenient(finiteNumber()),
-	current_usage: lenient(nullable(CurrentUsageSchema))
+	current_usage: lenient(/* @__PURE__ */ nullable(CurrentUsageSchema))
 })]);
-const TokenUsageSchema = object({
+const TokenUsageSchema = /* @__PURE__ */ object({
 	input_tokens: lenientWithDefault(finiteNumber(), 0),
 	output_tokens: lenientWithDefault(finiteNumber(), 0),
 	cache_creation_input_tokens: lenientWithDefault(finiteNumber(), 0),
 	cache_read_input_tokens: lenientWithDefault(finiteNumber(), 0)
 });
-const VimSchema = object({ mode: lenient(string()) });
-const EffortSchema = object({ level: lenient(string()) });
-const WorkspaceSchema = object({ project_dir: lenient(string()) });
-const StatusJsonSchema = object({
+const VimSchema = /* @__PURE__ */ object({ mode: lenient(/* @__PURE__ */ string()) });
+const EffortSchema = /* @__PURE__ */ object({ level: lenient(/* @__PURE__ */ string()) });
+const WorkspaceSchema = /* @__PURE__ */ object({ project_dir: lenient(/* @__PURE__ */ string()) });
+const StatusJsonSchema = /* @__PURE__ */ object({
 	model: lenient(ModelSchema),
 	cost: lenient(CostSchema),
 	context_window: lenient(ContextWindowSchema),
 	token_usage: lenient(TokenUsageSchema),
 	vim: lenient(VimSchema),
 	effort: lenient(EffortSchema),
-	cwd: lenient(string()),
+	cwd: lenient(/* @__PURE__ */ string()),
 	workspace: lenient(WorkspaceSchema),
-	session_id: lenient(string())
+	session_id: lenient(/* @__PURE__ */ string())
 });
-
-//#endregion
-//#region src/utils/env-timeout.ts
+// src/utils/env-timeout.ts
 /**
 * Read a millisecond deadline from an environment variable, falling back to
 * `fallback` for anything that is not an integer in [1, 2^31-1].
@@ -1006,16 +909,14 @@ const StatusJsonSchema = object({
 *
 * Malformed values degrade to the default rather than being coerced.
 */
-function resolveTimeoutMsFromEnv(name, fallback$1) {
+function resolveTimeoutMsFromEnv(name, fallback) {
 	const raw = process.env[name];
-	if (raw === void 0 || raw.trim() === "") return fallback$1;
+	if (raw === void 0 || raw.trim() === "") return fallback;
 	const parsed = Number(raw);
-	if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) return fallback$1;
+	if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) return fallback;
 	return parsed;
 }
-
-//#endregion
-//#region src/data/stdin-reader.ts
+// src/data/stdin-reader.ts
 /**
 * Claude Code waits 600s for the statusline command (its hook spawn helper
 * computes `e.timeout ? e.timeout*1000 : 600000`, verified against the 2.1.220
@@ -1050,7 +951,7 @@ function resolveTimeoutMs() {
 * (`src/index.ts`) and passes neither.
 */
 function readStdin(stream = process.stdin, timeoutMs = resolveTimeoutMs()) {
-	return new Promise((resolve$1, reject) => {
+	return new Promise((resolve, reject) => {
 		const chunks = [];
 		let settled = false;
 		let timer;
@@ -1058,7 +959,7 @@ function readStdin(stream = process.stdin, timeoutMs = resolveTimeoutMs()) {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			resolve$1({
+			resolve({
 				raw: Buffer.concat(chunks).toString("utf-8"),
 				timedOut,
 				timeoutMs
@@ -1095,10 +996,9 @@ function parseStatusJson(raw) {
 	try {
 		data = JSON.parse(raw);
 	} catch (err) {
-		const detail = err instanceof Error ? err.message : "could not be parsed";
 		return {
 			stdin: {},
-			error: `stdin is not valid JSON — ${detail}`
+			error: `stdin is not valid JSON — ${err instanceof Error ? err.message : "could not be parsed"}`
 		};
 	}
 	if (typeof data !== "object" || data === null || Array.isArray(data)) return {
@@ -1119,13 +1019,40 @@ function describe(data) {
 	if (Array.isArray(data)) return "an array";
 	return `a ${typeof data}`;
 }
-
-//#endregion
-//#region node_modules/chalk/source/vendor/ansi-styles/index.js
+// node_modules/chalk/source/utilities.js
+function stringReplaceAll(string, substring, postfix) {
+	let index = string.indexOf(substring);
+	if (index === -1) return string;
+	const substringLength = substring.length;
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		returnValue += string.slice(endIndex, index) + substring + postfix;
+		endIndex = index + substringLength;
+		index = string.indexOf(substring, endIndex);
+	} while (index !== -1);
+	returnValue += string.slice(endIndex);
+	return returnValue;
+}
+function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
+	let endIndex = 0;
+	let returnValue = "";
+	do {
+		const isGotCR = string[index - 1] === "\r";
+		returnValue += string.slice(endIndex, isGotCR ? index - 1 : index) + prefix + (isGotCR ? "\r\n" : "\n") + postfix;
+		endIndex = index + 1;
+		index = string.indexOf("\n", endIndex);
+	} while (index !== -1);
+	returnValue += string.slice(endIndex);
+	return returnValue;
+}
+// node_modules/chalk/source/vendor/ansi-styles/index.js
 const ANSI_BACKGROUND_OFFSET = 10;
-const wrapAnsi16 = (offset = 0) => (code) => `\u001B[${code + offset}m`;
-const wrapAnsi256 = (offset = 0) => (code) => `\u001B[${38 + offset};5;${code}m`;
-const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u001B[${38 + offset};2;${red};${green};${blue}m`;
+const ANSI_UNDERLINE_OFFSET = 20;
+const wrapAnsi16 = (offset = 0) => (code) => `\u{1B}[${code + offset}m`;
+const wrapAnsi256 = (offset = 0) => (code) => `\u{1B}[${38 + offset};5;${code}m`;
+const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u{1B}[${38 + offset};2;${red};${green};${blue}m`;
+const wrapUnderlineAnsi = (code) => `\u{1B}[58;5;${code < 90 ? code - 30 : code - 90 + 8}m`;
 const styles$1 = {
 	modifier: {
 		reset: [0, 0],
@@ -1133,6 +1060,10 @@ const styles$1 = {
 		dim: [2, 22],
 		italic: [3, 23],
 		underline: [4, 24],
+		underlineDouble: ["4:2", 24],
+		underlineCurly: ["4:3", 24],
+		underlineDotted: ["4:4", 24],
+		underlineDashed: ["4:5", 24],
 		overline: [53, 55],
 		inverse: [7, 27],
 		hidden: [8, 28],
@@ -1177,22 +1108,43 @@ const styles$1 = {
 		bgMagentaBright: [105, 49],
 		bgCyanBright: [106, 49],
 		bgWhiteBright: [107, 49]
+	},
+	underlineColor: {
+		underlineBlack: ["58;5;0", 59],
+		underlineRed: ["58;5;1", 59],
+		underlineGreen: ["58;5;2", 59],
+		underlineYellow: ["58;5;3", 59],
+		underlineBlue: ["58;5;4", 59],
+		underlineMagenta: ["58;5;5", 59],
+		underlineCyan: ["58;5;6", 59],
+		underlineWhite: ["58;5;7", 59],
+		underlineBlackBright: ["58;5;8", 59],
+		underlineGray: ["58;5;8", 59],
+		underlineGrey: ["58;5;8", 59],
+		underlineRedBright: ["58;5;9", 59],
+		underlineGreenBright: ["58;5;10", 59],
+		underlineYellowBright: ["58;5;11", 59],
+		underlineBlueBright: ["58;5;12", 59],
+		underlineMagentaBright: ["58;5;13", 59],
+		underlineCyanBright: ["58;5;14", 59],
+		underlineWhiteBright: ["58;5;15", 59]
 	}
 };
-const modifierNames = Object.keys(styles$1.modifier);
+Object.keys(styles$1.modifier);
 const foregroundColorNames = Object.keys(styles$1.color);
 const backgroundColorNames = Object.keys(styles$1.bgColor);
-const colorNames = [...foregroundColorNames, ...backgroundColorNames];
+Object.keys(styles$1.underlineColor);
+[...foregroundColorNames, ...backgroundColorNames];
 function assembleStyles() {
-	const codes = new Map();
+	const codes = /* @__PURE__ */ new Map();
 	for (const [groupName, group] of Object.entries(styles$1)) {
 		for (const [styleName, style] of Object.entries(group)) {
 			styles$1[styleName] = {
-				open: `\u001B[${style[0]}m`,
-				close: `\u001B[${style[1]}m`
+				open: `\u{1B}[${style[0]}m`,
+				close: `\u{1B}[${style[1]}m`
 			};
 			group[styleName] = styles$1[styleName];
-			codes.set(style[0], style[1]);
+			codes.set(Number.parseInt(style[0], 10), style[1]);
 		}
 		Object.defineProperty(styles$1, groupName, {
 			value: group,
@@ -1205,12 +1157,16 @@ function assembleStyles() {
 	});
 	styles$1.color.close = "\x1B[39m";
 	styles$1.bgColor.close = "\x1B[49m";
+	styles$1.underlineColor.close = "\x1B[59m";
 	styles$1.color.ansi = wrapAnsi16();
 	styles$1.color.ansi256 = wrapAnsi256();
 	styles$1.color.ansi16m = wrapAnsi16m();
 	styles$1.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
 	styles$1.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
 	styles$1.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+	styles$1.underlineColor.ansi = wrapUnderlineAnsi;
+	styles$1.underlineColor.ansi256 = wrapAnsi256(ANSI_UNDERLINE_OFFSET);
+	styles$1.underlineColor.ansi16m = wrapAnsi16m(ANSI_UNDERLINE_OFFSET);
 	Object.defineProperties(styles$1, {
 		rgbToAnsi256: {
 			value(red, green, blue) {
@@ -1225,7 +1181,7 @@ function assembleStyles() {
 		},
 		hexToRgb: {
 			value(hex) {
-				const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+				const matches = /[\da-f]{6}|[\da-f]{3}/i.exec(hex.toString(16));
 				if (!matches) return [
 					0,
 					0,
@@ -1233,11 +1189,11 @@ function assembleStyles() {
 				];
 				let [colorString] = matches;
 				if (colorString.length === 3) colorString = [...colorString].map((character) => character + character).join("");
-				const integer$1 = Number.parseInt(colorString, 16);
+				const integer = Number.parseInt(colorString, 16);
 				return [
-					integer$1 >> 16 & 255,
-					integer$1 >> 8 & 255,
-					integer$1 & 255
+					integer >> 16 & 255,
+					integer >> 8 & 255,
+					integer & 255
 				];
 			},
 			enumerable: false
@@ -1284,10 +1240,7 @@ function assembleStyles() {
 	return styles$1;
 }
 const ansiStyles = assembleStyles();
-var ansi_styles_default = ansiStyles;
-
-//#endregion
-//#region node_modules/chalk/source/vendor/supports-color/index.js
+// node_modules/chalk/source/vendor/supports-color/index.js
 function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process$1.argv) {
 	const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
 	const position = argv.indexOf(prefix + flag);
@@ -1298,12 +1251,15 @@ const { env } = process$1;
 let flagForceColor;
 if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) flagForceColor = 0;
 else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) flagForceColor = 1;
+function hasNumericForceColor() {
+	return /^\d+$/.test(env.FORCE_COLOR);
+}
 function envForceColor() {
-	if ("FORCE_COLOR" in env) {
-		if (env.FORCE_COLOR === "true") return 1;
-		if (env.FORCE_COLOR === "false") return 0;
-		return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
-	}
+	if (!("FORCE_COLOR" in env)) return;
+	if (env.FORCE_COLOR === "false") return 0;
+	if (env.FORCE_COLOR === "true" || env.FORCE_COLOR.length === 0) return 1;
+	if (!hasNumericForceColor()) return;
+	return Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
 }
 function translateLevel(level) {
 	if (level === 0) return false;
@@ -1323,12 +1279,13 @@ function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
 		if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) return 3;
 		if (hasFlag("color=256")) return 2;
 	}
+	if (forceColor !== void 0 && hasNumericForceColor()) return forceColor;
 	if ("TF_BUILD" in env && "AGENT_NAME" in env) return 1;
 	if (haveStream && !streamIsTTY && forceColor === void 0) return 0;
 	const min = forceColor || 0;
 	if (env.TERM === "dumb") return min;
 	if (process$1.platform === "win32") {
-		const osRelease = os.release().split(".");
+		const osRelease = os$1.release().split(".");
 		if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) return Number(osRelease[2]) >= 14931 ? 3 : 2;
 		return 1;
 	}
@@ -1347,94 +1304,68 @@ function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
 		].some((sign) => sign in env) || env.CI_NAME === "codeship") return 1;
 		return min;
 	}
-	if ("TEAMCITY_VERSION" in env) return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	if ("TEAMCITY_VERSION" in env) return /^(?:9\.0*[1-9]\d*\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
 	if (env.COLORTERM === "truecolor") return 3;
 	if (env.TERM === "xterm-kitty") return 3;
 	if (env.TERM === "xterm-ghostty") return 3;
 	if (env.TERM === "wezterm") return 3;
 	if ("TERM_PROGRAM" in env) {
-		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".", 1)[0], 10);
 		switch (env.TERM_PROGRAM) {
 			case "iTerm.app": return version >= 3 ? 3 : 2;
 			case "Apple_Terminal": return 2;
 		}
 	}
-	if (/-256(color)?$/i.test(env.TERM)) return 2;
+	if (/-256(?:color)?$/i.test(env.TERM)) return 2;
 	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) return 1;
 	if ("COLORTERM" in env) return 1;
 	return min;
 }
 function createSupportsColor(stream, options = {}) {
-	const level = _supportsColor(stream, {
+	return translateLevel(_supportsColor(stream, {
 		streamIsTTY: stream && stream.isTTY,
 		...options
-	});
-	return translateLevel(level);
+	}));
 }
-const supportsColor = {
+// node_modules/chalk/source/index.js
+const { stdout: stdoutColor, stderr: stderrColor } = {
 	stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
 	stderr: createSupportsColor({ isTTY: tty.isatty(2) })
 };
-var supports_color_default = supportsColor;
-
-//#endregion
-//#region node_modules/chalk/source/utilities.js
-function stringReplaceAll(string$1, substring, replacer) {
-	let index = string$1.indexOf(substring);
-	if (index === -1) return string$1;
-	const substringLength = substring.length;
-	let endIndex = 0;
-	let returnValue = "";
-	do {
-		returnValue += string$1.slice(endIndex, index) + substring + replacer;
-		endIndex = index + substringLength;
-		index = string$1.indexOf(substring, endIndex);
-	} while (index !== -1);
-	returnValue += string$1.slice(endIndex);
-	return returnValue;
-}
-function stringEncaseCRLFWithFirstIndex(string$1, prefix, postfix, index) {
-	let endIndex = 0;
-	let returnValue = "";
-	do {
-		const gotCR = string$1[index - 1] === "\r";
-		returnValue += string$1.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? "\r\n" : "\n") + postfix;
-		endIndex = index + 1;
-		index = string$1.indexOf("\n", endIndex);
-	} while (index !== -1);
-	returnValue += string$1.slice(endIndex);
-	return returnValue;
-}
-
-//#endregion
-//#region node_modules/chalk/source/index.js
-const { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
 const GENERATOR = Symbol("GENERATOR");
 const STYLER = Symbol("STYLER");
 const IS_EMPTY = Symbol("IS_EMPTY");
-const levelMapping = [
-	"ansi",
-	"ansi",
-	"ansi256",
-	"ansi16m"
-];
+const LEVEL = Symbol("LEVEL");
 const styles = Object.create(null);
-const applyOptions = (object$1, options = {}) => {
-	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) throw new Error("The `level` option should be an integer from 0 to 3");
+const assertValidLevel = (level) => {
+	if (!Number.isSafeInteger(level) || level < 0 || level > 3) throw new Error("The `level` should be an integer from 0 to 3");
+};
+const levelDescriptor = {
+	enumerable: true,
+	get() {
+		return this[LEVEL];
+	},
+	set(level) {
+		assertValidLevel(level);
+		this[LEVEL] = level;
+	}
+};
+const applyOptions = (object, options = {}) => {
+	if (options.level !== void 0) assertValidLevel(options.level);
 	const colorLevel = stdoutColor ? stdoutColor.level : 0;
-	object$1.level = options.level === void 0 ? colorLevel : options.level;
+	object[LEVEL] = options.level === void 0 ? colorLevel : options.level;
 };
 const chalkFactory = (options) => {
-	const chalk$1 = (...strings) => strings.join(" ");
-	applyOptions(chalk$1, options);
-	Object.setPrototypeOf(chalk$1, createChalk.prototype);
-	return chalk$1;
+	const chalk = (...strings) => strings.join(" ");
+	applyOptions(chalk, options);
+	Object.setPrototypeOf(chalk, createChalk.prototype);
+	return chalk;
 };
 function createChalk(options) {
 	return chalkFactory(options);
 }
 Object.setPrototypeOf(createChalk.prototype, Function.prototype);
-for (const [styleName, style] of Object.entries(ansi_styles_default)) styles[styleName] = { get() {
+for (const [styleName, style] of Object.entries(ansiStyles)) styles[styleName] = { get() {
 	const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
 	Object.defineProperty(this, styleName, { value: builder });
 	return builder;
@@ -1444,36 +1375,58 @@ styles.visible = { get() {
 	Object.defineProperty(this, "visible", { value: builder });
 	return builder;
 } };
-const getModelAnsi = (model, level, type, ...arguments_) => {
+const createModelConverters = (model, type) => {
+	const style = ansiStyles[type];
 	if (model === "rgb") {
-		if (level === "ansi16m") return ansi_styles_default[type].ansi16m(...arguments_);
-		if (level === "ansi256") return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
-		return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
+		const ansi = (red, green, blue) => style.ansi(ansiStyles.rgbToAnsi(red, green, blue));
+		const ansi256 = (red, green, blue) => style.ansi256(ansiStyles.rgbToAnsi256(red, green, blue));
+		return [
+			ansi,
+			ansi,
+			ansi256,
+			style.ansi16m
+		];
 	}
-	if (model === "hex") return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
-	return ansi_styles_default[type][model](...arguments_);
+	if (model === "hex") {
+		const ansi = (hex) => style.ansi(ansiStyles.hexToAnsi(hex));
+		const ansi256 = (hex) => style.ansi256(ansiStyles.hexToAnsi256(hex));
+		return [
+			ansi,
+			ansi,
+			ansi256,
+			(hex) => style.ansi16m(...ansiStyles.hexToRgb(hex))
+		];
+	}
+	const ansi = (code) => style.ansi(ansiStyles.ansi256ToAnsi(code));
+	return [
+		ansi,
+		ansi,
+		style.ansi256,
+		style.ansi256
+	];
 };
-const usedModels = [
+for (const model of [
 	"rgb",
 	"hex",
 	"ansi256"
-];
-for (const model of usedModels) {
-	styles[model] = { get() {
-		const { level } = this;
-		return function(...arguments_) {
-			const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
-			return createBuilder(this, styler, this[IS_EMPTY]);
-		};
-	} };
-	const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
-	styles[bgModel] = { get() {
-		const { level } = this;
-		return function(...arguments_) {
-			const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
-			return createBuilder(this, styler, this[IS_EMPTY]);
-		};
-	} };
+]) {
+	const capitalizedModel = model[0].toUpperCase() + model.slice(1);
+	for (const [styleName, type] of [
+		[model, "color"],
+		["bg" + capitalizedModel, "bgColor"],
+		["underline" + capitalizedModel, "underlineColor"]
+	]) {
+		const { close } = ansiStyles[type];
+		const converters = createModelConverters(model, type);
+		styles[styleName] = { get() {
+			const styleFunction = function(first, second, third) {
+				const open = converters[this.level](first, second, third);
+				return createBuilder(this, createStyler(open, close, this[STYLER]), this[IS_EMPTY]);
+			};
+			Object.defineProperty(this, styleName, { value: styleFunction });
+			return styleFunction;
+		} };
+	}
 }
 const proto = Object.defineProperties(() => {}, {
 	...styles,
@@ -1506,33 +1459,37 @@ const createStyler = (open, close, parent) => {
 	};
 };
 const createBuilder = (self, _styler, _isEmpty) => {
-	const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
+	const builder = (...arguments_) => {
+		if (arguments_.length === 1) return applyStyle(builder, "" + arguments_[0]);
+		if (arguments_.length === 2) return applyStyle(builder, `${arguments_[0] ?? ""} ${arguments_[1] ?? ""}`);
+		return applyStyle(builder, arguments_.join(" "));
+	};
 	Object.setPrototypeOf(builder, proto);
-	builder[GENERATOR] = self;
+	builder[GENERATOR] = self[GENERATOR] ?? self;
 	builder[STYLER] = _styler;
 	builder[IS_EMPTY] = _isEmpty;
 	return builder;
 };
-const applyStyle = (self, string$1) => {
-	if (self.level <= 0 || !string$1) return self[IS_EMPTY] ? "" : string$1;
+const applyStyle = (self, string) => {
+	if (self[GENERATOR][LEVEL] <= 0 || !string) return self[IS_EMPTY] ? "" : string;
 	let styler = self[STYLER];
-	if (styler === void 0) return string$1;
+	if (styler === void 0) return string;
 	const { openAll, closeAll } = styler;
-	if (string$1.includes("\x1B")) while (styler !== void 0) {
-		string$1 = stringReplaceAll(string$1, styler.close, styler.open);
+	if (string.includes("\x1B")) while (styler !== void 0) {
+		string = stringReplaceAll(string, styler.close, styler.open);
 		styler = styler.parent;
 	}
-	const lfIndex = string$1.indexOf("\n");
-	if (lfIndex !== -1) string$1 = stringEncaseCRLFWithFirstIndex(string$1, closeAll, openAll, lfIndex);
-	return openAll + string$1 + closeAll;
+	const lfIndex = string.indexOf("\n");
+	if (lfIndex !== -1) string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
+	return openAll + string + closeAll;
 };
-Object.defineProperties(createChalk.prototype, styles);
+Object.defineProperties(createChalk.prototype, {
+	...styles,
+	level: levelDescriptor
+});
 const chalk = createChalk();
-const chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
-var source_default = chalk;
-
-//#endregion
-//#region src/render/colors.ts
+createChalk({ level: stderrColor ? stderrColor.level : 0 });
+// src/render/colors.ts
 const NAMED_COLORS = {
 	red: "#ff0000",
 	green: "#00ff00",
@@ -1580,7 +1537,7 @@ function resolveColor(color) {
 	return Object.hasOwn(NAMED_COLORS, key) ? NAMED_COLORS[key] : trimmed;
 }
 function colorize(text, fg, bg) {
-	let result = source_default;
+	let result = chalk;
 	if (fg) {
 		const resolved = resolveColor(fg);
 		result = result.hex(resolved.startsWith("#") ? resolved : "#808080");
@@ -1591,74 +1548,61 @@ function colorize(text, fg, bg) {
 	}
 	return result(text);
 }
-
-//#endregion
-//#region src/config/schema.ts
-const ColorSchema = pipe(string(), check(isValidColor, "must be a color name or #rgb/#rrggbb hex"));
-const WidgetConfigSchema = object({
-	type: string(),
-	label: optional(string()),
-	fg: optional(ColorSchema),
-	bg: optional(ColorSchema),
-	icon: optional(string()),
-	format: optional(string()),
-	command: optional(string()),
-	text: optional(string()),
-	separator: optional(string()),
-	cacheTtlMs: optional(number()),
-	priority: optional(number())
+// src/config/schema.ts
+const ColorSchema = /* @__PURE__ */ pipe(/* @__PURE__ */ string(), /* @__PURE__ */ check(isValidColor, "must be a color name or #rgb/#rrggbb hex"));
+const SettingsSchema = /* @__PURE__ */ object({
+	lines: /* @__PURE__ */ optional(/* @__PURE__ */ array(/* @__PURE__ */ object({
+		widgets: /* @__PURE__ */ array(/* @__PURE__ */ object({
+			type: /* @__PURE__ */ string(),
+			label: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			fg: /* @__PURE__ */ optional(ColorSchema),
+			bg: /* @__PURE__ */ optional(ColorSchema),
+			icon: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			format: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			command: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			text: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			separator: /* @__PURE__ */ optional(/* @__PURE__ */ string()),
+			cacheTtlMs: /* @__PURE__ */ optional(/* @__PURE__ */ number()),
+			priority: /* @__PURE__ */ optional(/* @__PURE__ */ number())
+		})),
+		flex: /* @__PURE__ */ optional(/* @__PURE__ */ picklist([
+			"left",
+			"right",
+			"center",
+			"space-between"
+		]), "left")
+	}))),
+	powerline: /* @__PURE__ */ optional(/* @__PURE__ */ object({
+		enabled: /* @__PURE__ */ optional(/* @__PURE__ */ boolean(), false),
+		theme: /* @__PURE__ */ optional(/* @__PURE__ */ string(), "default"),
+		separator: /* @__PURE__ */ optional(/* @__PURE__ */ string(), ""),
+		separatorThin: /* @__PURE__ */ optional(/* @__PURE__ */ string(), "│")
+	})),
+	compact: /* @__PURE__ */ optional(/* @__PURE__ */ object({
+		mode: /* @__PURE__ */ optional(/* @__PURE__ */ picklist([
+			"auto",
+			"always",
+			"never"
+		]), "auto"),
+		threshold: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 80)
+	})),
+	alerts: /* @__PURE__ */ optional(/* @__PURE__ */ object({
+		sessionWarn: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 5),
+		sessionDanger: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 15),
+		dailyWarn: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 10),
+		dailyDanger: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 25)
+	})),
+	cache: /* @__PURE__ */ optional(/* @__PURE__ */ object({
+		statuslineTtlMs: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 5e3),
+		pricingTtlMs: /* @__PURE__ */ optional(/* @__PURE__ */ number(), 864e5)
+	})),
+	costSource: /* @__PURE__ */ optional(/* @__PURE__ */ picklist([
+		"auto",
+		"calculated",
+		"stdin"
+	]), "auto")
 });
-const FLEX_MODES = [
-	"left",
-	"right",
-	"center",
-	"space-between"
-];
-const COMPACT_MODES = [
-	"auto",
-	"always",
-	"never"
-];
-const COST_SOURCES = [
-	"auto",
-	"calculated",
-	"stdin"
-];
-const LineConfigSchema = object({
-	widgets: array(WidgetConfigSchema),
-	flex: optional(picklist(FLEX_MODES), "left")
-});
-const PowerlineConfigSchema = object({
-	enabled: optional(boolean(), false),
-	theme: optional(string(), "default"),
-	separator: optional(string(), ""),
-	separatorThin: optional(string(), "│")
-});
-const CacheConfigSchema = object({
-	statuslineTtlMs: optional(number(), 5e3),
-	pricingTtlMs: optional(number(), 864e5)
-});
-const CompactConfigSchema = object({
-	mode: optional(picklist(COMPACT_MODES), "auto"),
-	threshold: optional(number(), 80)
-});
-const AlertsConfigSchema = object({
-	sessionWarn: optional(number(), 5),
-	sessionDanger: optional(number(), 15),
-	dailyWarn: optional(number(), 10),
-	dailyDanger: optional(number(), 25)
-});
-const SettingsSchema = object({
-	lines: optional(array(LineConfigSchema)),
-	powerline: optional(PowerlineConfigSchema),
-	compact: optional(CompactConfigSchema),
-	alerts: optional(AlertsConfigSchema),
-	cache: optional(CacheConfigSchema),
-	costSource: optional(picklist(COST_SOURCES), "auto")
-});
-
-//#endregion
-//#region src/config/defaults.ts
+// src/config/defaults.ts
 const DEFAULT_SETTINGS = {
 	lines: [{
 		widgets: [
@@ -1756,9 +1700,7 @@ const DEFAULT_SETTINGS = {
 	},
 	costSource: "auto"
 };
-
-//#endregion
-//#region src/utils/paths.ts
+// src/utils/paths.ts
 /**
 * The user's home directory as an absolute path, or null when there is no
 * trustworthy answer.
@@ -1777,12 +1719,12 @@ const DEFAULT_SETTINGS = {
 */
 function getHomeDir() {
 	try {
-		const home = os$1.homedir();
-		if (path$11.isAbsolute(home)) return home;
+		const home = os.homedir();
+		if (path.isAbsolute(home)) return home;
 	} catch {}
 	try {
-		const fromPasswd = os$1.userInfo().homedir;
-		if (path$11.isAbsolute(fromPasswd)) return fromPasswd;
+		const fromPasswd = os.userInfo().homedir;
+		if (path.isAbsolute(fromPasswd)) return fromPasswd;
 	} catch {}
 	return null;
 }
@@ -1798,18 +1740,18 @@ function collapseHome(p) {
 	const home = getHomeDir();
 	if (home === null || home === "/") return p;
 	if (p === home) return "~";
-	const prefix = home.endsWith(path$11.sep) ? home : home + path$11.sep;
-	return p.startsWith(prefix) ? `~${path$11.sep}${p.slice(prefix.length)}` : p;
+	const prefix = home.endsWith(path.sep) ? home : home + path.sep;
+	return p.startsWith(prefix) ? `~${path.sep}${p.slice(prefix.length)}` : p;
 }
 /** `~/.claude`, where Claude Code keeps its data, or null with no home. */
 function getClaudeDataDir() {
 	const home = getHomeDir();
-	return home === null ? null : path$11.join(home, ".claude");
+	return home === null ? null : path.join(home, ".claude");
 }
 /** Claude Code's transcript tree, or null with no home: then none are read. */
 function getProjectsDir() {
 	const dataDir = getClaudeDataDir();
-	return dataDir === null ? null : path$11.join(dataDir, "projects");
+	return dataDir === null ? null : path.join(dataDir, "projects");
 }
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function shardKey(sessionId) {
@@ -1827,12 +1769,11 @@ function shardKey(sessionId) {
 function xdgBaseDir(name) {
 	const value = process.env[name];
 	if (!value) return void 0;
-	if (path$11.isAbsolute(value)) return value;
+	if (path.isAbsolute(value)) return value;
 	reportIgnoredXdg(name, value);
-	return void 0;
 }
 /** `NAME=value` pairs already reported, so each is logged once per process. */
-const reportedXdg = new Set();
+const reportedXdg = /* @__PURE__ */ new Set();
 /**
 * Ignoring a relative value moves the cache or config somewhere the user did
 * not ask for, silently. Say so under GCCUSAGE_DEBUG (review of #154) — once
@@ -1859,9 +1800,9 @@ function reportIgnoredXdg(name, value) {
 */
 function getCacheDir() {
 	const xdg = xdgBaseDir("XDG_CACHE_HOME");
-	if (xdg) return path$11.join(xdg, "gccusage");
+	if (xdg) return path.join(xdg, "gccusage");
 	const home = getHomeDir();
-	return home === null ? null : path$11.join(home, ".cache", "gccusage");
+	return home === null ? null : path.join(home, ".cache", "gccusage");
 }
 /**
 * Lives here, beside `getCacheDir`, so both are built on `getHomeDir()`. It
@@ -1875,9 +1816,9 @@ function getCacheDir() {
 */
 function getConfigDir() {
 	const xdg = xdgBaseDir("XDG_CONFIG_HOME");
-	if (xdg) return path$11.join(xdg, "gccusage");
+	if (xdg) return path.join(xdg, "gccusage");
 	const home = getHomeDir();
-	return home === null ? null : path$11.join(home, ".config", "gccusage");
+	return home === null ? null : path.join(home, ".config", "gccusage");
 }
 /**
 * Create `dir`, and any missing parents, as 0700 (SEC-003). The cache holds
@@ -1889,7 +1830,7 @@ function getConfigDir() {
 * choice, so nothing here chmods it.
 */
 function ensureDir(dir) {
-	if (!fs$7.existsSync(dir)) fs$7.mkdirSync(dir, {
+	if (!fs.existsSync(dir)) fs.mkdirSync(dir, {
 		recursive: true,
 		mode: 448
 	});
@@ -1916,26 +1857,26 @@ function ensureDir(dir) {
 * the refresh cadence. A marker would be more state to get wrong, for a
 * saving no one would notice.
 */
-function narrowCacheModes(cacheDir$1) {
+function narrowCacheModes(cacheDir) {
 	if (typeof process.getuid !== "function") return;
 	const uid = process.getuid();
-	if (!narrowOwned(cacheDir$1, uid, true)) return;
+	if (!narrowOwned(cacheDir, uid, true)) return;
 	let names;
 	try {
-		names = fs$7.readdirSync(cacheDir$1);
+		names = fs.readdirSync(cacheDir);
 	} catch {
 		return;
 	}
 	for (const name of names) {
-		const entry = path$11.join(cacheDir$1, name);
+		const entry = path.join(cacheDir, name);
 		if (!narrowOwned(entry, uid, true)) continue;
 		let inner;
 		try {
-			inner = fs$7.readdirSync(entry);
+			inner = fs.readdirSync(entry);
 		} catch {
 			continue;
 		}
-		for (const innerName of inner) narrowOwned(path$11.join(entry, innerName), uid, false);
+		for (const innerName of inner) narrowOwned(path.join(entry, innerName), uid, false);
 	}
 }
 /**
@@ -1946,7 +1887,7 @@ function narrowCacheModes(cacheDir$1) {
 function narrowOwned(p, uid, dirsToo) {
 	let st;
 	try {
-		st = fs$7.lstatSync(p);
+		st = fs.lstatSync(p);
 	} catch {
 		return false;
 	}
@@ -1957,14 +1898,14 @@ function narrowOwned(p, uid, dirsToo) {
 	const current = st.mode & 511;
 	const narrowed = current & -64;
 	if (narrowed !== current) try {
-		fs$7.chmodSync(p, narrowed);
+		fs.chmodSync(p, narrowed);
 	} catch {}
 	return isDir;
 }
 function findJsonlFiles(dir) {
-	if (!fs$7.existsSync(dir)) return [];
+	if (!fs.existsSync(dir)) return [];
 	try {
-		return fs$7.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path$11.join(dir, f));
+		return fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => path.join(dir, f));
 	} catch {
 		return [];
 	}
@@ -1973,7 +1914,7 @@ const SUBAGENT_TRANSCRIPT = /^agent-.*\.jsonl$/;
 /** The agent transcripts in `dir`, or null when `dir` cannot be listed. */
 function subagentTranscriptsIn(dir) {
 	try {
-		return fs$7.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path$11.join(dir, f));
+		return fs.readdirSync(dir).filter((f) => SUBAGENT_TRANSCRIPT.test(f)).map((f) => path.join(dir, f));
 	} catch {
 		return null;
 	}
@@ -2005,17 +1946,17 @@ function subagentTranscriptsIn(dir) {
 * over-count bounded by that overlap, against a ~15% under-count fixed.
 */
 function findSubagentJsonlFiles(sessionDir) {
-	const subagentsDir = path$11.join(sessionDir, "subagents");
+	const subagentsDir = path.join(sessionDir, "subagents");
 	const files = subagentTranscriptsIn(subagentsDir);
 	if (files === null) return [];
-	const workflowsDir = path$11.join(subagentsDir, "workflows");
+	const workflowsDir = path.join(subagentsDir, "workflows");
 	let runs;
 	try {
-		runs = fs$7.readdirSync(workflowsDir);
+		runs = fs.readdirSync(workflowsDir);
 	} catch {
 		return files;
 	}
-	for (const run of runs) files.push(...subagentTranscriptsIn(path$11.join(workflowsDir, run)) ?? []);
+	for (const run of runs) files.push(...subagentTranscriptsIn(path.join(workflowsDir, run)) ?? []);
 	return files;
 }
 /**
@@ -2030,18 +1971,17 @@ function findSessionTranscripts(sessionId) {
 	};
 	if (!sessionId) return none;
 	const projectsDir = getProjectsDir();
-	if (projectsDir === null || !fs$7.existsSync(projectsDir)) return none;
+	if (projectsDir === null || !fs.existsSync(projectsDir)) return none;
 	const joinable = SAFE_SESSION_ID.test(sessionId);
 	const mainFiles = [];
 	const subagentFiles = [];
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$11.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
+		for (const projectDir of fs.readdirSync(projectsDir)) {
+			const fullPath = path.join(projectsDir, projectDir);
+			if (!fs.statSync(fullPath).isDirectory()) continue;
 			const jsonlFiles = findJsonlFiles(fullPath);
-			mainFiles.push(...jsonlFiles.filter((f) => path$11.basename(f, ".jsonl") === sessionId));
-			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path$11.join(fullPath, sessionId)));
+			mainFiles.push(...jsonlFiles.filter((f) => path.basename(f, ".jsonl") === sessionId));
+			if (joinable) subagentFiles.push(...findSubagentJsonlFiles(path.join(fullPath, sessionId)));
 		}
 	} catch {}
 	return {
@@ -2069,14 +2009,14 @@ function findSessionTranscripts(sessionId) {
 */
 function findTodayJsonlFileStats() {
 	const projectsDir = getProjectsDir();
-	if (projectsDir === null || !fs$7.existsSync(projectsDir)) return [];
-	const todayStart = new Date();
+	if (projectsDir === null || !fs.existsSync(projectsDir)) return [];
+	const todayStart = /* @__PURE__ */ new Date();
 	todayStart.setHours(0, 0, 0, 0);
 	const todayMs = todayStart.getTime();
 	const files = [];
 	const addIfToday = (f) => {
 		try {
-			const fstat = fs$7.statSync(f);
+			const fstat = fs.statSync(f);
 			if (fstat.mtimeMs >= todayMs) files.push({
 				path: f,
 				mtimeMs: fstat.mtimeMs,
@@ -2085,18 +2025,17 @@ function findTodayJsonlFileStats() {
 		} catch {}
 	};
 	try {
-		for (const projectDir of fs$7.readdirSync(projectsDir)) {
-			const fullPath = path$11.join(projectsDir, projectDir);
-			const stat = fs$7.statSync(fullPath);
-			if (!stat.isDirectory()) continue;
+		for (const projectDir of fs.readdirSync(projectsDir)) {
+			const fullPath = path.join(projectsDir, projectDir);
+			if (!fs.statSync(fullPath).isDirectory()) continue;
 			let entries;
 			try {
-				entries = fs$7.readdirSync(fullPath, { withFileTypes: true });
+				entries = fs.readdirSync(fullPath, { withFileTypes: true });
 			} catch {
 				continue;
 			}
 			for (const entry of entries) {
-				const entryPath = path$11.join(fullPath, entry.name);
+				const entryPath = path.join(fullPath, entry.name);
 				if (entry.name.endsWith(".jsonl")) addIfToday(entryPath);
 				else if (entry.isDirectory()) for (const f of findSubagentJsonlFiles(entryPath)) addIfToday(f);
 			}
@@ -2104,9 +2043,7 @@ function findTodayJsonlFileStats() {
 	} catch {}
 	return files;
 }
-
-//#endregion
-//#region src/config/loader.ts
+// src/config/loader.ts
 /**
 * Null when there is no config directory to look in (SEC-004: no home and no
 * absolute XDG_CONFIG_HOME). That means "no config file", never "look
@@ -2114,7 +2051,7 @@ function findTodayJsonlFileStats() {
 */
 function getConfigPath() {
 	const dir = getConfigDir();
-	return dir === null ? null : path$10.join(dir, "settings.json");
+	return dir === null ? null : path.join(dir, "settings.json");
 }
 /**
 * Shallow-merge only keys that exist in the source object. `Object.hasOwn`,
@@ -2153,7 +2090,7 @@ function truncate(text) {
 /** One line describing why the config file was rejected. */
 function describeIssues(issues) {
 	const [first, ...rest] = issues;
-	const dotPath = getDotPath(first);
+	const dotPath = /* @__PURE__ */ getDotPath(first);
 	const where = dotPath ? `${dotPath}: ` : "";
 	const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
 	const suffix = first.kind === "validation" ? ` (got ${truncate(first.received)})` : "";
@@ -2161,10 +2098,10 @@ function describeIssues(issues) {
 }
 function loadSettings() {
 	const configPath = getConfigPath();
-	if (configPath === null || !fs$6.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
+	if (configPath === null || !fs.existsSync(configPath)) return { settings: DEFAULT_SETTINGS };
 	let parsed;
 	try {
-		parsed = JSON.parse(fs$6.readFileSync(configPath, "utf-8"));
+		parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return {
@@ -2172,16 +2109,14 @@ function loadSettings() {
 			error: err instanceof SyntaxError ? `invalid JSON: ${detail}` : `cannot read config: ${detail}`
 		};
 	}
-	const result = safeParse(SettingsSchema, parsed);
+	const result = /* @__PURE__ */ safeParse(SettingsSchema, parsed);
 	if (!result.success) return {
 		settings: DEFAULT_SETTINGS,
 		error: describeIssues(result.issues)
 	};
 	return { settings: mergeSettings(DEFAULT_SETTINGS, parsed, result.output) };
 }
-
-//#endregion
-//#region src/config/error-line.ts
+// src/config/error-line.ts
 const BOLD_RED = "\x1B[1;31m";
 const RESET$2 = "\x1B[0m";
 /**
@@ -2251,9 +2186,7 @@ function formatStdinReadError(error) {
 function formatDeadline(ms) {
 	return ms < 1e3 ? `${ms}ms` : `${ms / 1e3}s`;
 }
-
-//#endregion
-//#region src/utils/atomic-json.ts
+// src/utils/atomic-json.ts
 let counter = 0;
 /**
 * The same atomicity guarantee as `writeJsonAtomic`, for content that is
@@ -2269,18 +2202,17 @@ let counter = 0;
 * is never visible with a wider mode, even briefly.
 */
 function writeFileAtomic(filePath, contents, mode) {
-	const dir = path$9.dirname(filePath);
-	ensureDir(dir);
+	ensureDir(path.dirname(filePath));
 	const tmpPath = `${filePath}.${process.pid}.${counter++}.tmp`;
 	try {
 		createExclusive(tmpPath, contents, mode);
 		if (mode !== void 0) try {
-			fs$5.chmodSync(tmpPath, mode);
+			fs.chmodSync(tmpPath, mode);
 		} catch {}
-		fs$5.renameSync(tmpPath, filePath);
+		fs.renameSync(tmpPath, filePath);
 	} catch (err) {
 		try {
-			fs$5.unlinkSync(tmpPath);
+			fs.unlinkSync(tmpPath);
 		} catch {}
 		throw err;
 	}
@@ -2306,11 +2238,11 @@ function createExclusive(tmpPath, contents, mode) {
 		...mode === void 0 ? {} : { mode }
 	};
 	try {
-		fs$5.writeFileSync(tmpPath, contents, options);
+		fs.writeFileSync(tmpPath, contents, options);
 	} catch (err) {
 		if (err.code !== "EEXIST") throw err;
-		fs$5.unlinkSync(tmpPath);
-		fs$5.writeFileSync(tmpPath, contents, options);
+		fs.unlinkSync(tmpPath);
+		fs.writeFileSync(tmpPath, contents, options);
 	}
 }
 /**
@@ -2319,13 +2251,6 @@ function createExclusive(tmpPath, contents, mode) {
 * `notes.tmp` or anything else that merely ends in `.tmp`.
 */
 const TEMP_FILE_PATTERN = /\.\d+\.\d+\.tmp$/;
-/**
-* Old enough that no live write can still own the file. A write is one
-* `writeFileSync` and one `rename` of a few KB; an hour is many orders of
-* magnitude past that, so a younger temp file is left alone in case another
-* process is mid-write to it.
-*/
-const STALE_TEMP_FILE_AGE_MS = 60 * 60 * 1e3;
 /**
 * Remove orphaned `writeFileAtomic` temp files from `dir` and its immediate
 * subdirectories (the cache keeps targets in `daily/` and `blocks/` as well as
@@ -2361,17 +2286,17 @@ function sweepStaleTempFiles(dir) {
 function sweepDir(dir, now, depthLeft) {
 	let names;
 	try {
-		names = fs$5.readdirSync(dir);
+		names = fs.readdirSync(dir);
 	} catch {
 		return;
 	}
 	for (const name of names) {
-		const full = path$9.join(dir, name);
+		const full = path.join(dir, name);
 		try {
-			const stat = fs$5.lstatSync(full);
+			const stat = fs.lstatSync(full);
 			if (stat.isDirectory()) {
 				if (depthLeft > 0) sweepDir(full, now, depthLeft - 1);
-			} else if (stat.isFile() && TEMP_FILE_PATTERN.test(name) && now - stat.mtimeMs > STALE_TEMP_FILE_AGE_MS) fs$5.unlinkSync(full);
+			} else if (stat.isFile() && TEMP_FILE_PATTERN.test(name) && now - stat.mtimeMs > 36e5) fs.unlinkSync(full);
 		} catch {}
 	}
 }
@@ -2404,7 +2329,7 @@ function writeJsonAtomic(filePath, data) {
 function readJsonValidated(filePath, schema) {
 	let raw;
 	try {
-		raw = fs$5.readFileSync(filePath, "utf-8");
+		raw = fs.readFileSync(filePath, "utf-8");
 	} catch {
 		return null;
 	}
@@ -2414,17 +2339,14 @@ function readJsonValidated(filePath, schema) {
 	} catch {
 		return null;
 	}
-	const result = safeParse(schema, parsed);
+	const result = /* @__PURE__ */ safeParse(schema, parsed);
 	return result.success ? result.output : null;
 }
-
-//#endregion
-//#region src/data/jsonl-reader.ts
+// src/data/jsonl-reader.ts
 function parseJsonlFile(filePath) {
-	if (!fs$4.existsSync(filePath)) return [];
+	if (!fs.existsSync(filePath)) return [];
 	try {
-		const content = fs$4.readFileSync(filePath, "utf-8");
-		return parseJsonlContent(content);
+		return parseJsonlContent(fs.readFileSync(filePath, "utf-8"));
 	} catch {
 		return [];
 	}
@@ -2463,7 +2385,7 @@ function parseJsonlFile(filePath) {
 */
 function parseJsonlContent(content) {
 	const entries = [];
-	const entryIndexByMessageId = new Map();
+	const entryIndexByMessageId = /* @__PURE__ */ new Map();
 	for (const line of content.split("\n")) {
 		if (!line.trim()) continue;
 		try {
@@ -2502,8 +2424,7 @@ function normalizeEntry(raw) {
 	if (typeof raw["costUsd"] === "number") entry.costUsd = raw["costUsd"];
 	if (typeof raw["timestamp"] === "string") entry.timestamp = raw["timestamp"];
 	if (typeof raw["sessionId"] === "string") entry.sessionId = raw["sessionId"];
-	const origin = typeof raw["origin"] === "object" && raw["origin"] !== null ? raw["origin"] : void 0;
-	const originKind = origin?.["kind"];
+	const originKind = (typeof raw["origin"] === "object" && raw["origin"] !== null ? raw["origin"] : void 0)?.["kind"];
 	if (typeof originKind === "string") entry.originKind = originKind;
 	const message = typeof raw["message"] === "object" && raw["message"] !== null ? raw["message"] : void 0;
 	const model = message?.["model"] ?? raw["model"];
@@ -2524,7 +2445,7 @@ function normalizeEntry(raw) {
 	}
 	return entry;
 }
-function isEntryFromToday(entry, now = new Date()) {
+function isEntryFromToday(entry, now = /* @__PURE__ */ new Date()) {
 	if (!entry.timestamp) return false;
 	const ts = new Date(entry.timestamp).getTime();
 	if (Number.isNaN(ts)) return false;
@@ -2532,12 +2453,10 @@ function isEntryFromToday(entry, now = new Date()) {
 	midnight.setHours(0, 0, 0, 0);
 	return ts >= midnight.getTime();
 }
-function filterTodayEntries(entries, now = new Date()) {
+function filterTodayEntries(entries, now = /* @__PURE__ */ new Date()) {
 	return entries.filter((e) => isEntryFromToday(e, now));
 }
-
-//#endregion
-//#region src/data/pricing-tiers.ts
+// src/data/pricing-tiers.ts
 /**
 * Anthropic charges a premium on a request whose prompt exceeds 200k tokens.
 * The threshold is PER REQUEST, not per session: 50 turns of 60k each is 3M
@@ -2560,16 +2479,7 @@ const TIER_FIELDS = {
 * 1-hour entry too (#118).
 */
 const CACHE_1H_FIELD = "cache_creation_input_token_cost_above_1hr";
-/**
-* A 1-hour cache write costs twice the input rate. Verified against the live
-* feed: 21 of the 23 `claude-*` keys publishing the rate match this exactly,
-* and the 2 that do not are provably-broken records (spec D2). The same factor
-* reproduces all three published cross-product rates.
-*/
-const CACHE_1H_INPUT_MULTIPLIER = 2;
-
-//#endregion
-//#region src/data/token-aggregator.ts
+// src/data/token-aggregator.ts
 function emptyCounts$1() {
 	return {
 		inputTokens: 0,
@@ -2604,13 +2514,13 @@ function addCounts(target, usage) {
 function addUsage(target, entry) {
 	if (!entry.usage) return;
 	addCounts(target, entry.usage);
-	if (promptTokens(entry.usage) > PREMIUM_PROMPT_THRESHOLD) {
+	if (promptTokens(entry.usage) > 2e5) {
 		target.premium ??= emptyCounts$1();
 		addCounts(target.premium, entry.usage);
 	}
 }
 function aggregateTokens(entries) {
-	const byModel = new Map();
+	const byModel = /* @__PURE__ */ new Map();
 	const totals = emptyMetrics$1();
 	for (const entry of entries) {
 		if (!entry.usage) continue;
@@ -2651,13 +2561,11 @@ function getFirstTimestamp(entries) {
 * which is neither a turn nor a render.
 */
 function countHumanTurns(entries) {
-	let count$1 = 0;
-	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count$1++;
-	return count$1;
+	let count = 0;
+	for (const entry of entries) if (entry.type === "user" && entry.originKind === "human") count++;
+	return count;
 }
-
-//#endregion
-//#region src/cache/file-aggregate.ts
+// src/cache/file-aggregate.ts
 /**
 * Per-file transcript aggregates, cached on disk and reused while the file's
 * `mtimeMs` and `size` both still match. Shared by the today aggregate
@@ -2665,8 +2573,8 @@ function countHumanTurns(entries) {
 * (`session-aggregate-cache.ts`, COR-007), which cache different entries of
 * the same files: today's are filtered to today, the session's are not.
 */
-const count = pipe(finiteNumber(), minValue(0));
-const TokenCountsSchema = object({
+const count = /* @__PURE__ */ pipe(finiteNumber(), /* @__PURE__ */ minValue(0));
+const TokenCountsSchema = /* @__PURE__ */ object({
 	inputTokens: count,
 	outputTokens: count,
 	cacheCreationTokens: count,
@@ -2682,7 +2590,7 @@ const TokenCountsSchema = object({
 * TTL split fails validation and is discarded rather than read as "no 1-hour
 * tokens" — which would under-cost the rest of the day (#118).
 */
-const TokenMetricsSchema = object({
+const TokenMetricsSchema = /* @__PURE__ */ object({
 	...TokenCountsSchema.entries,
 	premium: TokenCountsSchema
 });
@@ -2697,13 +2605,13 @@ const TokenMetricsSchema = object({
 * They are REQUIRED, so a cache written before they existed is discarded
 * rather than read as "no start, no turns".
 */
-const FileAggregateSchema = object({
+const FileAggregateSchema = /* @__PURE__ */ object({
 	mtimeMs: finiteNumber(),
-	size: pipe(finiteNumber(), minValue(0)),
-	byModel: array(tuple([string(), TokenMetricsSchema])),
+	size: /* @__PURE__ */ pipe(finiteNumber(), /* @__PURE__ */ minValue(0)),
+	byModel: /* @__PURE__ */ array(/* @__PURE__ */ tuple([/* @__PURE__ */ string(), TokenMetricsSchema])),
 	totals: TokenMetricsSchema,
-	firstTimestamp: nullable(finiteNumber()),
-	humanTurns: pipe(finiteNumber(), integer(), minValue(0))
+	firstTimestamp: /* @__PURE__ */ nullable(finiteNumber()),
+	humanTurns: /* @__PURE__ */ pipe(finiteNumber(), /* @__PURE__ */ integer(), /* @__PURE__ */ minValue(0))
 });
 function emptyCounts() {
 	return {
@@ -2782,7 +2690,7 @@ function aggregateEntries(file, entries) {
 * offset: `parseJsonlContent` merges lines sharing a `message.id`, so a group
 * straddling an offset boundary would need that map carried across renders.
 */
-function refreshFileAggregates(files, previous, readEntries$1) {
+function refreshFileAggregates(files, previous, readEntries) {
 	const next = {};
 	let changed = Object.keys(previous).length !== files.length;
 	for (const file of files) {
@@ -2791,7 +2699,7 @@ function refreshFileAggregates(files, previous, readEntries$1) {
 			next[file.path] = hit;
 			continue;
 		}
-		next[file.path] = aggregateEntries(file, readEntries$1(file.path));
+		next[file.path] = aggregateEntries(file, readEntries(file.path));
 		changed = true;
 	}
 	return {
@@ -2809,7 +2717,7 @@ function persistableAggregates(files) {
 }
 /** Sum per-file aggregates into one session's or one day's metrics. */
 function sumAggregates(aggregates) {
-	const byModel = new Map();
+	const byModel = /* @__PURE__ */ new Map();
 	const totals = emptyMetrics();
 	for (const aggregate of aggregates) {
 		addInto(totals, aggregate.totals);
@@ -2827,15 +2735,13 @@ function sumAggregates(aggregates) {
 		totals
 	};
 }
-
-//#endregion
-//#region src/cache/session-aggregate-cache.ts
-const SessionAggregateCacheSchema = object({ files: record(string(), FileAggregateSchema) });
-const STALE_MS = 7 * 24 * 60 * 60 * 1e3;
+// src/cache/session-aggregate-cache.ts
+const SessionAggregateCacheSchema = /* @__PURE__ */ object({ files: /* @__PURE__ */ record(/* @__PURE__ */ string(), FileAggregateSchema) });
+const STALE_MS = 6048e5;
 /** Null when there is no cache dir (SEC-004): every file is re-parsed. */
 function cacheDir() {
 	const dir = getCacheDir();
-	return dir === null ? null : path$8.join(dir, "session-aggregates");
+	return dir === null ? null : path.join(dir, "session-aggregates");
 }
 /**
 * One file per session, keyed like the daily store's shards. A single shared
@@ -2844,7 +2750,7 @@ function cacheDir() {
 */
 function cachePath$1(sessionId) {
 	const dir = cacheDir();
-	return dir === null ? null : path$8.join(dir, `${shardKey(sessionId)}.json`);
+	return dir === null ? null : path.join(dir, `${shardKey(sessionId)}.json`);
 }
 /**
 * Delete other sessions' caches untouched for a week. Run only when this
@@ -2856,21 +2762,21 @@ function sweepStale(now) {
 	if (dir === null) return;
 	let names;
 	try {
-		names = fs$3.readdirSync(dir);
+		names = fs.readdirSync(dir);
 	} catch {
 		return;
 	}
 	for (const name of names) {
-		const filePath = path$8.join(dir, name);
+		const filePath = path.join(dir, name);
 		try {
-			if (now - fs$3.statSync(filePath).mtimeMs > STALE_MS) fs$3.unlinkSync(filePath);
+			if (now - fs.statSync(filePath).mtimeMs > STALE_MS) fs.unlinkSync(filePath);
 		} catch {}
 	}
 }
 function statAll(paths) {
 	const stats = [];
 	for (const filePath of paths) try {
-		const s = fs$3.statSync(filePath);
+		const s = fs.statSync(filePath);
 		stats.push({
 			path: filePath,
 			mtimeMs: s.mtimeMs,
@@ -2906,11 +2812,11 @@ function getSessionAggregate(sessionId) {
 		writeJsonAtomic(target, { files: persistableAggregates(next.files) });
 	} catch {}
 	const all = files.map((f) => next.files[f.path]);
-	const main$1 = files.filter((f) => mainPaths.has(f.path)).map((f) => next.files[f.path]);
+	const main = files.filter((f) => mainPaths.has(f.path)).map((f) => next.files[f.path]);
 	return {
 		metrics: sumAggregates(all),
-		sessionStartTime: earliestStart(main$1) ?? earliestStart(all),
-		turnCount: main$1.reduce((sum, a) => sum + a.humanTurns, 0)
+		sessionStartTime: earliestStart(main) ?? earliestStart(all),
+		turnCount: main.reduce((sum, a) => sum + a.humanTurns, 0)
 	};
 }
 function earliestStart(aggregates) {
@@ -2918,18 +2824,14 @@ function earliestStart(aggregates) {
 	for (const { firstTimestamp } of aggregates) if (firstTimestamp !== null && (earliest === null || firstTimestamp < earliest)) earliest = firstTimestamp;
 	return earliest;
 }
-
-//#endregion
-//#region src/types/block-metrics.ts
-const BLOCK_DURATION_MS = 5 * 60 * 60 * 1e3;
-
-//#endregion
-//#region src/cache/block-cache.ts
-const BlockCacheSchema = object({ blockStartTime: persistedTimestamp() });
+// src/types/block-metrics.ts
+const BLOCK_DURATION_MS = 18e6;
+// src/cache/block-cache.ts
+const BlockCacheSchema = /* @__PURE__ */ object({ blockStartTime: persistedTimestamp() });
 /** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getBlockCachePath() {
 	const dir = getCacheDir();
-	return dir === null ? null : path$7.join(dir, "blocks", "current.json");
+	return dir === null ? null : path.join(dir, "blocks", "current.json");
 }
 /**
 * The cached block, if it is still running. The one place a cached start is
@@ -2937,14 +2839,14 @@ function getBlockCachePath() {
 * re-derives it as `now - blockStartTime`, a second gate that could disagree.
 */
 function loadBlockCache(now = Date.now()) {
-	const cachePath$2 = getBlockCachePath();
-	if (cachePath$2 === null) return null;
-	const data = readJsonValidated(cachePath$2, BlockCacheSchema);
+	const cachePath = getBlockCachePath();
+	if (cachePath === null) return null;
+	const data = readJsonValidated(cachePath, BlockCacheSchema);
 	if (!data) return null;
 	const elapsedMs = ageSince(data.blockStartTime, now);
-	if (elapsedMs === null || elapsedMs >= BLOCK_DURATION_MS) {
+	if (elapsedMs === null || elapsedMs >= 18e6) {
 		try {
-			fs$2.unlinkSync(cachePath$2);
+			fs.unlinkSync(cachePath);
 		} catch {}
 		return null;
 	}
@@ -2954,15 +2856,13 @@ function loadBlockCache(now = Date.now()) {
 	};
 }
 function saveBlockCache(data) {
-	const cachePath$2 = getBlockCachePath();
-	if (cachePath$2 === null) return;
+	const cachePath = getBlockCachePath();
+	if (cachePath === null) return;
 	try {
-		writeJsonAtomic(cachePath$2, data);
+		writeJsonAtomic(cachePath, data);
 	} catch {}
 }
-
-//#endregion
-//#region src/data/block-tracker.ts
+// src/data/block-tracker.ts
 function detectBlock(sessionStartTime) {
 	const now = Date.now();
 	const cached = loadBlockCache(now);
@@ -2974,7 +2874,7 @@ function detectBlock(sessionStartTime) {
 	};
 	if (sessionStartTime !== null) {
 		const elapsed = ageSince(sessionStartTime, now);
-		if (elapsed !== null && elapsed < BLOCK_DURATION_MS) {
+		if (elapsed !== null && elapsed < 18e6) {
 			saveBlockCache({ blockStartTime: sessionStartTime });
 			return {
 				blockStartTime: sessionStartTime,
@@ -2986,9 +2886,7 @@ function detectBlock(sessionStartTime) {
 	}
 	return null;
 }
-
-//#endregion
-//#region src/data/fallback-pricing.ts
+// src/data/fallback-pricing.ts
 /**
 * Offline snapshot of the LiteLLM pricing feed, parsed by the same
 * `parseLitellmPricing` the online path uses. Merged UNDER every table
@@ -3206,20 +3104,6 @@ const FALLBACK_PRICING = {
 		}
 	}
 };
-
-//#endregion
-//#region src/data/pricing-validation.ts
-/**
-* $1000 per million tokens. The live table tops out at 7.5e-5 (Opus output),
-* so this sits ~13x above anything real: it rejects the absurd and never a
-* genuine repricing.
-*/
-const MAX_COST_PER_TOKEN = .001;
-/**
-* How far a fetched price may drift from the checked-in snapshot before we
-* stop believing it. Anthropic has never moved a price by this factor.
-*/
-const MAX_SNAPSHOT_DEVIATION = 10;
 /**
 * A pricing table is a dictionary keyed by the LiteLLM feed and by the cache
 * file, so it has no prototype. As a plain `{}`, a feed key such as
@@ -3251,7 +3135,7 @@ function mergePricingTables(...tables) {
 * out as a TypeScript object literal, where a `"__proto__":` key SETS the
 * prototype of FALLBACK_PRICING (SEC-005).
 */
-const UNSTORABLE_KEYS = new Set([
+const UNSTORABLE_KEYS = /* @__PURE__ */ new Set([
 	"__proto__",
 	"prototype",
 	"constructor"
@@ -3273,13 +3157,13 @@ const COST_KEYS = [
 */
 function isSaneModelPricing(value) {
 	if (!value || typeof value !== "object") return false;
-	const record$1 = value;
+	const record = value;
 	for (const key of COST_KEYS) {
-		const cost = record$1[key];
+		const cost = record[key];
 		if (typeof cost !== "number" || !Number.isFinite(cost)) return false;
-		if (cost < 0 || cost > MAX_COST_PER_TOKEN) return false;
+		if (cost < 0 || cost > .001) return false;
 	}
-	return record$1["inputCostPerToken"] > 0;
+	return record["inputCostPerToken"] > 0;
 }
 /**
 * Bounds a whole entry, tier included. A failing TIER strips the tier and
@@ -3292,7 +3176,7 @@ function sanitiseModelPricing(value) {
 	if (!isSaneModelPricing(value)) return null;
 	if (value.above200k === void 0) return value;
 	if (isSaneTier(value.above200k, value)) return value;
-	const { above200k: _rejected,...withoutTier } = value;
+	const { above200k: _rejected, ...withoutTier } = value;
 	return withoutTier;
 }
 /**
@@ -3354,7 +3238,7 @@ function anchorToSnapshot(table, snapshot = FALLBACK_PRICING) {
 function withinDeviation(fetched, known) {
 	if (known === 0) return fetched === 0;
 	const ratio = fetched / known;
-	return ratio >= 1 / MAX_SNAPSHOT_DEVIATION && ratio <= MAX_SNAPSHOT_DEVIATION;
+	return ratio >= 1 / 10 && ratio <= 10;
 }
 /**
 * A tier the snapshot has no counterpart for passes on bounds alone, exactly
@@ -3390,32 +3274,15 @@ function tierWithinDeviation(fetched, known) {
 	const k = known.above200k;
 	return COST_KEYS.every((key) => withinDeviation(f[key], k[key]));
 }
-
-//#endregion
-//#region src/cache/pricing-cache.ts
-/**
-* Bumped whenever the cached envelope's meaning changes in a way an OLD
-* reader would misinterpret and a NEW reader must not accept from an old
-* file. #103 added the above-200k tier to every parser and to the snapshot
-* this cache falls back to; a pre-tier file merged whole-entry over that
-* snapshot would shadow the new tier for up to the cache's full TTL. Exported
-* so a test can pin the exact value rather than restating it.
-*
-* Bumped again for #118: `cacheCreation1hCostPerToken` joined COST_KEYS, so a
-* v1 file written by the old parser lacks it, fails bounds on read, and would
-* drop EVERY model for up to the full TTL. Rejecting the envelope instead
-* degrades to FALLBACK_PRICING, which carries the field.
-*/
-const PRICING_CACHE_VERSION = 2;
-const PricingCacheSchema = object({
-	version: literal(PRICING_CACHE_VERSION),
+const PricingCacheSchema = /* @__PURE__ */ object({
+	version: /* @__PURE__ */ literal(2),
 	timestamp: persistedTimestamp(),
-	data: record(string(), unknown())
+	data: /* @__PURE__ */ record(/* @__PURE__ */ string(), /* @__PURE__ */ unknown())
 });
 /** Null when there is no cache dir (SEC-004): nothing is read or written. */
 function getCachePath$1() {
 	const dir = getCacheDir();
-	return dir === null ? null : path$6.join(dir, "pricing.json");
+	return dir === null ? null : path.join(dir, "pricing.json");
 }
 /**
 * Loads the cache regardless of age and reports how old it is, leaving the
@@ -3425,9 +3292,9 @@ function getCachePath$1() {
 * the table is too old to price from at all.
 */
 function loadPricingCacheEntry() {
-	const cachePath$2 = getCachePath$1();
-	if (cachePath$2 === null) return null;
-	const cache = readJsonValidated(cachePath$2, PricingCacheSchema);
+	const cachePath = getCachePath$1();
+	if (cachePath === null) return null;
+	const cache = readJsonValidated(cachePath, PricingCacheSchema);
 	if (!cache) return null;
 	const ageMs = ageSince(cache.timestamp);
 	const data = sanitisePricingTable(cache.data);
@@ -3448,37 +3315,24 @@ function loadPricingCache(ttlMs) {
 	return entry.ageMs < ttlMs ? entry.data : null;
 }
 function savePricingCache(data) {
-	const cachePath$2 = getCachePath$1();
-	if (cachePath$2 === null) return;
+	const cachePath = getCachePath$1();
+	if (cachePath === null) return;
 	try {
-		const cache = {
-			version: PRICING_CACHE_VERSION,
+		writeJsonAtomic(cachePath, {
+			version: 2,
 			timestamp: Date.now(),
 			data
-		};
-		writeJsonAtomic(cachePath$2, cache);
+		});
 	} catch {}
 }
-
-//#endregion
-//#region src/data/pricing-fetcher.ts
-const LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 /**
 * Overridable so the blackhole test can point at an unroutable address, and so
 * an air-gapped install can aim at an internal mirror. Read per call rather
 * than captured at module load, because the test sets it per case.
 */
 function getPricingUrl() {
-	return process.env["GCCUSAGE_PRICING_URL"] || LITELLM_URL;
+	return process.env["GCCUSAGE_PRICING_URL"] || "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 }
-/**
-* `ttlMs` says when to REFRESH; this says when the table is too old to price
-* from at all. They are different questions. Serving a stale cache is right —
-* it is real pricing, and the refresh lands within a prompt or two — but a
-* machine that has been offline for months would otherwise prefer a
-* long-dead cache to a FALLBACK_PRICING table generated at the last release.
-*/
-const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1e3;
 /**
 * The pricing the statusline renders with. Does no I/O beyond reading the
 * cache file, and in particular never touches the network (#84).
@@ -3498,7 +3352,7 @@ function getPricingForRender(ttlMs) {
 		pricing: mergePricingTables(FALLBACK_PRICING, entry.data),
 		stale: true
 	};
-	if (entry.ageMs >= MAX_STALE_MS) return {
+	if (entry.ageMs >= 6048e5) return {
 		pricing: mergePricingTables(FALLBACK_PRICING),
 		stale: true
 	};
@@ -3516,8 +3370,7 @@ async function refreshPricing() {
 	try {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (!response.ok) return false;
-		const data = await response.json();
-		const pricing = anchorToSnapshot(parseLitellmPricing(data));
+		const pricing = anchorToSnapshot(parseLitellmPricing(await response.json()));
 		if (Object.keys(pricing).length === 0) return false;
 		savePricingCache(pricing);
 		return true;
@@ -3556,7 +3409,7 @@ async function refreshPricing() {
 * residual paragraph for why it is documented rather than suppressed (#125).
 */
 function resolveCache1hRate(published, inputCost, cacheCreationCost) {
-	const derived = inputCost * CACHE_1H_INPUT_MULTIPLIER;
+	const derived = inputCost * 2;
 	if (typeof published !== "number" || !Number.isFinite(published)) return derived;
 	return published < cacheCreationCost ? derived : published;
 }
@@ -3623,8 +3476,7 @@ async function fetchPricing(ttlMs) {
 	try {
 		const response = await fetch(getPricingUrl(), { signal: AbortSignal.timeout(5e3) });
 		if (response.ok) {
-			const data = await response.json();
-			const pricing = anchorToSnapshot(parseLitellmPricing(data));
+			const pricing = anchorToSnapshot(parseLitellmPricing(await response.json()));
 			if (Object.keys(pricing).length > 0) {
 				savePricingCache(pricing);
 				return mergePricingTables(FALLBACK_PRICING, pricing);
@@ -3633,16 +3485,6 @@ async function fetchPricing(ttlMs) {
 	} catch {}
 	return mergePricingTables(FALLBACK_PRICING);
 }
-
-//#endregion
-//#region src/data/pricing-refresh.ts
-/**
-* How long to wait after an attempt before spawning another refresher.
-* Shorter than the pricing TTL on purpose: this bounds retries after a
-* FAILED attempt, whereas a success makes the cache fresh and stops the
-* spawn at source.
-*/
-const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 /**
 * Exported so tests can seed the stamp to suppress the spawn, and assert it
 * was not rewritten. A test that hardcodes the name keeps passing if this is
@@ -3650,8 +3492,8 @@ const REFRESH_BACKOFF_MS = 10 * 60 * 1e3;
 * again (#122).
 */
 const PRICING_REFRESH_STAMP_FILE = "pricing-refresh-attempt.json";
-function stampPath(cacheDir$1) {
-	return path$5.join(cacheDir$1, PRICING_REFRESH_STAMP_FILE);
+function stampPath(cacheDir) {
+	return path.join(cacheDir, PRICING_REFRESH_STAMP_FILE);
 }
 /**
 * `v.finite()`, not bare `v.number()`: `JSON.parse('{"timestamp":1e400}')`
@@ -3666,12 +3508,12 @@ function stampPath(cacheDir$1) {
 * backoff until the clock caught up. Hence `persistedTimestamp()` plus
 * `ageSince` below (COR-006).
 */
-const StampSchema = object({ timestamp: persistedTimestamp() });
-function attemptedRecently(cacheDir$1) {
-	const stamp = readJsonValidated(stampPath(cacheDir$1), StampSchema);
+const StampSchema = /* @__PURE__ */ object({ timestamp: persistedTimestamp() });
+function attemptedRecently(cacheDir) {
+	const stamp = readJsonValidated(stampPath(cacheDir), StampSchema);
 	if (stamp === null) return false;
 	const age = ageSince(stamp.timestamp);
-	return age !== null && age < REFRESH_BACKOFF_MS;
+	return age !== null && age < 6e5;
 }
 /**
 * Refreshes pricing out of band when the cache is stale, so the render path
@@ -3687,12 +3529,12 @@ function attemptedRecently(cacheDir$1) {
 */
 function maybeSpawnPricingRefresh(stale) {
 	if (!stale) return;
-	const cacheDir$1 = getCacheDir();
-	if (cacheDir$1 === null) return;
+	const cacheDir = getCacheDir();
+	if (cacheDir === null) return;
 	try {
-		if (attemptedRecently(cacheDir$1)) return;
-		ensureDir(cacheDir$1);
-		writeJsonAtomic(stampPath(cacheDir$1), { timestamp: Date.now() });
+		if (attemptedRecently(cacheDir)) return;
+		ensureDir(cacheDir);
+		writeJsonAtomic(stampPath(cacheDir), { timestamp: Date.now() });
 		const entry = fileURLToPath(import.meta.url);
 		const child = spawn(process.execPath, [entry, "refresh-pricing"], {
 			detached: true,
@@ -3704,9 +3546,7 @@ function maybeSpawnPricingRefresh(stale) {
 		child.unref();
 	} catch {}
 }
-
-//#endregion
-//#region src/utils/local-date.ts
+// src/utils/local-date.ts
 /**
 * The local calendar date as `YYYY-MM-DD`: the key both daily stores reset on
 * (the per-session cost shards and the today-aggregate cache).
@@ -3722,17 +3562,15 @@ function localDateKey(d) {
 	const day = String(d.getDate()).padStart(2, "0");
 	return `${d.getFullYear()}-${month}-${day}`;
 }
-
-//#endregion
-//#region src/cache/today-aggregate-cache.ts
-const TodayAggregateCacheSchema = object({
-	date: string(),
-	files: record(string(), FileAggregateSchema)
+// src/cache/today-aggregate-cache.ts
+const TodayAggregateCacheSchema = /* @__PURE__ */ object({
+	date: /* @__PURE__ */ string(),
+	files: /* @__PURE__ */ record(/* @__PURE__ */ string(), FileAggregateSchema)
 });
 /** Null when there is no cache dir (SEC-004): every file is re-parsed. */
 function cachePath() {
 	const dir = getCacheDir();
-	return dir === null ? null : path$4.join(dir, "today-aggregates.json");
+	return dir === null ? null : path.join(dir, "today-aggregates.json");
 }
 /**
 * Today's token usage across every transcript, aggregated per file and cached.
@@ -3741,13 +3579,12 @@ function cachePath() {
 * the active transcript, so re-parsing it whole is still flat with respect to
 * the day's total volume (#94).
 */
-function getTodayAggregate(now = new Date()) {
+function getTodayAggregate(now = /* @__PURE__ */ new Date()) {
 	const files = findTodayJsonlFileStats();
 	const date = localDateKey(now);
 	const target = cachePath();
 	const cached = target === null ? null : readJsonValidated(target, TodayAggregateCacheSchema);
-	const previous = cached && cached.date === date ? cached.files : {};
-	const next = refreshFileAggregates(files, previous, (filePath) => filterTodayEntries(parseJsonlFile(filePath), now));
+	const next = refreshFileAggregates(files, cached && cached.date === date ? cached.files : {}, (filePath) => filterTodayEntries(parseJsonlFile(filePath), now));
 	if (next.changed && target !== null) try {
 		writeJsonAtomic(target, {
 			date,
@@ -3761,9 +3598,7 @@ function getTodayAggregate(now = new Date()) {
 		fileCount: files.length
 	};
 }
-
-//#endregion
-//#region src/data/cost-calculator.ts
+// src/data/cost-calculator.ts
 function rateCounts(counts, rates) {
 	const cacheCreation5m = counts.cacheCreationTokens - counts.cacheCreation1hTokens;
 	return counts.inputTokens * rates.inputCostPerToken + counts.outputTokens * rates.outputCostPerToken + cacheCreation5m * rates.cacheCreationCostPerToken + counts.cacheCreation1hTokens * rates.cacheCreation1hCostPerToken + counts.cacheReadTokens * rates.cacheReadCostPerToken;
@@ -3776,14 +3611,13 @@ function rateCounts(counts, rates) {
 function calculateCost(metrics, pricing) {
 	const premium = metrics.premium;
 	if (!premium) return rateCounts(metrics, pricing);
-	const standard = {
+	return rateCounts({
 		inputTokens: metrics.inputTokens - premium.inputTokens,
 		outputTokens: metrics.outputTokens - premium.outputTokens,
 		cacheCreationTokens: metrics.cacheCreationTokens - premium.cacheCreationTokens,
 		cacheCreation1hTokens: metrics.cacheCreation1hTokens - premium.cacheCreation1hTokens,
 		cacheReadTokens: metrics.cacheReadTokens - premium.cacheReadTokens
-	};
-	return rateCounts(standard, pricing) + rateCounts(premium, pricing.above200k ?? pricing);
+	}, pricing) + rateCounts(premium, pricing.above200k ?? pricing);
 }
 /**
 * Returns the skipped models alongside the costs rather than a bare Map. The
@@ -3792,7 +3626,7 @@ function calculateCost(metrics, pricing) {
 * from an unpriced one, because both arrived as an empty Map.
 */
 function calculateCostByModel(byModel, pricing) {
-	const costs = new Map();
+	const costs = /* @__PURE__ */ new Map();
 	const unpriced = [];
 	const approximated = [];
 	for (const [model, metrics] of byModel) {
@@ -3867,18 +3701,12 @@ function calculateBurnRate(session, sessionStartTime) {
 	if (elapsedMs === null || elapsedMs < 1e4) return null;
 	const elapsedMinutes = elapsedMs / 6e4;
 	if (session.costs.size === 0 && session.unpriced.length > 0) return null;
-	const sessionCost = calculateTotalCost(session.costs);
-	const costPerMinute = sessionCost / elapsedMinutes;
+	const costPerMinute = calculateTotalCost(session.costs) / elapsedMinutes;
 	return {
 		costPerHour: costPerMinute * 60,
 		costPerMinute
 	};
 }
-
-//#endregion
-//#region node_modules/get-east-asian-width/lookup-data.js
-const ambiguousMinimalCodePoint = 161;
-const ambiguousMaximumCodePoint = 1114109;
 const ambiguousRanges = [
 	161,
 	161,
@@ -4239,8 +4067,6 @@ const ambiguousRanges = [
 	1048576,
 	1114109
 ];
-const fullwidthMinimalCodePoint = 12288;
-const fullwidthMaximumCodePoint = 65510;
 const fullwidthRanges = [
 	12288,
 	12288,
@@ -4249,8 +4075,6 @@ const fullwidthRanges = [
 	65504,
 	65510
 ];
-const wideMinimalCodePoint = 4352;
-const wideMaximumCodePoint = 262141;
 const wideRanges = [
 	4352,
 	4447,
@@ -4373,11 +4197,15 @@ const wideRanges = [
 	94192,
 	94198,
 	94208,
-	101589,
+	101594,
 	101631,
-	101662,
+	101664,
 	101760,
 	101874,
+	101888,
+	102801,
+	102816,
+	102866,
 	110576,
 	110579,
 	110581,
@@ -4385,7 +4213,7 @@ const wideRanges = [
 	110589,
 	110590,
 	110592,
-	110882,
+	110888,
 	110898,
 	110898,
 	110928,
@@ -4393,7 +4221,7 @@ const wideRanges = [
 	110933,
 	110933,
 	110948,
-	110951,
+	110952,
 	110960,
 	111355,
 	119552,
@@ -4408,6 +4236,8 @@ const wideRanges = [
 	127374,
 	127377,
 	127386,
+	127406,
+	127406,
 	127488,
 	127490,
 	127504,
@@ -4461,13 +4291,15 @@ const wideRanges = [
 	128720,
 	128722,
 	128725,
-	128728,
+	128729,
 	128732,
 	128735,
 	128747,
 	128748,
 	128756,
 	128764,
+	128986,
+	128986,
 	128992,
 	129003,
 	129008,
@@ -4481,25 +4313,21 @@ const wideRanges = [
 	129648,
 	129660,
 	129664,
-	129674,
-	129678,
 	129734,
 	129736,
 	129736,
-	129741,
-	129756,
+	129740,
+	129757,
 	129759,
-	129770,
+	129771,
 	129775,
-	129784,
+	129786,
 	131072,
 	196605,
 	196608,
 	262141
 ];
-
-//#endregion
-//#region node_modules/get-east-asian-width/utilities.js
+// node_modules/get-east-asian-width/utilities.js
 /**
 Binary search on a sorted flat array of [start, end] pairs.
 
@@ -4519,11 +4347,9 @@ const isInRange = (ranges, codePoint) => {
 	}
 	return false;
 };
-
-//#endregion
-//#region node_modules/get-east-asian-width/lookup.js
+// node_modules/get-east-asian-width/lookup.js
 const commonCjkCodePoint = 19968;
-const [wideFastPathStart, wideFastPathEnd] = /* @__PURE__ */ findWideFastPathRange(wideRanges);
+const [wideFastPathStart, wideFastPathEnd] = /* #__PURE__ */ findWideFastPathRange(wideRanges);
 function findWideFastPathRange(ranges) {
 	let fastPathStart = ranges[0];
 	let fastPathEnd = ranges[1];
@@ -4539,32 +4365,28 @@ function findWideFastPathRange(ranges) {
 	return [fastPathStart, fastPathEnd];
 }
 const isAmbiguous = (codePoint) => {
-	if (codePoint < ambiguousMinimalCodePoint || codePoint > ambiguousMaximumCodePoint) return false;
+	if (codePoint < 161 || codePoint > 1114109) return false;
 	return isInRange(ambiguousRanges, codePoint);
 };
-const isFullWidth = (codePoint) => {
-	if (codePoint < fullwidthMinimalCodePoint || codePoint > fullwidthMaximumCodePoint) return false;
+const isFullwidth = (codePoint) => {
+	if (codePoint < 12288 || codePoint > 65510) return false;
 	return isInRange(fullwidthRanges, codePoint);
 };
 const isWide = (codePoint) => {
 	if (codePoint >= wideFastPathStart && codePoint <= wideFastPathEnd) return true;
-	if (codePoint < wideMinimalCodePoint || codePoint > wideMaximumCodePoint) return false;
+	if (codePoint < 4352 || codePoint > 262141) return false;
 	return isInRange(wideRanges, codePoint);
 };
-
-//#endregion
-//#region node_modules/get-east-asian-width/index.js
+// node_modules/get-east-asian-width/index.js
 function validate(codePoint) {
 	if (!Number.isSafeInteger(codePoint)) throw new TypeError(`Expected a code point, got \`${typeof codePoint}\`.`);
 }
 function eastAsianWidth(codePoint, { ambiguousAsWide = false } = {}) {
 	validate(codePoint);
-	if (isFullWidth(codePoint) || isWide(codePoint) || ambiguousAsWide && isAmbiguous(codePoint)) return 2;
+	if (isFullwidth(codePoint) || isWide(codePoint) || ambiguousAsWide && isAmbiguous(codePoint)) return 2;
 	return 1;
 }
-
-//#endregion
-//#region src/utils/display-width.ts
+// src/utils/display-width.ts
 /**
 * Grapheme cluster boundaries, per UAX #29.
 *
@@ -4628,9 +4450,7 @@ function displayWidth(str) {
 	for (const { segment } of segmenter.segment(str)) width += graphemeWidth(segment);
 	return width;
 }
-
-//#endregion
-//#region src/utils/terminal.ts
+// src/utils/terminal.ts
 /**
 * The terminal's width in columns, or `undefined` when it cannot be known.
 *
@@ -4907,10 +4727,8 @@ function sanitizeAnsi(str) {
 	if (!sawSgr || out.endsWith(RESET$1)) return out;
 	return out + RESET$1;
 }
-
-//#endregion
-//#region src/data/daily-cost-tracker.ts
-const CostSourceSchema = picklist(["stdin", "calculated"]);
+// src/data/daily-cost-tracker.ts
+const CostSourceSchema = /* @__PURE__ */ picklist(["stdin", "calculated"]);
 /**
 * The shard schema replaces four hand-rolled `typeof` checks scattered through
 * this file (#92). `v.fallback` preserves each tolerance exactly: a shard
@@ -4926,28 +4744,28 @@ const CostSourceSchema = picklist(["stdin", "calculated"]);
 * seventh here without updating every reader will lose it quietly rather than
 * loudly.
 */
-const ShardSchema = object({
-	sessionId: string(),
-	date: string(),
+const ShardSchema = /* @__PURE__ */ object({
+	sessionId: /* @__PURE__ */ string(),
+	date: /* @__PURE__ */ string(),
 	costUsd: finiteNumber(),
-	baselineUsd: fallback(finiteNumber(), 0),
-	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(persistedTimestamp(), 0),
-	processStart: fallback(optional(persistedTimestamp()), void 0),
-	uncertain: fallback(boolean(), false)
+	baselineUsd: /* @__PURE__ */ fallback(finiteNumber(), 0),
+	source: /* @__PURE__ */ fallback(/* @__PURE__ */ optional(CostSourceSchema), void 0),
+	updatedAt: /* @__PURE__ */ fallback(persistedTimestamp(), 0),
+	processStart: /* @__PURE__ */ fallback(/* @__PURE__ */ optional(persistedTimestamp()), void 0),
+	uncertain: /* @__PURE__ */ fallback(/* @__PURE__ */ boolean(), false)
 });
-const LegacyStoreSchema = object({
-	date: fallback(optional(string()), void 0),
-	sessions: fallback(array(unknown()), [])
+const LegacyStoreSchema = /* @__PURE__ */ object({
+	date: /* @__PURE__ */ fallback(/* @__PURE__ */ optional(/* @__PURE__ */ string()), void 0),
+	sessions: /* @__PURE__ */ fallback(/* @__PURE__ */ array(/* @__PURE__ */ unknown()), [])
 });
-const LegacyEntrySchema = object({
-	sessionId: string(),
+const LegacyEntrySchema = /* @__PURE__ */ object({
+	sessionId: /* @__PURE__ */ string(),
 	costUsd: finiteNumber(),
-	baselineUsd: fallback(finiteNumber(), 0),
-	source: fallback(optional(CostSourceSchema), void 0),
-	updatedAt: fallback(optional(persistedTimestamp()), void 0)
+	baselineUsd: /* @__PURE__ */ fallback(finiteNumber(), 0),
+	source: /* @__PURE__ */ fallback(/* @__PURE__ */ optional(CostSourceSchema), void 0),
+	updatedAt: /* @__PURE__ */ fallback(/* @__PURE__ */ optional(persistedTimestamp()), void 0)
 });
-const STALE_SESSION_MS = 48 * 3600 * 1e3;
+const STALE_SESSION_MS = 1728e5;
 /**
 * Whether a shard is old enough to prune. Pruning deletes data, so a stamp in
 * the future (COR-006) is not simply "stale" the way it is for a cache: a
@@ -4966,11 +4784,11 @@ function isStale(updatedAt, now) {
 * XDG_CACHE_HOME). There is then no store at all — see `hasDailyStore`.
 */
 function getStorePaths() {
-	const cacheDir$1 = getCacheDir();
-	if (cacheDir$1 === null) return null;
+	const cacheDir = getCacheDir();
+	if (cacheDir === null) return null;
 	return {
-		shardDir: path$3.join(cacheDir$1, "daily"),
-		legacyPath: path$3.join(cacheDir$1, "daily-costs.json")
+		shardDir: path.join(cacheDir, "daily"),
+		legacyPath: path.join(cacheDir, "daily-costs.json")
 	};
 }
 /**
@@ -4981,7 +4799,7 @@ function getStorePaths() {
 */
 function shardPath(store, sessionId, processStart) {
 	const suffix = processStart === void 0 ? "" : `.p${processStart}`;
-	return path$3.join(store.shardDir, `${shardKey(sessionId)}${suffix}.json`);
+	return path.join(store.shardDir, `${shardKey(sessionId)}${suffix}.json`);
 }
 /**
 * How far apart two computed starts of one process may be. `now -
@@ -5010,16 +4828,16 @@ const RESTORED_FIRST_RENDER_MS = 12e4;
 */
 function migrateLegacyStore(store, now) {
 	const legacyPath = store.legacyPath;
-	if (!fs$1.existsSync(legacyPath)) return;
+	if (!fs.existsSync(legacyPath)) return;
 	let raw;
 	try {
-		raw = fs$1.readFileSync(legacyPath, "utf-8");
+		raw = fs.readFileSync(legacyPath, "utf-8");
 	} catch {
 		return;
 	}
 	let legacy;
 	try {
-		const result = safeParse(LegacyStoreSchema, JSON.parse(raw));
+		const result = /* @__PURE__ */ safeParse(LegacyStoreSchema, JSON.parse(raw));
 		legacy = result.success ? result.output : null;
 	} catch {
 		legacy = null;
@@ -5028,12 +4846,12 @@ function migrateLegacyStore(store, now) {
 	const date = legacy?.date ?? localDateKey(now);
 	try {
 		for (const sessionRaw of sessions) {
-			const parsed = safeParse(LegacyEntrySchema, sessionRaw);
+			const parsed = /* @__PURE__ */ safeParse(LegacyEntrySchema, sessionRaw);
 			if (!parsed.success) continue;
 			const s = parsed.output;
 			const target = shardPath(store, s.sessionId);
-			if (fs$1.existsSync(target)) continue;
-			const entry = {
+			if (fs.existsSync(target)) continue;
+			writeJsonAtomic(target, {
 				sessionId: s.sessionId,
 				date,
 				costUsd: s.costUsd,
@@ -5041,14 +4859,13 @@ function migrateLegacyStore(store, now) {
 				source: s.source,
 				updatedAt: s.updatedAt ?? now.getTime(),
 				uncertain: false
-			};
-			writeJsonAtomic(target, entry);
+			});
 		}
 	} catch {
 		return;
 	}
 	try {
-		fs$1.unlinkSync(legacyPath);
+		fs.unlinkSync(legacyPath);
 	} catch {}
 }
 /**
@@ -5060,19 +4877,19 @@ function readEntries(store, now) {
 	migrateLegacyStore(store, now);
 	let files;
 	try {
-		files = fs$1.readdirSync(store.shardDir);
+		files = fs.readdirSync(store.shardDir);
 	} catch {
 		return [];
 	}
 	const entries = [];
 	for (const file of files) {
 		if (!file.endsWith(".json")) continue;
-		const fullPath = path$3.join(store.shardDir, file);
+		const fullPath = path.join(store.shardDir, file);
 		const entry = readJsonValidated(fullPath, ShardSchema);
 		if (!entry) continue;
 		if (isStale(entry.updatedAt, now)) {
 			try {
-				fs$1.unlinkSync(fullPath);
+				fs.unlinkSync(fullPath);
 			} catch {}
 			continue;
 		}
@@ -5152,15 +4969,15 @@ function findEntry(entries, input, now) {
 		if (e.sessionId === sessionId) session.push(i);
 	});
 	if (processStart === void 0) {
-		let index$1 = -1;
-		for (const i of session) if (index$1 === -1 || entries[i].updatedAt > entries[index$1].updatedAt) index$1 = i;
+		let index = -1;
+		for (const i of session) if (index === -1 || entries[i].updatedAt > entries[index].updatedAt) index = i;
 		return {
-			index: index$1,
+			index,
 			newBaseline: 0
 		};
 	}
 	let index = -1;
-	let best = Infinity;
+	let best = 1e400;
 	for (const i of session) {
 		const e = entries[i];
 		if (e.processStart === void 0) continue;
@@ -5214,7 +5031,7 @@ function findEntry(entries, input, now) {
 * erased the bar on every render (REL-005). A failed write costs the store
 * update and marks Today uncertain; this render's own figure is still exact.
 */
-function recordDailyCost(input, now = new Date()) {
+function recordDailyCost(input, now = /* @__PURE__ */ new Date()) {
 	const store = getStorePaths();
 	if (store === null) return {
 		totalUsd: Number.isFinite(input.costUsd) ? input.costUsd : 0,
@@ -5283,16 +5100,13 @@ function tryWrite(store, entry) {
 		return false;
 	}
 }
-
-//#endregion
-//#region src/data/pipeline.ts
+// src/data/pipeline.ts
 function getStdinBurnRate(stdin) {
 	const durationMs = stdin.cost?.total_duration_ms;
 	if (!durationMs || durationMs < 1e4) return null;
 	const costUsd = stdin.cost?.total_cost_usd;
 	if (costUsd === void 0) return null;
-	const elapsedMinutes = durationMs / 6e4;
-	const costPerMinute = costUsd / elapsedMinutes;
+	const costPerMinute = costUsd / (durationMs / 6e4);
 	return {
 		costPerHour: costPerMinute * 60,
 		costPerMinute
@@ -5333,13 +5147,12 @@ async function buildRenderContext(stdin, settings) {
 	const jsonlBurnRate = calculateBurnRate(session, sessionStartTime);
 	const stdinBurnRate = sessionCostSource === "stdin" ? getStdinBurnRate(stdin) : null;
 	const burnRate = stdinBurnRate ?? jsonlBurnRate;
-	const burnRateUncertain = burnRate !== null && stdinBurnRate === null && (session.unpriced.length > 0 || session.approximated.length > 0);
 	return {
 		stdin,
 		metrics,
 		block,
 		burnRate,
-		burnRateUncertain,
+		burnRateUncertain: burnRate !== null && stdinBurnRate === null && (session.unpriced.length > 0 || session.approximated.length > 0),
 		pricing,
 		sessionCostUsd,
 		todayCostUsd,
@@ -5373,13 +5186,11 @@ async function buildRenderContext(stdin, settings) {
 */
 function processStartOf(stdin, now) {
 	const duration = stdin.cost?.total_duration_ms;
-	if (duration === void 0 || !Number.isFinite(duration) || duration < 0 || duration > now) return void 0;
+	if (duration === void 0 || !Number.isFinite(duration) || duration < 0 || duration > now) return;
 	const start = Math.round(now - duration);
 	return Number.isSafeInteger(start) ? start : void 0;
 }
-
-//#endregion
-//#region src/utils/format.ts
+// src/utils/format.ts
 function formatDollars(amount) {
 	if (!Number.isFinite(amount)) return "$?";
 	if (amount < .01) return "$0.00";
@@ -5400,11 +5211,11 @@ function formatCost(amount, uncertain) {
 	const marked = uncertain && Number.isFinite(amount);
 	return formatDollars(amount) + (marked ? "?" : "");
 }
-function formatTokens(count$1) {
-	if (!Number.isFinite(count$1)) return "?";
-	if (count$1 < 1e3) return `${count$1}`;
-	if (count$1 < 1e6) return `${(count$1 / 1e3).toFixed(1)}k`;
-	return `${(count$1 / 1e6).toFixed(2)}M`;
+function formatTokens(count) {
+	if (!Number.isFinite(count)) return "?";
+	if (count < 1e3) return `${count}`;
+	if (count < 1e6) return `${(count / 1e3).toFixed(1)}k`;
+	return `${(count / 1e6).toFixed(2)}M`;
 }
 function formatDuration(ms) {
 	if (!Number.isFinite(ms)) return "?";
@@ -5421,11 +5232,7 @@ function formatPercent(ratio) {
 }
 function formatModelName(model) {
 	const match = model.match(/claude-(\w+)-(\d+)(?:[.-](\d{1,2})(?=-|$))?/);
-	if (match) {
-		const name = match[1].charAt(0).toUpperCase() + match[1].slice(1);
-		const version = match[3] ? `${match[2]}.${match[3]}` : match[2];
-		return `${name} ${version}`;
-	}
+	if (match) return `${match[1].charAt(0).toUpperCase() + match[1].slice(1)} ${match[3] ? `${match[2]}.${match[3]}` : match[2]}`;
 	return model;
 }
 /**
@@ -5439,9 +5246,7 @@ function formatCostPerHour(costPerHour) {
 	if (costPerHour < 100) return `$${costPerHour.toFixed(2)}/hr`;
 	return `$${costPerHour.toFixed(0)}/hr`;
 }
-
-//#endregion
-//#region src/widgets/model.ts
+// src/widgets/model.ts
 const modelWidget = { render(context, config) {
 	const raw = context.stdin.model;
 	if (!raw) return null;
@@ -5450,18 +5255,14 @@ const modelWidget = { render(context, config) {
 	else name = raw.id ? formatModelName(raw.id) : raw.display_name ?? "";
 	if (!name) return null;
 	const label = config.label ?? "";
-	const icon = config.icon ?? "";
-	const prefix = [icon, label].filter(Boolean).join(" ");
-	const text = prefix ? `${prefix} ${name}` : name;
+	const prefix = [config.icon ?? "", label].filter(Boolean).join(" ");
 	return {
-		text,
+		text: prefix ? `${prefix} ${name}` : name,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/alert-colors.ts
+// src/widgets/alert-colors.ts
 /**
 * The set of backgrounds widgets choose at render time (from thresholds,
 * modes or levels) rather than from configured colors — so they never
@@ -5481,25 +5282,18 @@ const COMPACT_COUNTDOWN_AMBER = "#b8860b";
 const COMPACT_COUNTDOWN_RED = "#a01822";
 const VIM_NORMAL = "#2ec27e";
 const VIM_INSERT = "#e5a50a";
-const EFFORT_LOW = "#77767b";
-const EFFORT_MEDIUM = "#2a8ca6";
-const EFFORT_HIGH = "#5841c8";
-const EFFORT_XHIGH = "#b0228c";
-const EFFORT_MAX = "#e66100";
 /**
 * Level → background. A Map, not an object literal: an object would answer
 * `"constructor"` or `"toString"` with an inherited function, and the level
 * string comes from the payload.
 */
-const EFFORT_COLORS = new Map([
-	["low", EFFORT_LOW],
-	["medium", EFFORT_MEDIUM],
-	["high", EFFORT_HIGH],
-	["xhigh", EFFORT_XHIGH],
-	["max", EFFORT_MAX]
+const EFFORT_COLORS = /* @__PURE__ */ new Map([
+	["low", "#77767b"],
+	["medium", "#2a8ca6"],
+	["high", "#5841c8"],
+	["xhigh", "#b0228c"],
+	["max", "#e66100"]
 ]);
-/** A level this build has never seen renders neutral rather than vanishing. */
-const EFFORT_FALLBACK = EFFORT_LOW;
 /**
 * The shared warn/danger escalation for the dollar-valued widgets
 * (session-cost, today-spend): red at or above `danger`, amber at or above
@@ -5522,26 +5316,21 @@ function alertBg(cost, warn, danger, configBg) {
 	if (cost >= warn) return ALERT_AMBER;
 	return configBg;
 }
-
-//#endregion
-//#region src/widgets/effort.ts
+// src/widgets/effort.ts
 const effortWidget = { render(context, config) {
 	const level = context.stdin.effort?.level?.trim();
 	if (!level) return null;
 	const label = config.label ?? "";
-	const icon = config.icon ?? "";
-	const prefix = [icon, label].filter(Boolean).join(" ");
+	const prefix = [config.icon ?? "", label].filter(Boolean).join(" ");
 	const text = prefix ? `${prefix} ${level}` : level;
-	const bg = config.bg ?? EFFORT_COLORS.get(level.toLowerCase()) ?? EFFORT_FALLBACK;
+	const bg = config.bg ?? EFFORT_COLORS.get(level.toLowerCase()) ?? "#77767b";
 	return {
 		text,
 		fg: config.fg ?? "#ffffff",
 		bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/session-cost.ts
+// src/widgets/session-cost.ts
 const sessionCostWidget = { render(context, config) {
 	const cost = context.sessionCostUsd;
 	const label = config.label ?? "";
@@ -5554,13 +5343,10 @@ const sessionCostWidget = { render(context, config) {
 		bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/today-spend.ts
+// src/widgets/today-spend.ts
 const todaySpendWidget = { render(context, config) {
 	const cost = context.todayCostUsd;
-	const label = config.label ?? "Today:";
-	const text = `${label} ${formatCost(cost, context.todayCostUncertain)}`;
+	const text = `${config.label ?? "Today:"} ${formatCost(cost, context.todayCostUncertain)}`;
 	const bg = alertBg(cost, context.alerts.dailyWarn, context.alerts.dailyDanger, config.bg);
 	return {
 		text,
@@ -5568,38 +5354,29 @@ const todaySpendWidget = { render(context, config) {
 		bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/block-timer.ts
+// src/widgets/block-timer.ts
 const blockTimerWidget = { render(context, config) {
 	if (!context.block) return null;
-	const label = config.label ?? "Block:";
-	const text = `${label} ${formatDuration(context.block.elapsedMs)}`;
 	return {
-		text,
+		text: `${config.label ?? "Block:"} ${formatDuration(context.block.elapsedMs)}`,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/burn-rate.ts
+// src/widgets/burn-rate.ts
 const burnRateWidget = { render(context, config) {
 	if (!context.burnRate) return null;
 	const label = config.label ?? "";
 	const costPerHour = context.burnRate.costPerHour;
 	const marked = context.burnRateUncertain && Number.isFinite(costPerHour);
 	const rate = formatCostPerHour(costPerHour) + (marked ? "?" : "");
-	const text = label ? `${label} ${rate}` : rate;
 	return {
-		text,
+		text: label ? `${label} ${rate}` : rate,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/utils/context-usage.ts
+// src/utils/context-usage.ts
 function sumTokens(counts) {
 	return (counts.input_tokens ?? 0) + (counts.output_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0) + (counts.cache_read_input_tokens ?? 0);
 }
@@ -5607,13 +5384,11 @@ function withTokens(ratio, windowSize, exact) {
 	const derived = windowSize !== null ? Math.round(ratio * windowSize) : null;
 	const hasExact = exact !== void 0 && exact > 0;
 	const usedTokens = hasExact ? Math.max(exact, derived ?? exact) : derived;
-	const usedFromExact = hasExact && usedTokens === exact;
-	const usedTokensStep = usedFromExact || windowSize === null ? 1 : windowSize / 100;
 	return {
 		ratio,
 		windowSize,
 		usedTokens,
-		usedTokensStep
+		usedTokensStep: hasExact && usedTokens === exact || windowSize === null ? 1 : windowSize / 100
 	};
 }
 /**
@@ -5642,38 +5417,9 @@ function deriveContextUsage(stdin) {
 	}
 	return null;
 }
-
-//#endregion
-//#region src/utils/autocompact.ts
-/**
-* Auto-compact prediction.
-*
-* Derived from the shipped Claude Code binary (VERSION "2.1.220",
-* BUILD_TIME 2026-07-24), not from a measured session. The relevant
-* de-minified functions:
-*
-*   CSe(model, setting) = aY(...).window - Math.min(maxOutputTokens, 20000)
-*   Sfo(eff)            = eff - 13000
-*   uMu(tokens, eff)    = tokens >= Sfo(eff) ? "compact" : ...
-*
-* `cst()` gives a default max_output_tokens of 32000, so that Math.min always
-* clamps to 20000 for current models. The threshold is therefore a fixed token
-* reserve, not a fraction of the window. The same binary corroborates this with
-* a hardcoded precompute default of 967000 for a 1M window (1_000_000 - 33_000).
-* See issue #37.
-*
-* Assumes Claude Code's defaults: auto-compact enabled and `autoCompactWindow`
-* unset. Neither is visible in the statusline payload, so a user who changes
-* either will see these predictions miss — `autoCompactWindow` makes compaction
-* fire earlier than predicted, and `autoCompactEnabled: false` means it never
-* fires at all.
-*/
-/** Output headroom Claude Code holds back: min(maxOutputTokens, 20_000). */
-const OUTPUT_RESERVE = 2e4;
-/** Fixed compaction reserve, on top of the output headroom. */
-const COMPACT_RESERVE = 13e3;
+// src/utils/autocompact.ts
 /** Total tokens reserved below the window size. */
-const AUTOCOMPACT_RESERVE = OUTPUT_RESERVE + COMPACT_RESERVE;
+const AUTOCOMPACT_RESERVE = 33e3;
 /** Amber band: Claude Code's own "warn" level sits 20k before the threshold. */
 const AMBER_TOKENS = 2e4;
 /** Red band: the last warning before compaction. */
@@ -5711,7 +5457,7 @@ function alertLevel(remainingTokens, stepTokens) {
 * should fall back rather than render a negative countdown.
 */
 function compactThresholdTokens(windowSize) {
-	if (!Number.isFinite(windowSize) || windowSize <= AUTOCOMPACT_RESERVE) return null;
+	if (!Number.isFinite(windowSize) || windowSize <= 33e3) return null;
 	return windowSize - AUTOCOMPACT_RESERVE;
 }
 /** Tokens left before auto-compact, clamped at zero. Null when unmodellable. */
@@ -5720,9 +5466,7 @@ function tokensUntilCompact(usedTokens, windowSize) {
 	if (threshold === null) return null;
 	return Math.max(0, Math.round(threshold - usedTokens));
 }
-
-//#endregion
-//#region src/widgets/context-percent.ts
+// src/widgets/context-percent.ts
 const BAR_WIDTH = 10;
 const THRESHOLD_WARN = .7;
 const THRESHOLD_DANGER = .9;
@@ -5735,8 +5479,7 @@ const THRESHOLD_DANGER = .9;
 * left unclamped: an over-full window is what was reported, and worth seeing.
 */
 function buildBar(ratio) {
-	const clamped = Math.min(1, Math.max(0, ratio));
-	const filled = Math.round(clamped * BAR_WIDTH);
+	const filled = Math.round(Math.min(1, Math.max(0, ratio)) * BAR_WIDTH);
 	const empty = BAR_WIDTH - filled;
 	return "[" + "=".repeat(filled) + "-".repeat(empty) + "]";
 }
@@ -5766,16 +5509,13 @@ const contextPercentWidget = { render(context, config) {
 	const bar = buildBar(usage.ratio);
 	const pct = formatPercent(usage.ratio);
 	const size = usage.windowSize ? ` (${formatTokens(usage.windowSize)})` : "";
-	const text = label ? `${label} ${bar} ${pct}${size}` : `${bar} ${pct}${size}`;
 	return {
-		text,
+		text: label ? `${label} ${bar} ${pct}${size}` : `${bar} ${pct}${size}`,
 		fg: config.fg,
 		bg: thresholdBg(usage, config.bg)
 	};
 } };
-
-//#endregion
-//#region src/utils/git.ts
+// src/utils/git.ts
 /** How long each render-time git call may take before its widget drops out. */
 const DEFAULT_GIT_TIMEOUT_MS = 2e3;
 /**
@@ -5823,26 +5563,19 @@ function getGitChanges(cwd) {
 	}
 	return changes;
 }
-
-//#endregion
-//#region src/widgets/git-branch.ts
+// src/widgets/git-branch.ts
 const gitBranchWidget = { render(context, config) {
 	const branch = getGitBranch(context.stdin.cwd);
 	if (!branch) return null;
-	const icon = config.icon ?? "";
-	const label = config.label ?? "";
-	const prefix = [icon, label].filter(Boolean).join(" ");
-	const text = prefix ? `${prefix} ${branch}` : branch;
+	const prefix = [config.icon ?? "", config.label ?? ""].filter(Boolean).join(" ");
 	return {
-		text,
+		text: prefix ? `${prefix} ${branch}` : branch,
 		fg: config.fg,
 		bg: config.bg,
 		shrinkable: true
 	};
 } };
-
-//#endregion
-//#region src/widgets/git-changes.ts
+// src/widgets/git-changes.ts
 const gitChangesWidget = { render(context, config) {
 	const changes = getGitChanges(context.stdin.cwd);
 	if (!changes) return null;
@@ -5852,53 +5585,38 @@ const gitChangesWidget = { render(context, config) {
 	if (changes.modified > 0) parts.push(`~${changes.modified}`);
 	if (changes.deleted > 0) parts.push(`-${changes.deleted}`);
 	const label = config.label ?? "";
-	const text = label ? `${label} ${parts.join(" ")}` : parts.join(" ");
 	return {
-		text,
+		text: label ? `${label} ${parts.join(" ")}` : parts.join(" "),
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/tokens-input.ts
+// src/widgets/tokens-input.ts
 const tokensInputWidget = { render(context, config) {
-	const label = config.label ?? "In:";
-	const text = `${label} ${formatTokens(context.metrics.totals.inputTokens)}`;
 	return {
-		text,
+		text: `${config.label ?? "In:"} ${formatTokens(context.metrics.totals.inputTokens)}`,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/tokens-output.ts
+// src/widgets/tokens-output.ts
 const tokensOutputWidget = { render(context, config) {
-	const label = config.label ?? "Out:";
-	const text = `${label} ${formatTokens(context.metrics.totals.outputTokens)}`;
 	return {
-		text,
+		text: `${config.label ?? "Out:"} ${formatTokens(context.metrics.totals.outputTokens)}`,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/tokens-cached.ts
+// src/widgets/tokens-cached.ts
 const tokensCachedWidget = { render(context, config) {
 	const cached = context.metrics.totals.cacheCreationTokens + context.metrics.totals.cacheReadTokens;
-	const label = config.label ?? "Cached:";
-	const text = `${label} ${formatTokens(cached)}`;
 	return {
-		text,
+		text: `${config.label ?? "Cached:"} ${formatTokens(cached)}`,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/per-model-breakdown.ts
+// src/widgets/per-model-breakdown.ts
 const perModelBreakdownWidget = { render(context, config) {
 	if (context.costByModel.size === 0 && context.unpricedModels.length === 0) return null;
 	const parts = [];
@@ -5907,45 +5625,36 @@ const perModelBreakdownWidget = { render(context, config) {
 		parts.push(`${formatModelName(model)}:${formatDollars(cost)}${approximate}`);
 	}
 	for (const model of context.unpricedModels) parts.push(`${formatModelName(model)}:$?`);
-	const text = parts.join(" ");
 	return {
-		text,
+		text: parts.join(" "),
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/session-clock.ts
+// src/widgets/session-clock.ts
 const sessionClockWidget = { render(context, config) {
 	if (!context.sessionStartTime) return null;
-	const elapsed = ageSince(context.sessionStartTime) ?? Number.NaN;
+	const elapsed = ageSince(context.sessionStartTime) ?? NaN;
 	const label = config.label ?? "Session:";
-	const text = label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed);
 	return {
-		text,
+		text: label ? `${label} ${formatDuration(elapsed)}` : formatDuration(elapsed),
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/cwd.ts
+// src/widgets/cwd.ts
 const cwdWidget = { render(context, config) {
 	const raw = context.stdin.cwd;
 	if (!raw) return null;
 	const cwd = collapseHome(raw);
 	const label = config.label ?? "";
-	const text = label ? `${label} ${cwd}` : cwd;
 	return {
-		text,
+		text: label ? `${label} ${cwd}` : cwd,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/project.ts
+// src/widgets/project.ts
 /**
 * The current project's name, from `workspace.project_dir` — the repo root.
 *
@@ -5962,20 +5671,16 @@ const projectWidget = { render(context, config) {
 	const projectDir = context.stdin.workspace?.project_dir;
 	if (!projectDir) return null;
 	const dir = projectDir.replace(/\/+$/, "") || "/";
-	const home = getHomeDir();
-	const name = dir === home ? "~" : path$2.basename(dir) || "/";
+	const name = dir === getHomeDir() ? "~" : path.basename(dir) || "/";
 	const label = config.label ?? "";
-	const text = label ? `${label} ${name}` : name;
 	return {
-		text,
+		text: label ? `${label} ${name}` : name,
 		fg: config.fg,
 		bg: config.bg,
 		shrinkable: true
 	};
 } };
-
-//#endregion
-//#region src/widgets/custom-text.ts
+// src/widgets/custom-text.ts
 const customTextWidget = { render(_context, config) {
 	const text = config.text ?? "";
 	if (!text) return null;
@@ -5985,24 +5690,19 @@ const customTextWidget = { render(_context, config) {
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/custom-command.ts
-const commandCache = new Map();
-/** Exported so the published JSON Schema documents the real default (#97). */
-const DEFAULT_TTL_MS = 3e4;
+// src/widgets/custom-command.ts
+const commandCache = /* @__PURE__ */ new Map();
 const DEFAULT_TIMEOUT_MS = 2e3;
 const customCommandWidget = { render(context, config) {
 	const command = config.command;
 	if (!command) return null;
-	const ttl = config.cacheTtlMs ?? DEFAULT_TTL_MS;
+	const ttl = config.cacheTtlMs ?? 3e4;
 	const now = Date.now();
 	const cached = commandCache.get(command);
 	if (cached && now - cached.timestamp < ttl) {
 		const label = config.label;
-		const text = label ? `${label} ${cached.output}` : cached.output;
 		return {
-			text,
+			text: label ? `${label} ${cached.output}` : cached.output,
 			fg: config.fg,
 			bg: config.bg
 		};
@@ -6025,18 +5725,16 @@ const customCommandWidget = { render(context, config) {
 			timestamp: now
 		});
 		const label = config.label;
-		const text = label ? `${label} ${output}` : output;
 		return {
-			text,
+			text: label ? `${label} ${output}` : output,
 			fg: config.fg,
 			bg: config.bg
 		};
 	} catch {
 		if (cached) {
 			const label = config.label;
-			const text = label ? `${label} ${cached.output}` : cached.output;
 			return {
-				text,
+				text: label ? `${label} ${cached.output}` : cached.output,
 				fg: config.fg,
 				bg: config.bg
 			};
@@ -6044,40 +5742,30 @@ const customCommandWidget = { render(context, config) {
 		return null;
 	}
 } };
-
-//#endregion
-//#region src/widgets/separator.ts
+// src/widgets/separator.ts
 const separatorWidget = { render(_context, config) {
-	const text = config.separator ?? " | ";
 	return {
-		text,
+		text: config.separator ?? " | ",
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/cache-hit-rate.ts
+// src/widgets/cache-hit-rate.ts
 const cacheHitRateWidget = { render(context, config) {
 	const cw = context.stdin.context_window;
 	if (typeof cw !== "object" || !cw?.current_usage) return null;
 	const u = cw.current_usage;
 	const reads = u.cache_read_input_tokens ?? 0;
-	const creates = u.cache_creation_input_tokens ?? 0;
-	const total = reads + creates;
+	const total = reads + (u.cache_creation_input_tokens ?? 0);
 	if (total === 0) return null;
 	const hitRate = Math.round(reads / total * 100);
-	const label = config.label ?? "Hit:";
-	const text = `${label} ${hitRate}%`;
 	return {
-		text,
+		text: `${config.label ?? "Hit:"} ${hitRate}%`,
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/lines-changed.ts
+// src/widgets/lines-changed.ts
 const linesChangedWidget = { render(context, config) {
 	const added = context.stdin.cost?.total_lines_added;
 	const removed = context.stdin.cost?.total_lines_removed;
@@ -6089,125 +5777,15 @@ const linesChangedWidget = { render(context, config) {
 	if (a > 0) parts.push(`+${a}`);
 	if (r > 0) parts.push(`-${r}`);
 	const label = config.label ?? "";
-	const text = label ? `${label} ${parts.join(" ")}` : parts.join(" ");
 	return {
-		text,
+		text: label ? `${label} ${parts.join(" ")}` : parts.join(" "),
 		fg: config.fg,
 		bg: config.bg
 	};
 } };
-
-//#endregion
-//#region src/widgets/vim-mode.ts
-const MODE_COLORS = new Map([["NORMAL", VIM_NORMAL], ["INSERT", VIM_INSERT]]);
-const vimModeWidget = { render(context, config) {
-	const mode = context.stdin.vim?.mode;
-	if (!mode) return null;
-	const label = config.label ?? "";
-	const text = label ? `${label} ${mode}` : mode;
-	const bg = config.bg ?? MODE_COLORS.get(mode) ?? VIM_NORMAL;
-	return {
-		text,
-		fg: config.fg ?? "#ffffff",
-		bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/api-latency.ts
-const apiLatencyWidget = { render(context, config) {
-	const apiMs = context.stdin.cost?.total_api_duration_ms;
-	if (apiMs == null || apiMs === 0) return null;
-	const label = config.label ?? "API total:";
-	const text = `${label} ${formatDuration(apiMs)}`;
-	return {
-		text,
-		fg: config.fg,
-		bg: config.bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/token-breakdown.ts
-/**
-* Session input and output tokens in one segment.
-*
-* Reads `metrics.totals`, the JSONL-derived cumulative totals — the same
-* source `tokens-input` and `tokens-output` read, so the three agree about
-* one session rather than contradicting each other on the same bar (#58).
-*
-* Deliberately NOT `context_window.total_input_tokens` /
-* `total_output_tokens`, which this widget used to read: those are a snapshot
-* of the last assistant message, not session totals. On the captured 2.1.220
-* payload that rendered `In:268.8k Out:536` for a session whose real totals
-* were 396 in and 137.8k out. `compact-countdown` had the identical
-* misreading before PR #38.
-*/
-const tokenBreakdownWidget = { render(context, config) {
-	const input = context.metrics.totals.inputTokens;
-	const output = context.metrics.totals.outputTokens;
-	if (input === 0 && output === 0) return null;
-	const text = `In:${formatTokens(input)} Out:${formatTokens(output)}`;
-	return {
-		text,
-		fg: config.fg,
-		bg: config.bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/session-timer.ts
-const sessionTimerWidget = { render(context, config) {
-	const durationMs = context.stdin.cost?.total_duration_ms;
-	if (!durationMs || durationMs < 1e3) return null;
-	const label = config.label ?? "Up:";
-	const text = label ? `${label} ${formatDuration(durationMs)}` : formatDuration(durationMs);
-	return {
-		text,
-		fg: config.fg,
-		bg: config.bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/compact-countdown.ts
-const compactCountdownWidget = { render(context, config) {
-	const usage = deriveContextUsage(context.stdin);
-	if (!usage || !usage.windowSize || usage.usedTokens === null) return null;
-	const remaining = tokensUntilCompact(usage.usedTokens, usage.windowSize);
-	if (remaining === null) return null;
-	if (remaining <= 0) return {
-		text: "Compact imminent!",
-		fg: "#ffffff",
-		bg: COMPACT_COUNTDOWN_RED
-	};
-	const level = alertLevel(remaining, usage.usedTokensStep);
-	let bg = config.bg;
-	if (level === "red") bg = COMPACT_COUNTDOWN_RED;
-	else if (level === "amber") bg = COMPACT_COUNTDOWN_AMBER;
-	return {
-		text: `~${formatTokens(remaining)} left`,
-		fg: config.fg,
-		bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/turn-counter.ts
-const turnCounterWidget = { render(context, config) {
-	const count$1 = context.turnCount;
-	if (!count$1 || count$1 < 1) return null;
-	const label = config.label ?? "#";
-	const text = `${label}${count$1}`;
-	return {
-		text,
-		fg: config.fg,
-		bg: config.bg
-	};
-} };
-
-//#endregion
-//#region src/widgets/registry.ts
+// src/widgets/vim-mode.ts
+const MODE_COLORS = /* @__PURE__ */ new Map([["NORMAL", VIM_NORMAL], ["INSERT", VIM_INSERT]]);
+// src/widgets/registry.ts
 const WIDGET_MAP = {
 	model: modelWidget,
 	effort: effortWidget,
@@ -6230,12 +5808,76 @@ const WIDGET_MAP = {
 	separator: separatorWidget,
 	"cache-hit-rate": cacheHitRateWidget,
 	"lines-changed": linesChangedWidget,
-	"vim-mode": vimModeWidget,
-	"api-latency": apiLatencyWidget,
-	"token-breakdown": tokenBreakdownWidget,
-	"session-timer": sessionTimerWidget,
-	"compact-countdown": compactCountdownWidget,
-	"turn-counter": turnCounterWidget
+	"vim-mode": { render(context, config) {
+		const mode = context.stdin.vim?.mode;
+		if (!mode) return null;
+		const label = config.label ?? "";
+		const text = label ? `${label} ${mode}` : mode;
+		const bg = config.bg ?? MODE_COLORS.get(mode) ?? "#2ec27e";
+		return {
+			text,
+			fg: config.fg ?? "#ffffff",
+			bg
+		};
+	} },
+	"api-latency": { render(context, config) {
+		const apiMs = context.stdin.cost?.total_api_duration_ms;
+		if (apiMs == null || apiMs === 0) return null;
+		return {
+			text: `${config.label ?? "API total:"} ${formatDuration(apiMs)}`,
+			fg: config.fg,
+			bg: config.bg
+		};
+	} },
+	"token-breakdown": { render(context, config) {
+		const input = context.metrics.totals.inputTokens;
+		const output = context.metrics.totals.outputTokens;
+		if (input === 0 && output === 0) return null;
+		return {
+			text: `In:${formatTokens(input)} Out:${formatTokens(output)}`,
+			fg: config.fg,
+			bg: config.bg
+		};
+	} },
+	"session-timer": { render(context, config) {
+		const durationMs = context.stdin.cost?.total_duration_ms;
+		if (!durationMs || durationMs < 1e3) return null;
+		const label = config.label ?? "Up:";
+		return {
+			text: label ? `${label} ${formatDuration(durationMs)}` : formatDuration(durationMs),
+			fg: config.fg,
+			bg: config.bg
+		};
+	} },
+	"compact-countdown": { render(context, config) {
+		const usage = deriveContextUsage(context.stdin);
+		if (!usage || !usage.windowSize || usage.usedTokens === null) return null;
+		const remaining = tokensUntilCompact(usage.usedTokens, usage.windowSize);
+		if (remaining === null) return null;
+		if (remaining <= 0) return {
+			text: "Compact imminent!",
+			fg: "#ffffff",
+			bg: COMPACT_COUNTDOWN_RED
+		};
+		const level = alertLevel(remaining, usage.usedTokensStep);
+		let bg = config.bg;
+		if (level === "red") bg = COMPACT_COUNTDOWN_RED;
+		else if (level === "amber") bg = COMPACT_COUNTDOWN_AMBER;
+		return {
+			text: `~${formatTokens(remaining)} left`,
+			fg: config.fg,
+			bg
+		};
+	} },
+	"turn-counter": { render(context, config) {
+		const count = context.turnCount;
+		if (!count || count < 1) return null;
+		return {
+			text: `${config.label ?? "#"}${count}`,
+			fg: config.fg,
+			bg: config.bg
+		};
+	} }
 };
 /**
 * `Object.hasOwn`, not `WIDGET_MAP[type] ?? null`: `type` comes from the
@@ -6246,9 +5888,7 @@ const WIDGET_MAP = {
 function getWidget(type) {
 	return Object.hasOwn(WIDGET_MAP, type) ? WIDGET_MAP[type] : null;
 }
-
-//#endregion
-//#region src/render/themes.ts
+// src/render/themes.ts
 const THEMES = {
 	default: {
 		name: "default",
@@ -6364,9 +6004,7 @@ const THEMES = {
 function getTheme(name) {
 	return Object.hasOwn(THEMES, name) ? THEMES[name] : THEMES["default"];
 }
-
-//#endregion
-//#region src/render/color-compare.ts
+// src/render/color-compare.ts
 const CHALK_HEX = /[a-f\d]{6}|[a-f\d]{3}/i;
 /**
 * Normalize a color string the way chalk's `hex()`/`bgHex()` actually resolve
@@ -6465,16 +6103,12 @@ function relativeLuminance(hex) {
 */
 function contrastingForeground(bg) {
 	const luminance = relativeLuminance(normalizeColor(bg));
-	const contrastWithDark = (luminance + .05) / .05;
-	const contrastWithLight = 1.05 / (luminance + .05);
-	return contrastWithDark >= contrastWithLight ? CONTRAST_DARK : CONTRAST_LIGHT;
+	return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? CONTRAST_DARK : CONTRAST_LIGHT;
 }
 function colorDistance(a, b) {
 	const [l1, a1, b1] = hexToLab(normalizeColor(a));
 	const [l2, a2, b2] = hexToLab(normalizeColor(b));
-	const c1 = Math.hypot(a1, b1);
-	const c2 = Math.hypot(a2, b2);
-	const cBar = (c1 + c2) / 2;
+	const cBar = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2;
 	const g = .5 * (1 - Math.sqrt(Math.pow(cBar, 7) / (Math.pow(cBar, 7) + Math.pow(25, 7))));
 	const a1p = (1 + g) * a1;
 	const a2p = (1 + g) * a2;
@@ -6506,19 +6140,8 @@ function colorDistance(a, b) {
 	const rT = -Math.sin(2 * dTheta * RAD) * rC;
 	return Math.sqrt(Math.pow(dLp / sL, 2) + Math.pow(dCp / sC, 2) + Math.pow(dHp / sH, 2) + rT * (dCp / sC) * (dHp / sH));
 }
-
-//#endregion
-//#region src/render/powerline.ts
-source_default.level = 3;
-/**
-* Below this CIEDE2000 distance two backgrounds are too close for the wide
-* glyph — painted in the previous segment's bg — to read against the incoming
-* one. Exact matches (ΔE 0) are the degenerate case. Measured across every
-* adjacent pair reachable in the shipped defaults, the nearest values either
-* side of this are 6.54 and 9.14, so the exact constant is not delicate.
-* See the issue #40 design spec.
-*/
-const MIN_SEPARATOR_DELTA = 8;
+// src/render/powerline.ts
+chalk.level = 3;
 /**
 * Resolve widget outputs and the theme into the exact pieces the statusline is
 * painted from. Exported so tests can assert on the real color model rather
@@ -6533,7 +6156,7 @@ function layoutPowerline(outputs, options) {
 		const style = theme.segments[i % theme.segments.length];
 		const bg = resolveColor(output.bg ?? style.bg);
 		const fg = output.bg !== void 0 && output.fg === void 0 ? contrastingForeground(bg) : resolveColor(output.fg ?? style.fg);
-		if (prev !== null) pieces.push(colorDistance(prev.bg, bg) < MIN_SEPARATOR_DELTA ? {
+		if (prev !== null) pieces.push(colorDistance(prev.bg, bg) < 8 ? {
 			text: options.separatorThin.trim() ? options.separatorThin : options.separator,
 			fg: prev.fg,
 			bg
@@ -6559,11 +6182,9 @@ function layoutPowerline(outputs, options) {
 	return pieces;
 }
 function renderPowerlineSegments(outputs, options) {
-	return layoutPowerline(outputs, options).map((piece) => piece.bg ? source_default.hex(piece.fg).bgHex(piece.bg)(piece.text) : source_default.hex(piece.fg)(piece.text)).join("");
+	return layoutPowerline(outputs, options).map((piece) => piece.bg ? chalk.hex(piece.fg).bgHex(piece.bg)(piece.text) : chalk.hex(piece.fg)(piece.text)).join("");
 }
-
-//#endregion
-//#region src/render/flex.ts
+// src/render/flex.ts
 function applyFlex(segments, totalWidth, mode) {
 	const content = segments.join("");
 	if (totalWidth === void 0) return content;
@@ -6588,13 +6209,10 @@ function applyFlex(segments, totalWidth, mode) {
 				return seg + " ".repeat(gap);
 			}).join("");
 		}
-		case "left":
 		default: return content + " ".repeat(padding);
 	}
 }
-
-//#endregion
-//#region src/render/truncation.ts
+// src/render/truncation.ts
 const ELLIPSIS$1 = "…";
 const ESC = "\x1B";
 const RESET = `${ESC}[0m`;
@@ -6641,18 +6259,6 @@ function truncateAnsi(str, maxWidth) {
 	result.push(ELLIPSIS$1, RESET);
 	return result.join("");
 }
-
-//#endregion
-//#region src/render/shrink.ts
-/**
-* Fewest visible columns a shrunk segment may keep, ellipsis included.
-*
-* Below roughly this width a branch name stops distinguishing one branch from
-* another, so the columns buy nothing. Deliberately not configurable: a knob
-* would need documenting, validating and testing, and nothing yet suggests
-* anyone wants to tune it.
-*/
-const MIN_SHRUNK_TEXT = 8;
 const ELLIPSIS = "…";
 /**
 * `text` reduced to at most `width` visible columns, ending in an ellipsis.
@@ -6673,11 +6279,9 @@ function trimTo(text, width) {
 	if (visibleLength(text) <= width) return text;
 	let clusters = splitGraphemes(text);
 	while (clusters.length > 0) {
-		const current = visibleLength(clusters.join("") + ELLIPSIS);
-		if (current <= width) break;
+		if (visibleLength(clusters.join("") + ELLIPSIS) <= width) break;
 		const nextClusters = clusters.slice(0, -1);
-		const next = visibleLength(nextClusters.join("") + ELLIPSIS);
-		if (next < MIN_SHRUNK_TEXT) break;
+		if (visibleLength(nextClusters.join("") + ELLIPSIS) < 8) break;
 		clusters = nextClusters;
 	}
 	return clusters.join("") + ELLIPSIS;
@@ -6705,7 +6309,7 @@ function shrinkOutputs(outputs, overflow) {
 	if (overflow <= 0) return outputs;
 	const result = outputs.map((output) => ({ ...output }));
 	let remaining = overflow;
-	const stuck = new Set();
+	const stuck = /* @__PURE__ */ new Set();
 	while (remaining > 0) {
 		let widest = -1;
 		let widestWidth = 0;
@@ -6714,14 +6318,14 @@ function shrinkOutputs(outputs, overflow) {
 			const output = result[i];
 			if (!output.shrinkable) continue;
 			const width = visibleLength(output.text);
-			if (width > MIN_SHRUNK_TEXT && width > widestWidth) {
+			if (width > 8 && width > widestWidth) {
 				widest = i;
 				widestWidth = width;
 			}
 		}
 		if (widest === -1) break;
-		const runnerUp = Math.max(MIN_SHRUNK_TEXT, ...result.filter((o, i) => o.shrinkable && i !== widest && !stuck.has(i)).map((o) => visibleLength(o.text)));
-		const target = Math.max(MIN_SHRUNK_TEXT, runnerUp, widestWidth - remaining);
+		const runnerUp = Math.max(8, ...result.filter((o, i) => o.shrinkable && i !== widest && !stuck.has(i)).map((o) => visibleLength(o.text)));
+		const target = Math.max(8, runnerUp, widestWidth - remaining);
 		const capped = Math.min(target, widestWidth - 1);
 		const trimmed = trimTo(result[widest].text, capped);
 		const trimmedWidth = visibleLength(trimmed);
@@ -6737,9 +6341,7 @@ function shrinkOutputs(outputs, overflow) {
 	}
 	return result;
 }
-
-//#endregion
-//#region src/render/contained-error-hook.ts
+// src/render/contained-error-hook.ts
 /**
 * A test seam for widget throws the renderer contains (REL-007, review of #154).
 *
@@ -6764,9 +6366,7 @@ function reportContainedWidgetError(widgetType, error) {
 	const listener = globalThis[CONTAINED_WIDGET_ERROR_HOOK];
 	if (typeof listener === "function") listener(widgetType, error);
 }
-
-//#endregion
-//#region src/render/renderer.ts
+// src/render/renderer.ts
 function shouldCompact(settings, terminalWidth) {
 	const compact = settings.compact;
 	if (!compact) return false;
@@ -6827,17 +6427,12 @@ function renderLine(outputs, settings, context, flex) {
 		if (natural > context.terminalWidth) laidOut = shrinkOutputs(outputs, natural - context.terminalWidth);
 	}
 	let line;
-	if (isPowerline && powerline) {
-		const nonSeparator = laidOut.filter((o) => o.text !== " | " && o.text.trim() !== "|");
-		line = renderPowerlineSegments(nonSeparator, {
-			theme: powerline.theme ?? "default",
-			separator: powerline.separator ?? "",
-			separatorThin: powerline.separatorThin ?? "│"
-		});
-	} else {
-		const segments = laidOut.map((o) => colorize(o.text, o.fg, o.bg));
-		line = applyFlex(segments, context.terminalWidth, flex);
-	}
+	if (isPowerline && powerline) line = renderPowerlineSegments(laidOut.filter((o) => o.text !== " | " && o.text.trim() !== "|"), {
+		theme: powerline.theme ?? "default",
+		separator: powerline.separator ?? "",
+		separatorThin: powerline.separatorThin ?? "│"
+	});
+	else line = applyFlex(laidOut.map((o) => colorize(o.text, o.fg, o.bg)), context.terminalWidth, flex);
 	return truncateAnsi(line, context.terminalWidth);
 }
 function renderStatusline(context, settings) {
@@ -6962,23 +6557,21 @@ function sanitizeOutput(output) {
 function stringOrUndefined(color) {
 	return typeof color === "string" ? color : void 0;
 }
-
-//#endregion
-//#region src/cache/cache-manager.ts
-const CacheEntrySchema = object({
-	output: string(),
+// src/cache/cache-manager.ts
+const CacheEntrySchema = /* @__PURE__ */ object({
+	output: /* @__PURE__ */ string(),
 	timestamp: persistedTimestamp(),
-	key: string()
+	key: /* @__PURE__ */ string()
 });
 /** Null when there is no cache dir (SEC-004): every check misses. */
 function getCachePath() {
 	const dir = getCacheDir();
-	return dir === null ? null : path$1.join(dir, "statusline-cache.json");
+	return dir === null ? null : path.join(dir, "statusline-cache.json");
 }
 function checkCache(ttlMs, key) {
-	const cachePath$2 = getCachePath();
-	if (cachePath$2 === null) return null;
-	const entry = readJsonValidated(cachePath$2, CacheEntrySchema);
+	const cachePath = getCachePath();
+	if (cachePath === null) return null;
+	const entry = readJsonValidated(cachePath, CacheEntrySchema);
 	if (!entry) return null;
 	if (entry.key !== key) return null;
 	const age = ageSince(entry.timestamp);
@@ -6986,20 +6579,17 @@ function checkCache(ttlMs, key) {
 	return entry.output;
 }
 function writeCache(output, key) {
-	const cachePath$2 = getCachePath();
-	if (cachePath$2 === null) return;
+	const cachePath = getCachePath();
+	if (cachePath === null) return;
 	try {
-		const entry = {
+		writeJsonAtomic(cachePath, {
 			output,
 			timestamp: Date.now(),
 			key
-		};
-		writeJsonAtomic(cachePath$2, entry);
+		});
 	} catch {}
 }
-
-//#endregion
-//#region src/cache/cache-key.ts
+// src/cache/cache-key.ts
 /**
 * Fields deliberately excluded from the cache key.
 *
@@ -7023,8 +6613,7 @@ const VOLATILE_COST_FIELDS = ["total_duration_ms", "total_api_duration_ms"];
 function stableStringify(value) {
 	if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
 	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-	const entries = Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
-	return `{${entries.join(",")}}`;
+	return `{${Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
 }
 /**
 * The identity of a rendered bar: every stdin input the render can depend on,
@@ -7048,22 +6637,16 @@ function computeCacheKey(stdin, terminalWidth) {
 	});
 	return createHash("sha256").update(payload).digest("hex");
 }
-
-//#endregion
-//#region src/statusline.ts
+// src/statusline.ts
 async function runStatusline(stdin, settings) {
-	const terminalWidth = getTerminalWidth();
-	const key = computeCacheKey(stdin, terminalWidth);
+	const key = computeCacheKey(stdin, getTerminalWidth());
 	const cached = checkCache(settings.cache?.statuslineTtlMs ?? 5e3, key);
 	if (cached !== null) return cached;
-	const context = await buildRenderContext(stdin, settings);
-	const output = renderStatusline(context, settings);
+	const output = renderStatusline(await buildRenderContext(stdin, settings), settings);
 	writeCache(output, key);
 	return output;
 }
-
-//#endregion
-//#region src/utils/node-path.ts
+// src/utils/node-path.ts
 /**
 * A path segment naming a specific Node version — the thing that makes an
 * interpreter path expire. Homebrew's Cellar, nvm, nodenv and volta all
@@ -7141,9 +6724,7 @@ function resolveStableNodePath(probe = defaultProbe()) {
 		warning: versionWarning(version)
 	};
 }
-
-//#endregion
-//#region src/version.ts
+// src/version.ts
 /**
 * The shipped version, mirrored from package.json's `version`.
 *
@@ -7158,9 +6739,7 @@ function resolveStableNodePath(probe = defaultProbe()) {
 * itself — the exact gap OPS-007 named.
 */
 const VERSION = "1.3.0";
-
-//#endregion
-//#region src/cli.ts
+// src/cli.ts
 async function runCli(args) {
 	const command = args[0] ?? "today";
 	switch (command) {
@@ -7181,10 +6760,10 @@ async function runCli(args) {
 			console.log(VERSION);
 			break;
 		case "refresh-pricing": {
-			const cacheDir$1 = getCacheDir();
-			if (cacheDir$1 !== null) {
-				sweepStaleTempFiles(cacheDir$1);
-				narrowCacheModes(cacheDir$1);
+			const cacheDir = getCacheDir();
+			if (cacheDir !== null) {
+				sweepStaleTempFiles(cacheDir);
+				narrowCacheModes(cacheDir);
 			}
 			await refreshPricing();
 			break;
@@ -7197,8 +6776,7 @@ async function runCli(args) {
 }
 async function reportToday() {
 	const { byModel, totals, fileCount } = getTodayAggregate();
-	const pricing = await fetchPricing(864e5);
-	const { costs: costByModel, unpriced, approximated } = calculateCostByModel(byModel, pricing);
+	const { costs: costByModel, unpriced, approximated } = calculateCostByModel(byModel, await fetchPricing(864e5));
 	const totalCost = calculateTotalCost(costByModel);
 	const marker = unpriced.length > 0 ? " (partial)" : approximated.length > 0 ? " (approximate)" : "";
 	console.log("=== Today's Usage ===\n");
@@ -7287,9 +6865,9 @@ function readExistingSettings(settingsPath) {
 * command that configures the statusline.
 */
 function removeLegacyTurnStore() {
-	const cacheDir$1 = getCacheDir();
-	if (cacheDir$1 === null) return;
-	for (const target of [resolve(cacheDir$1, "turns"), resolve(cacheDir$1, "turn-count.json")]) try {
+	const cacheDir = getCacheDir();
+	if (cacheDir === null) return;
+	for (const target of [resolve(cacheDir, "turns"), resolve(cacheDir, "turn-count.json")]) try {
 		rmSync(target, {
 			recursive: true,
 			force: true
@@ -7420,8 +6998,8 @@ function runSetup() {
 	};
 	writeFileAtomic(target, JSON.stringify(settings, null, 2) + "\n", existingModeOr(target));
 	removeLegacyTurnStore();
-	const cacheDir$1 = getCacheDir();
-	if (cacheDir$1 !== null) narrowCacheModes(cacheDir$1);
+	const cacheDir = getCacheDir();
+	if (cacheDir !== null) narrowCacheModes(cacheDir);
 	console.log("gccusage setup complete!\n");
 	console.log(`  Settings: ${settingsPath}${redirected ? ` -> ${target}` : ""}`);
 	console.log(`  Command:  ${command}`);
@@ -7447,9 +7025,7 @@ Quick Start:
 
 Config: ~/.config/gccusage/settings.json`);
 }
-
-//#endregion
-//#region src/index.ts
+// src/index.ts
 async function main() {
 	const args = process.argv.slice(2);
 	if (args.length > 0) {
@@ -7495,5 +7071,4 @@ main().catch((err) => {
 	if (process.env["GCCUSAGE_DEBUG"]) console.error("gccusage: render failed —", err instanceof Error ? err.stack ?? err.message : String(err));
 	process.exit(0);
 });
-
-//#endregion
+export {};

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -90,7 +90,7 @@ describe("gccusage today", () => {
   let originalHome: string | undefined;
   let originalXdg: string | undefined;
   let lines: string[];
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: MockInstance<typeof console.log>;
 
   function writeEntry(
     model: string,
@@ -220,7 +220,7 @@ describe("gccusage setup", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let originalXdg: string | undefined;
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: MockInstance<typeof console.log>;
 
   const settingsPath = (): string => path.join(tmpDir, ".claude", "settings.json");
   const backupPath = (): string => `${settingsPath()}.bak`;

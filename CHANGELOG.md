@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The shipped bundle is rebuilt with chalk 6, valibot 1.5, get-east-asian-width
+  1.7 and tsdown 0.23 (#164). Output is unchanged; tsdown is pinned to emit
+  `dist/index.js`, since 0.23 defaults ESM output to `.mjs`. Development moves
+  to vitest 5, TypeScript 6 and oxlint 1.93. TypeScript is held below 7 and
+  `@types/node` at the Node 22 line.
+
 ## [1.3.0] — 2026-11-18
 
 Remediation of the 2026-11-16 audit (see AUDIT.md).
