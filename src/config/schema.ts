@@ -46,8 +46,6 @@ const LineConfigSchema = v.object({
   flex: v.optional(v.picklist(FLEX_MODES), "left"),
 });
 
-export type LineConfig = v.InferOutput<typeof LineConfigSchema>;
-
 const PowerlineConfigSchema = v.object({
   enabled: v.optional(v.boolean(), false),
   theme: v.optional(v.string(), "default"),

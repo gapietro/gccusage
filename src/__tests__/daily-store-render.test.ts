@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * The daily store's audit findings (2026-11-16) through the shipped bundle,
@@ -59,9 +60,7 @@ function render(payload: Record<string, unknown>): { out: string; status: number
       cwd: dir,
       input: JSON.stringify(payload),
       env: {
-        ...process.env,
-        HOME: dir,
-        XDG_CONFIG_HOME: path.join(dir, "config"),
+        ...isolatedEnv(dir),
         ...refresher.env,
         COLUMNS: "200",
       },

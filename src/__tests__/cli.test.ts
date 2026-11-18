@@ -658,3 +658,33 @@ describe("gccusage refresh-pricing", () => {
     expect(fs.statSync(shard).mode & 0o777).toBe(0o600);
   });
 });
+
+describe("an unknown command", () => {
+  let restoreExitCode: typeof process.exitCode;
+
+  beforeEach(() => {
+    restoreExitCode = process.exitCode;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    // Load-bearing: a leaked exitCode of 1 fails the vitest worker.
+    process.exitCode = restoreExitCode;
+    vi.restoreAllMocks();
+  });
+
+  // index.ts sets process.exitCode and returns rather than calling
+  // process.exit(1), because stderr to a pipe is asynchronous on macOS and an
+  // immediate exit can cut the message off. The unknown-command path took
+  // the other route.
+  it("sets exitCode 1 instead of calling process.exit, so stderr can drain", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+    await runCli(["--verison"]);
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    expect(console.error).toHaveBeenCalledWith("Unknown command: --verison");
+  });
+});

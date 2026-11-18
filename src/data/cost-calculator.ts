@@ -1,6 +1,7 @@
 import type { TokenMetrics, TokenCounts } from "../types/token-metrics.js";
 import type { PricingTable, ModelPricing, RateSet } from "../types/pricing.js";
 import type { BurnRate } from "../types/burn-rate.js";
+import { ageSince } from "../utils/schemas.js";
 
 function rateCounts(counts: TokenCounts, rates: RateSet): number {
   // 5-minute writes are the remainder: cacheCreation1hTokens is a SUBSET of
@@ -201,8 +202,14 @@ export function calculateBurnRate(
 ): BurnRate | null {
   if (!sessionStartTime) return null;
 
-  const elapsedMs = Date.now() - sessionStartTime;
-  if (elapsedMs < 10000) return null; // need at least 10s of data
+  // Through `ageSince`, like the session clock and the block tracker: a start
+  // in the future (a clock set backwards) or with no finite age has no
+  // trustworthy duration to divide by, so there is no rate (COR-006). Raw
+  // subtraction only got the future case right by accident, a negative age
+  // being under the 10s floor, and turned an infinitely old start into a
+  // confident "$0.00/hr".
+  const elapsedMs = ageSince(sessionStartTime);
+  if (elapsedMs === null || elapsedMs < 10000) return null; // need at least 10s of data
 
   const elapsedMinutes = elapsedMs / 60000;
 

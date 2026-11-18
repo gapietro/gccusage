@@ -10,6 +10,7 @@ import {
   suppressPricingRefresh,
   type RefresherSuppression,
 } from "./helpers/pricing-refresher.js";
+import { isolatedEnv } from "./helpers/isolated-env.js";
 
 /**
  * #143 through the shipped bundle. Each test gets a fresh HOME and renders
@@ -82,9 +83,7 @@ function render(stdin: Record<string, unknown>): string {
     cwd: dir,
     input: JSON.stringify({ session_id: SESSION_ID, ...stdin }),
     env: {
-      ...process.env,
-      HOME: dir,
-      XDG_CONFIG_HOME: path.join(dir, "config"),
+      ...isolatedEnv(dir),
       ...refresher.env,
       COLUMNS: "200",
       // The renderer contains a widget throw as a missing segment (REL-007),

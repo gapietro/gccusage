@@ -188,7 +188,7 @@ function renderFull(context: RenderContext, settings: Settings): string {
     const cleaned = cleanSeparators(outputs);
     if (cleaned.length === 0) continue;
 
-    const line = renderLine(cleaned, settings, context, (lineConfig.flex ?? "left") as FlexMode);
+    const line = renderLine(cleaned, settings, context, lineConfig.flex ?? "left");
     lines.push(line);
   }
 

@@ -23,8 +23,9 @@ const SCHEMA_PATH = path.resolve(
  *
  * The generator lives under `src/` rather than `scripts/` because it imports
  * from `src/`, whose `.js` specifiers only the bundler and vitest resolve —
- * plain Node throws ERR_MODULE_NOT_FOUND on them (see CLAUDE.md and
- * scripts/__tests__/cli.test.ts).
+ * plain Node throws ERR_MODULE_NOT_FOUND on them. That is why
+ * scripts/concurrency-harness.ts drives the built bundle instead (see its
+ * header).
  */
 describe("config-schema.json", () => {
   const generated = buildConfigJsonSchema();

@@ -27,10 +27,6 @@ export interface TokenMetrics extends TokenCounts {
   premium?: TokenCounts;
 }
 
-export interface ModelTokenMetrics extends TokenMetrics {
-  model: string;
-}
-
 export interface AggregatedMetrics {
   byModel: Map<string, TokenMetrics>;
   totals: TokenMetrics;

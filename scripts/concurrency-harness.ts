@@ -7,9 +7,10 @@
  * N x (round x COST_STEP); a smaller total is a lost update.
  *
  * The cumulative cost grows by COST_STEP each round. That is load-bearing: the
- * statusline cache keys on (session, cost, width), so a fixed cost would make
- * every round after the first a cache hit that never reaches the tracker, and
- * the harness would measure nothing while printing all-ok.
+ * statusline cache key hashes the stdin payload (plus the terminal width), so
+ * an unchanged payload — a fixed cost — would make every round after the first
+ * a cache hit that never reaches the tracker, and the harness would measure
+ * nothing while printing all-ok.
  *
  * Usage: node scripts/concurrency-harness.ts [--sessions 12] [--rounds 8]
  *
