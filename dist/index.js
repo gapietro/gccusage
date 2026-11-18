@@ -7157,7 +7157,7 @@ function resolveStableNodePath(probe = defaultProbe()) {
 * the other turns the suite red rather than shipping a binary that misreports
 * itself — the exact gap OPS-007 named.
 */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 
 //#endregion
 //#region src/cli.ts
