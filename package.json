@@ -45,10 +45,10 @@
   "author": "gapietro",
   "devDependencies": {
     "@types/node": "^22.20.5",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "chalk": "^6.0.1",
     "get-east-asian-width": "^1.7.0",
-    "oxlint": "1.93.0",
+    "oxlint": "1.94.0",
     "tsdown": "^0.23.7",
     "typescript": "^6.0.3",
     "valibot": "^1.5.0",
